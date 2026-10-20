@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -397,5 +398,34 @@ func TestScanViewHelpOverlay(t *testing.T) {
 	pressS(v, keySpace) // closes, and must not tick anything
 	if v.help || !strings.Contains(viewS(v), "Scan results") || v.tickedCount() != 0 {
 		t.Fatalf("any key should only close the help; ticked=%d", v.tickedCount())
+	}
+}
+
+// Regression: with Ollama absent the embedded picker shows the install
+// guide; esc must hand control back to the scan, and a second esc quits.
+func TestScanViewPickModelCancelWhenNotInstalled(t *testing.T) {
+	cl := ollama.New("http://127.0.0.1:1")
+	cl.LookPath = func(string) (string, error) { return "", errors.New("not found") }
+	cl.Stat = func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
+	v := newTestScan(t, Assessor{Models: &ModelDeps{Client: cl, Hardware: testHW, HasBrew: true}})
+	cmd := pressS(v, runeKey('m'))
+	if v.picker == nil || cmd == nil {
+		t.Fatal("m should open the picker")
+	}
+	pump(v, cmd)
+	if v.picker == nil || v.picker.state != stateNotInstalled {
+		t.Fatalf("picker state = %v, want not installed", v.picker)
+	}
+	if !strings.Contains(viewS(v), "not installed") {
+		t.Fatalf("install guide not shown:\n%s", viewS(v))
+	}
+	if cmd := pressS(v, keyEsc); v.picker != nil || cmd != nil {
+		t.Fatalf("first esc should close the picker (picker=%v cmd=%v)", v.picker != nil, cmd != nil)
+	}
+	if !strings.Contains(viewS(v), "Scan results") {
+		t.Fatal("scan view not restored")
+	}
+	if cmd := pressS(v, keyEsc); cmd == nil {
+		t.Fatal("second esc should quit")
 	}
 }
