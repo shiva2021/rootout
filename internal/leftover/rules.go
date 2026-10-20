@@ -64,10 +64,12 @@ var rules = []rule{
 	{dir: lib("Containers"), kind: Container, matchers: []matchKind{matchID, matchTeam}},
 	{dir: lib("Group Containers"), kind: GroupContainer, matchers: []matchKind{matchTeam, matchGroup}},
 
-	{dir: lib("Saved Application State"), kind: SavedState, matchers: []matchKind{matchSavedState}},
-	{dir: lib("HTTPStorages"), kind: HTTPStorage, matchers: []matchKind{matchID, matchBinaryCookies}},
-	{dir: lib("Cookies"), kind: Cookies, matchers: []matchKind{matchBinaryCookies}},
-	{dir: lib("WebKit"), kind: WebKit, matchers: []matchKind{matchID}},
+	// Helper processes use "<id>.helper" style ids, so the prefix form is
+	// accepted wherever the exact id is.
+	{dir: lib("Saved Application State"), kind: SavedState, matchers: []matchKind{matchSavedState, matchIDPrefix}},
+	{dir: lib("HTTPStorages"), kind: HTTPStorage, matchers: []matchKind{matchID, matchBinaryCookies, matchIDPrefix}},
+	{dir: lib("Cookies"), kind: Cookies, matchers: []matchKind{matchBinaryCookies, matchIDPrefix}},
+	{dir: lib("WebKit"), kind: WebKit, matchers: []matchKind{matchID, matchIDPrefix}},
 	{dir: lib("Application Scripts"), kind: AppScripts, matchers: []matchKind{matchID}},
 
 	{dir: lib("LaunchAgents"), kind: LaunchAgent, matchers: []matchKind{matchLaunchd}},
@@ -76,6 +78,7 @@ var rules = []rule{
 	{dir: sys("Library", "PrivilegedHelperTools"), kind: PrivilegedHelper, matchers: []matchKind{matchIDPrefix, matchHelperLabel}},
 
 	{dir: lib("Logs", "DiagnosticReports"), kind: CrashReport, matchers: []matchKind{matchCrashReport}, when: crashReports},
+	{dir: sys("Library", "Logs", "DiagnosticReports"), kind: CrashReport, matchers: []matchKind{matchCrashReport}, when: crashReports},
 
 	{dir: home(".config"), kind: Dotfile, matchers: []matchKind{matchName}, when: dotfiles},
 	{dir: home(), kind: Dotfile, matchers: []matchKind{matchDotName}, when: dotfiles},

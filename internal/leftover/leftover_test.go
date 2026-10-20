@@ -525,3 +525,51 @@ func TestKindJSON(t *testing.T) {
 		t.Errorf("String() = %q / %q", Kind(99), Bundle)
 	}
 }
+
+// TestHelperSiblingsAndSystemCrashReports covers gaps found by comparing a
+// real dry run against `find`: helper ids under HTTPStorages/WebKit and the
+// system-wide DiagnosticReports folder.
+func TestHelperSiblingsAndSystemCrashReports(t *testing.T) {
+	const id = "com.spotify.client"
+	env := testutil.FakeHome(t, testutil.Spec{
+		Apps: []testutil.App{{Path: "/Applications/Spotify.app", BundleID: id, Name: "Spotify"}},
+		Files: map[string]string{
+			"~/Library/HTTPStorages/" + id + ".helper/x":                                          "1",
+			"~/Library/WebKit/" + id + ".helper/x":                                                "1",
+			"~/Library/Saved Application State/" + id + ".helper.savedState/x":                    "1",
+			"~/Library/HTTPStorages/com.spotify.installer/x":                                      "1", // sibling id: must NOT match
+			"/Library/Logs/DiagnosticReports/Spotify_2026-10-18-173425_Shivangs-MacBook-Air.diag": "1",
+			"/Library/Logs/DiagnosticReports/Other-2026-10-18.ips":                                "1",
+		},
+	})
+	a, err := app.Read(env, env.Sys("Applications", "Spotify.app"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Find(context.Background(), env, a, Options{CrashReports: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := map[string]string{}
+	for _, l := range got {
+		paths[l.Path] = l.MatchedBy
+	}
+	for _, want := range []string{
+		env.Library("HTTPStorages", id+".helper"),
+		env.Library("WebKit", id+".helper"),
+		env.Library("Saved Application State", id+".helper.savedState"),
+		env.Sys("Library", "Logs", "DiagnosticReports", "Spotify_2026-10-18-173425_Shivangs-MacBook-Air.diag"),
+	} {
+		if _, ok := paths[want]; !ok {
+			t.Errorf("missing %s; got %v", want, paths)
+		}
+	}
+	for _, bad := range []string{
+		env.Library("HTTPStorages", "com.spotify.installer"),
+		env.Sys("Library", "Logs", "DiagnosticReports", "Other-2026-10-18.ips"),
+	} {
+		if _, ok := paths[bad]; ok {
+			t.Errorf("must not match %s", bad)
+		}
+	}
+}

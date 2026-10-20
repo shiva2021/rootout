@@ -21,11 +21,17 @@ Everything that deletes goes through `internal/safety`. Read this before touchin
 | `~/Library/Caches/<key>`, `Logs/<key>`, `Application Support/<key>` | B, B*, N |
 | `~/Library/Containers/<key>` | B, T.B |
 | `~/Library/Group Containers/<key>` | T.B, `group.<B>`; never N |
-| `~/Library/Saved Application State/<B>.savedState`, `HTTPStorages/<B>*`, `Cookies/<B>.binarycookies`, `WebKit/<B>`, `Application Scripts/<B>` | B |
+| `~/Library/Saved Application State/<B>.savedState`, `HTTPStorages/<B>`, `Cookies/<B>.binarycookies`, `WebKit/<B>` | B, B* (helper ids such as `<B>.helper`) |
+| `~/Library/Application Scripts/<B>` | B |
 | `~/Library/LaunchAgents`, `/Library/LaunchAgents`, `/Library/LaunchDaemons` | B* or plist program path inside the .app |
 | `/Library/PrivilegedHelperTools/<B>*` | B* (root) |
 | `/Library/Application Support/<N>`, `/Library/Preferences/<B>.plist`, `/Library/Caches/<B>` | B, N (root) |
-| `~/Library/Logs/DiagnosticReports/<N>-*.ips` | N exact prefix |
+| `~/Library/Logs/DiagnosticReports/<N>-*.ips`, `/Library/Logs/DiagnosticReports/<N>_*.diag` | N exact prefix + `-`/`_` and a crash-report extension |
 | pkg receipts (`pkgutil --pkgs` filtered by B*) | list files still present; `--forget` on execute |
-| Login items (`sfltool dumpbtm`) | report only |
+| Login items (`sfltool dumpbtm`, 3 s timeout: it blocks without Full Disk Access) | report only |
 | `~/.config/<N>`, `~/.<N>` | N, off by default (`--dotfiles`) |
+
+## Known non-matches (by design)
+- Sibling bundle ids from the same vendor (`com.spotify.installer` next to `com.spotify.client`) are not matched: a vendor-wide rule would sweep unrelated apps (`com.google.*`). Use `--also` or the TUI "add path".
+- Third-party SDK folders nested under another vendor's directory (`Application Support/io.branch/<id>`) are not matched.
+- Root-owned paths are deleted permanently even in Trash mode (the Trash is per-user); the confirm screen says so.

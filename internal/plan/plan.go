@@ -89,7 +89,10 @@ func Build(ctx context.Context, env fsx.Env, a app.App, opts Options) (*Plan, er
 	}
 	p := &Plan{App: a, Mode: opts.Mode, BrewZap: a.Cask != ""}
 	for _, l := range found {
-		p.Items = append(p.Items, Item{Leftover: l, Selected: true})
+		// A root-owned crash report alone is not worth an admin prompt; the
+		// user can tick it in the review screen.
+		sel := l.Kind != leftover.CrashReport || !l.NeedsRoot
+		p.Items = append(p.Items, Item{Leftover: l, Selected: sel})
 	}
 	for _, extra := range opts.Also {
 		if err := p.Add(env, extra, safety.Options{AllowDotfiles: opts.Dotfiles}); err != nil {
