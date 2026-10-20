@@ -235,6 +235,9 @@ var (
 )
 
 func codeEvalDynamic(c *FileCtx) []codeHit {
+	if !c.HasAny("eval", "function", "settimeout", "setinterval", "runin", "exec", "spawn", "os.system", "subprocess", "atob", "fromcharcode", "base64") {
+		return nil
+	}
 	d := c.Data
 	var hits []codeHit
 	evalAt := func(off int) {
@@ -289,6 +292,9 @@ var (
 )
 
 func codeChildProcessShell(c *FileCtx) []codeHit {
+	if !c.HasAny("child_process", "exec", "spawn", "sh -c", "shell", "osascript", "powershell", "cmd.exe") {
+		return nil
+	}
 	d := c.Data
 	var hits []codeHit
 	switch strings.ToLower(path.Ext(c.Rel)) {
@@ -320,6 +326,9 @@ func codeChildProcessShell(c *FileCtx) []codeHit {
 var reCodeHexIdent = regexp.MustCompile(`\b_0x[0-9a-f]{4,}\b`)
 
 func codeHexIdentifiers(c *FileCtx) []codeHit {
+	if !c.HasAny("_0x") {
+		return nil
+	}
 	ms := reCodeHexIdent.FindAllIndex(c.Data, -1)
 	if len(ms) == 0 {
 		return nil
@@ -353,6 +362,9 @@ var (
 )
 
 func codeEscapedStrings(c *FileCtx) []codeHit {
+	if !c.HasAny("\\x", "\\u") {
+		return nil
+	}
 	var hits []codeHit
 	for _, m := range reCodeEscapeRun.FindAllIndex(c.Data, -1) {
 		n := len(reCodeEscape.FindAllIndex(c.Data[m[0]:m[1]], -1))
@@ -371,8 +383,10 @@ func codeEscapedStrings(c *FileCtx) []codeHit {
 // --- obf_high_entropy_string ------------------------------------------------
 
 var (
-	reCodeLongString = regexp.MustCompile(`"[^"\n]{200,}"|'[^'\n]{200,}'|` + "`[^`]{200,}`")
-	reCodeHexTable   = regexp.MustCompile(`^[\s#0-9a-fA-F,;:]+$`)
+	// long string literals and base64 runs are found by linear byte scans
+	// (codeLongStrings, codeByteRuns): a counted repetition like {200,} makes
+	// Go's regexp machine hundreds of times slower on large bundles.
+	reCodeHexTable = regexp.MustCompile(`^[\s#0-9a-fA-F,;:]+$`)
 )
 
 func codeHighEntropyString(c *FileCtx) []codeHit {
@@ -381,7 +395,7 @@ func codeHighEntropyString(c *FileCtx) []codeHit {
 		sev = High
 	}
 	var hits []codeHit
-	for _, m := range reCodeLongString.FindAllIndex(c.Data, -1) {
+	for _, m := range codeLongStrings(c.Data, 200) {
 		s := c.Data[m[0]+1 : m[1]-1]
 		if bytes.Contains(s, []byte("data:image")) || bytes.Contains(s, []byte("data:font")) ||
 			bytes.Contains(s, []byte("sourceMappingURL")) || reCodeHexTable.Match(s) {
@@ -397,14 +411,13 @@ func codeHighEntropyString(c *FileCtx) []codeHit {
 // --- obf_base64_blob --------------------------------------------------------
 
 var (
-	reCodeB64     = regexp.MustCompile(`[A-Za-z0-9+/=]{400,}`)
 	reCodeB64Sink = regexp.MustCompile(`atob\s*\(|Buffer\.from\s*\(|\beval\s*\(|Function\s*\(|\bexec\w*\s*\(`)
 )
 
 func codeBase64Blob(c *FileCtx) []codeHit {
 	d := c.Data
 	var hits []codeHit
-	for _, m := range reCodeB64.FindAllIndex(d, -1) {
+	for _, m := range codeByteRuns(d, codeIsB64, 400) {
 		before := d[max(0, m[0]-100):m[0]]
 		if bytes.Contains(before, []byte("sourceMappingURL")) {
 			continue
@@ -579,6 +592,9 @@ func codeNear(d []byte, off, window int, re *regexp.Regexp) bool {
 }
 
 func codeRemoteExecChain(c *FileCtx) []codeHit {
+	if !c.HasAny("http", "curl", "wget", "fetch", "axios", "urllib", "invoke-webrequest", "iwr ") {
+		return nil
+	}
 	d := c.Data
 	if !reCodeDownload.Match(d) {
 		return nil
@@ -633,6 +649,9 @@ var (
 )
 
 func codeDynamicRequireNet(c *FileCtx) []codeHit {
+	if !c.HasAny("require", "import(") {
+		return nil
+	}
 	d := c.Data
 	var hits []codeHit
 	for _, m := range reCodeDynRequire.FindAllSubmatchIndex(d, -1) {
@@ -690,4 +709,53 @@ func codeLongLine(c *FileCtx) []codeHit {
 		start = end + 1
 	}
 	return hits
+}
+
+// codeLongStrings returns [start,end) spans of quoted string literals whose
+// body is at least min bytes: a quote character, then bytes up to the same
+// quote (no newline for " and '; backticks may span lines), like the regex
+// `"[^"\n]{200,}"` but in one linear pass.
+func codeLongStrings(d []byte, min int) [][]int {
+	var out [][]int
+	for i := 0; i < len(d); i++ {
+		q := d[i]
+		if q != '"' && q != '\'' && q != '`' {
+			continue
+		}
+		j := i + 1
+		for j < len(d) && d[j] != q && (q == '`' || d[j] != '\n') {
+			j++
+		}
+		if j < len(d) && d[j] == q {
+			if j-i-1 >= min {
+				out = append(out, []int{i, j + 1})
+			}
+			i = j
+		}
+	}
+	return out
+}
+
+func codeIsB64(b byte) bool {
+	return b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z' || b >= '0' && b <= '9' || b == '+' || b == '/' || b == '='
+}
+
+// codeByteRuns returns [start,end) spans of maximal runs of bytes accepted by
+// ok that are at least min long.
+func codeByteRuns(d []byte, ok func(byte) bool, min int) [][]int {
+	var out [][]int
+	start := -1
+	for i := 0; i <= len(d); i++ {
+		in := i < len(d) && ok(d[i])
+		switch {
+		case in && start < 0:
+			start = i
+		case !in && start >= 0:
+			if i-start >= min {
+				out = append(out, []int{start, i})
+			}
+			start = -1
+		}
+	}
+	return out
 }

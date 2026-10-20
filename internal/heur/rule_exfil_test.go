@@ -141,3 +141,34 @@ func TestExfilEnvDumpBoundedSpan(t *testing.T) {
 		}
 	}
 }
+
+func TestExfilLeadingLiteral(t *testing.T) {
+	cases := map[string]string{
+		`(?i)\b(?:discord(?:app)?\.com/api/webhooks)\b`: "discord",
+		`(?i)\b(?:api\.telegram\.org/bot)`:              "api.telegram.org/bot",
+		`\.ssh\b`:                                       ".ssh",
+		`\.aws[/\\](?:credentials|config)\b`:            ".aws",
+		`(?:homedir\(\)|\$HOME)`:                        "homedir",
+		`[A-Z]+`:                                        "",
+	}
+	for src, want := range cases {
+		if got := exfilLeadingLiteral(src); got != want {
+			t.Errorf("exfilLeadingLiteral(%q) = %q, want %q", src, got, want)
+		}
+	}
+	for _, pats := range [][]exfilPat{exfilHosts, exfilCredTokens} {
+		lits := exfilLits(pats)
+		if lits == nil {
+			t.Fatal("list has no literal gate")
+		}
+		gated := 0
+		for _, l := range lits {
+			if l != "" {
+				gated++
+			}
+		}
+		if gated < len(pats)*3/4 {
+			t.Errorf("only %d of %d patterns have a literal; windowed scanning would fall back to full scans", gated, len(pats))
+		}
+	}
+}

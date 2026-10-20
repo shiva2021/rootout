@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 const (
@@ -221,17 +222,113 @@ func (e *exfilEmitter) add(rule string, sev Severity, off int, detail string) {
 
 // scan applies a pattern table, formatting Detail with the pattern label.
 func (e *exfilEmitter) scan(pats []exfilPat, format string, accept func(off, end int) bool) {
-	for _, p := range pats {
+	// Cost must follow the number of literal hits, not the file size: large
+	// bundles are scanned with bytes.Index for each pattern's leading literal
+	// and the regexp runs only in a window around each hit. Patterns with no
+	// usable literal (a handful) still scan the whole file.
+	lits := exfilLits(pats)
+	for i, p := range pats {
 		if e.full() {
 			return
 		}
-		for _, m := range p.re.FindAllIndex(e.c.Data, exfilCap*8) {
-			if accept != nil && !accept(m[0], m[1]) {
-				continue
+		lit := ""
+		if lits != nil {
+			lit = lits[i]
+		}
+		if lit == "" {
+			for _, m := range p.re.FindAllIndex(e.c.Data, exfilCap*8) {
+				e.hit(p, m[0], m[1], format, accept)
 			}
-			e.add("", p.sev, m[0], fmt.Sprintf(format, p.label))
+			continue
+		}
+		low, needle := e.c.Lower(), []byte(lit)
+		for from, hits := 0, 0; hits < exfilLitHits; hits++ {
+			k := bytes.Index(low[from:], needle)
+			if k < 0 {
+				break
+			}
+			off := from + k
+			ws, we := max(0, off-exfilWindow), min(len(e.c.Data), off+len(needle)+exfilWindow)
+			for _, m := range p.re.FindAllIndex(e.c.Data[ws:we], -1) {
+				e.hit(p, ws+m[0], ws+m[1], format, accept)
+			}
+			from = off + len(needle)
 		}
 	}
+}
+
+// exfilWindow is how far around a literal hit the pattern may extend;
+// exfilLitHits bounds the hits examined per pattern and file.
+const (
+	exfilWindow  = 300
+	exfilLitHits = 64
+)
+
+func (e *exfilEmitter) hit(p exfilPat, off, end int, format string, accept func(off, end int) bool) {
+	if accept != nil && !accept(off, end) {
+		return
+	}
+	e.add("", p.sev, off, fmt.Sprintf(format, p.label))
+}
+
+var (
+	exfilLitsMu  sync.Mutex
+	exfilLitSets = map[*exfilPat][]string{}
+)
+
+// exfilLits derives one lower-case literal per pattern (the leading literal
+// run of its source, e.g. "discord" from `discord(?:app)?\.com/…`), or ""
+// when a pattern has none; nil when no pattern in the list has one.
+func exfilLits(pats []exfilPat) []string {
+	key := &pats[0]
+	exfilLitsMu.Lock()
+	defer exfilLitsMu.Unlock()
+	if l, ok := exfilLitSets[key]; ok {
+		return l
+	}
+	lits := make([]string, len(pats))
+	any := false
+	for i, p := range pats {
+		if lit := exfilLeadingLiteral(p.re.String()); len(lit) >= 3 {
+			lits[i] = strings.ToLower(lit)
+			any = true
+		}
+	}
+	if !any {
+		lits = nil
+	}
+	exfilLitSets[key] = lits
+	return lits
+}
+
+// exfilLeadingLiteral returns the literal prefix of a regex source after
+// stripping leading flags and word boundaries; escaped punctuation is unescaped.
+func exfilLeadingLiteral(src string) string {
+	// Leading flags, word boundaries and non-capturing group openers carry
+	// no literal; a group that opens an alternation does, so stop there.
+	for changed := true; changed; {
+		changed = false
+		for _, pre := range []string{"(?i)", "(?m)", `\b`, "(?:"} {
+			if strings.HasPrefix(src, pre) {
+				src = src[len(pre):]
+				changed = true
+			}
+		}
+	}
+	var b strings.Builder
+	for i := 0; i < len(src); i++ {
+		ch := src[i]
+		switch {
+		case ch == '\\' && i+1 < len(src) && strings.ContainsRune(`.-/_`, rune(src[i+1])):
+			b.WriteByte(src[i+1])
+			i++
+		case strings.ContainsRune(`\()[]{}|?*+^$.`, rune(ch)):
+			return b.String()
+		default:
+			b.WriteByte(ch)
+		}
+	}
+	return b.String()
 }
 
 // exfilLineStart returns the offset of the first byte of the line holding off.

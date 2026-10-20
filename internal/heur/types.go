@@ -93,6 +93,26 @@ type FileCtx struct {
 	once     sync.Once
 	lineOffs []int
 	minified *bool
+	lowOnce  sync.Once
+	low      []byte
+}
+
+// Lower returns the file lower-cased, computed once, for cheap literal gates
+// (bytes.Contains is far faster than a regexp pass over a large bundle).
+func (c *FileCtx) Lower() []byte {
+	c.lowOnce.Do(func() { c.low = bytes.ToLower(c.Data) })
+	return c.low
+}
+
+// HasAny reports whether any of the lower-case literals occurs in the file.
+func (c *FileCtx) HasAny(lits ...string) bool {
+	low := c.Lower()
+	for _, l := range lits {
+		if bytes.Contains(low, []byte(l)) {
+			return true
+		}
+	}
+	return false
 }
 
 // Line returns the 1-based line number of byte offset off.
