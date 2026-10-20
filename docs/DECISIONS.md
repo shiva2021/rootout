@@ -145,3 +145,43 @@ Append-only. Newest at the bottom. Never edit an old entry; add a new one that s
 **Alternatives.** Keep `purge` and rely on Homebrew's PATH order (fragile); `macsweep` (free as a command, but about 30 GitHub projects use it, almost all Mac cleaners); `appgone`, `leavenone`, `traceout` (also clean). 32 names were checked for a macOS command, a Homebrew formula or cask, and same-category GitHub projects; `rootout` had none of the first two and 4 unrelated GitHub repos.
 **Consequences.** Trademark and domain availability are not yet checked; do that before a paid release.
 **Status.** Accepted
+
+## D-019 · 2026-10-20 · Interactive uninstalls require typing `delete`
+
+**Context.** Shivang asked that nothing be uninstalled without the user typing `delete`. The flows were confirmed with Enter or `y`.
+**Decision.** The TUI confirm screen, the scan review screen and the plain prompt all require the exact word `delete` (case-insensitive, trimmed) for apps, orphans and extensions. `--yes` remains the scripting bypass and prints a warning banner; `scan` gains `--uninstall <id>` and `--yes` so extensions have the same scripted path.
+**Alternatives.** No bypass at all (breaks scripting); typed word only for `--permanent`.
+**Consequences.** One shared `typedConfirm` sub-model in `internal/tui` and `plan.IsConfirmWord`; every new destructive screen must use them.
+**Status.** Accepted
+
+## D-020 · 2026-10-20 · Orphan leftovers: conservative detection, nothing pre-selected
+
+**Context.** Files left by apps uninstalled before rootout existed cannot be matched to an installed app, so the usual bundle-id matching does not apply and false positives would delete live data.
+**Decision.** `rootout orphans` considers only entries in `~/Library` whose name parses as a reverse-DNS bundle id (never plain names). An id is owned, and therefore not an orphan, if any installed app has it or a prefix of it, if it is a prefix of an installed id (vendor-shared folders), if it is `com.apple.*`, if any app bundle anywhere on disk (Spotlight) carries it, or if a loaded launchd job or running process uses it. Results are grouped by owner id, nothing is ticked, groups changed within 30 days are marked "recently used", and removal needs the typed word. `/Library` and receipts are report-only in this version.
+**Alternatives.** Pre-ticking confident candidates; a report-only first release; matching plain names.
+**Consequences.** Detection lives in `package leftover` to reuse the rules table; `plan.New` builds a plan without an app. The owned-set sources are listed in `docs/kb/safety.md`.
+**Status.** Accepted
+
+## D-021 · 2026-10-20 · Help: examples, a guide command, in-screen key help
+
+**Context.** Help was Cobra's default output with no examples or orientation.
+**Decision.** Every command gets `Example` and a fuller `Long`; the root help gets a "Getting started" block; `rootout guide` prints a tour whose steps reflect this machine (reusing the doctor checks); a one-time first-run hint points at it; every TUI screen opens a key overlay on `?`.
+**Alternatives.** Shell completions (deferred); a wizard that runs commands for the user.
+**Consequences.** New commands must ship with `Example`; new screens must register their keys with the overlay.
+**Status.** Accepted
+
+## D-022 · 2026-10-20 · Pick the local model inside the scan screen
+
+**Context.** The model picker existed only behind `config models --pick`; the scan showed nothing about which AI, if any, would answer.
+**Decision.** The scan review header shows the active provider and model; `m` opens the model picker as a sub-model embedded in the scan screen (same Bubble Tea program, no nested program); `scan --pick-model` opens it before scanning. After a pick the command rebuilds the provider and saves it as default.
+**Alternatives.** Suspending the program and running a second one; asking every time no provider is set.
+**Consequences.** `tui.Assessor` replaces the bare assess function so the screen knows the label and can swap the provider.
+**Status.** Accepted
+
+## D-023 · 2026-10-20 · Progress reporting through an optional Reporter
+
+**Context.** Discovery, scanning and removal ran silently for seconds.
+**Decision.** `internal/progress.Reporter` (Start/Step/Done) is an optional parameter on long operations, defaulting to a no-op. The CLI renders one updating line on stderr, silent when stderr is not a terminal or under `--json`. The app picker loads apps inside the program and shows the same bar. Bundle size walks run on four workers.
+**Alternatives.** Context-carried reporters (hidden coupling); per-package ad-hoc callbacks (already one for Ollama pulls, kept).
+**Consequences.** Every new long operation accepts a Reporter; tests use `progress.Recorder`.
+**Status.** Accepted
