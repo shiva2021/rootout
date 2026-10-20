@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/shiva2021/rootout/internal/ext"
+	"github.com/shiva2021/rootout/internal/progress"
 )
 
 // ErrNoDir is returned when the extension has no directory to scan.
@@ -62,9 +63,21 @@ func Scan(ctx context.Context, e ext.Extension, lim Limits) (Report, error) {
 
 // ScanAll runs Scan concurrently (workers = min(4, len)) preserving input
 // order; per-extension errors become a Finding{Rule:"scan_error",
-// Severity: Info} rather than aborting.
+// Severity: Info} rather than aborting. It is ScanAllWith with no reporter.
 func ScanAll(ctx context.Context, exts []ext.Extension, lim Limits) []Report {
+	return ScanAllWith(ctx, exts, lim, nil)
+}
+
+// ScanAllWith is ScanAll reporting to p: Start once with len(exts), one Step
+// per extension (its ID) as each scan finishes, Done at the end. A nil p
+// means progress.Nop().
+func ScanAllWith(ctx context.Context, exts []ext.Extension, lim Limits, p progress.Reporter) []Report {
+	if p == nil {
+		p = progress.Nop()
+	}
 	out := make([]Report, len(exts))
+	p.Start("Scanning extensions", len(exts))
+	defer p.Done()
 	if len(exts) == 0 {
 		return out
 	}
@@ -74,6 +87,7 @@ func ScanAll(ctx context.Context, exts []ext.Extension, lim Limits) []Report {
 		wg.Go(func() {
 			for i := range idx {
 				out[i] = scanOrError(ctx, exts[i], lim)
+				p.Step(exts[i].ID)
 			}
 		})
 	}

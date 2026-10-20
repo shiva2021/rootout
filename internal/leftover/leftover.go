@@ -20,6 +20,7 @@ import (
 
 	"github.com/shiva2021/rootout/internal/app"
 	"github.com/shiva2021/rootout/internal/fsx"
+	"github.com/shiva2021/rootout/internal/progress"
 	"github.com/shiva2021/rootout/internal/safety"
 )
 
@@ -110,9 +111,28 @@ type Runner = run.Runner
 
 // Options tunes Find.
 type Options struct {
-	Dotfiles     bool   // include ~/.config/<name> and ~/.<name> (name-guarded); default false
-	CrashReports bool   // include DiagnosticReports; callers default this to true
-	Run          Runner // for `pkgutil` (receipts) and `sfltool dumpbtm` (login items); nil skips both
+	Dotfiles     bool              // include ~/.config/<name> and ~/.<name> (name-guarded); default false
+	CrashReports bool              // include DiagnosticReports; callers default this to true
+	Run          Runner            // for `pkgutil` (receipts) and `sfltool dumpbtm` (login items); nil skips both
+	Progress     progress.Reporter // one Step per rule row plus receipts and login items; nil = progress.Nop()
+}
+
+// active reports whether rule r runs under opts.
+func (r rule) active(opts Options) bool { return r.when == nil || r.when(opts) }
+
+// stepCount is the number of progress steps Find takes under opts: one per
+// active rule row, plus receipts and login items when a Runner is set.
+func stepCount(opts Options) int {
+	n := 0
+	for _, r := range rules {
+		if r.active(opts) {
+			n++
+		}
+	}
+	if opts.Run != nil {
+		n += 2
+	}
+	return n
 }
 
 // Find returns every leftover for a, including the bundle itself as the first
@@ -142,6 +162,13 @@ func Find(ctx context.Context, env fsx.Env, a app.App, opts Options) ([]Leftover
 	if err := safety.Validate(env, a.Path, s.vopts); err != nil {
 		return nil, fmt.Errorf("leftover: bundle %s: %w", a.Path, err)
 	}
+	p := opts.Progress
+	if p == nil {
+		p = progress.Nop()
+	}
+	p.Start("Looking for leftovers", stepCount(opts))
+	defer p.Done()
+
 	bundle := s.describe(Leftover{Path: filepath.Clean(a.Path), Kind: Bundle, MatchedBy: ByBundleID})
 	if a.SizeBytes > 0 {
 		bundle.SizeBytes = a.SizeBytes
@@ -153,18 +180,21 @@ func Find(ctx context.Context, env fsx.Env, a app.App, opts Options) ([]Leftover
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if r.when != nil && !r.when(opts) {
+		if !r.active(opts) {
 			continue
 		}
 		s.apply(r)
+		p.Step(filepath.Base(r.dir(env)))
 	}
 	if opts.Run != nil {
 		if err := s.receipts(ctx); err != nil {
 			return nil, err
 		}
+		p.Step("Receipts")
 		if err := s.loginItem(ctx); err != nil {
 			return nil, err
 		}
+		p.Step("Login items")
 	}
 
 	sort.SliceStable(s.found, func(i, j int) bool {

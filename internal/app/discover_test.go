@@ -2,9 +2,11 @@ package app
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/shiva2021/rootout/internal/progress"
 	"github.com/shiva2021/rootout/internal/testutil"
 )
 
@@ -167,6 +169,80 @@ func TestDiscoverEmpty(t *testing.T) {
 		t.Errorf("got %v, want none", appNames(apps))
 	}
 }
+
+func TestDiscoverWithProgress(t *testing.T) {
+	env := testutil.FakeHome(t, discoverSpec())
+	want, err := Discover(env)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	for _, workers := range []int{0, 1, 4, 32} {
+		t.Run("workers="+itoa(workers), func(t *testing.T) {
+			rec := &progress.Recorder{}
+			apps, err := DiscoverWith(env, Options{Progress: rec, Workers: workers})
+			if err != nil {
+				t.Fatalf("DiscoverWith: %v", err)
+			}
+			if rec.Label != "Scanning applications" {
+				t.Errorf("Label = %q", rec.Label)
+			}
+			if rec.Total != len(want) || len(apps) != len(want) {
+				t.Errorf("Total = %d, apps = %d, want %d", rec.Total, len(apps), len(want))
+			}
+			if len(rec.Steps) != rec.Total {
+				t.Errorf("Steps = %d, want %d", len(rec.Steps), rec.Total)
+			}
+			if !rec.Finished {
+				t.Error("Done not called")
+			}
+			stepped := map[string]bool{}
+			for _, s := range rec.Steps {
+				stepped[s] = true
+			}
+			for i, a := range apps {
+				if a != want[i] {
+					t.Errorf("apps[%d] = %+v, want %+v (order must not depend on workers)", i, a, want[i])
+				}
+				if !stepped[a.Name] {
+					t.Errorf("no Step for %q", a.Name)
+				}
+			}
+		})
+	}
+}
+
+func TestDiscoverWithSkipSizes(t *testing.T) {
+	env := testutil.FakeHome(t, discoverSpec())
+	sized, err := DiscoverWith(env, Options{})
+	if err != nil {
+		t.Fatalf("DiscoverWith: %v", err)
+	}
+	unsized, err := DiscoverWith(env, Options{SkipSizes: true})
+	if err != nil {
+		t.Fatalf("DiscoverWith(SkipSizes): %v", err)
+	}
+	if len(sized) != len(unsized) {
+		t.Fatalf("got %d vs %d apps", len(sized), len(unsized))
+	}
+	var checked bool
+	for i := range sized {
+		if sized[i].SizeBytes == 0 {
+			continue
+		}
+		checked = true
+		if unsized[i].SizeBytes != 0 {
+			t.Errorf("%s: SizeBytes = %d with SkipSizes, want 0", unsized[i].Name, unsized[i].SizeBytes)
+		}
+		if unsized[i].Path != sized[i].Path || unsized[i].BundleID != sized[i].BundleID {
+			t.Errorf("%s: identity changed with SkipSizes", sized[i].Name)
+		}
+	}
+	if !checked {
+		t.Fatal("fixture has no bundle with size > 0; the test proves nothing")
+	}
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }
 
 func TestRead(t *testing.T) {
 	env := testutil.FakeHome(t, discoverSpec())

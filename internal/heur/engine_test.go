@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/shiva2021/rootout/internal/ext"
+	"github.com/shiva2021/rootout/internal/progress"
 )
 
 // Test rules are registered globally and stay registered for the whole test
@@ -448,6 +449,40 @@ func TestScanAll(t *testing.T) {
 	}
 	if got := ScanAll(context.Background(), nil, Limits{}); len(got) != 0 {
 		t.Errorf("ScanAll(nil) = %v, want empty", got)
+	}
+}
+
+func TestScanAllWithProgress(t *testing.T) {
+	tok := t.Name()
+	var exts []ext.Extension
+	for i := range 6 {
+		dir := t.TempDir()
+		writeTree(t, dir, map[string]string{"a.js": "1"})
+		exts = append(exts, ext.Extension{Dir: dir, Name: tok, ID: "ext-" + strconv.Itoa(i)})
+	}
+	exts[4].Dir = "" // errors still count as a step
+
+	rec := &progress.Recorder{}
+	reports := ScanAllWith(context.Background(), exts, Limits{}, rec)
+	if len(reports) != len(exts) {
+		t.Fatalf("got %d reports, want %d", len(reports), len(exts))
+	}
+	if rec.Label != "Scanning extensions" || rec.Total != 6 || !rec.Finished {
+		t.Errorf("recorder = label %q total %d finished %v", rec.Label, rec.Total, rec.Finished)
+	}
+	got := slices.Clone(rec.Steps)
+	slices.Sort(got)
+	var want []string
+	for _, e := range exts {
+		want = append(want, e.ID)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("Steps = %v, want one per extension %v", rec.Steps, want)
+	}
+
+	empty := &progress.Recorder{}
+	if out := ScanAllWith(context.Background(), nil, Limits{}, empty); len(out) != 0 || empty.Total != 0 || !empty.Finished {
+		t.Errorf("empty input: out=%v total=%d finished=%v", out, empty.Total, empty.Finished)
 	}
 }
 

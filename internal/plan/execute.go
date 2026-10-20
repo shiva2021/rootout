@@ -14,9 +14,14 @@ import (
 	"github.com/shiva2021/rootout/internal/fsx"
 	"github.com/shiva2021/rootout/internal/leftover"
 	"github.com/shiva2021/rootout/internal/priv"
+	"github.com/shiva2021/rootout/internal/progress"
 	"github.com/shiva2021/rootout/internal/run"
 	"github.com/shiva2021/rootout/internal/trash"
 )
+
+// trashChunk is how many user paths go to one Trash.Move call so progress
+// advances between calls instead of once at the end.
+const trashChunk = 25
 
 // Deps are the side-effecting collaborators Execute uses; tests inject fakes.
 type Deps struct {
@@ -27,6 +32,7 @@ type Deps struct {
 	RemoveAll func(string) error // permanent user-level deletion; default os.RemoveAll
 	UID       int                // for launchctl gui/<uid>; default os.Getuid()
 	Dotfiles  bool               // mirrors Options.Dotfiles for re-validation
+	Progress  progress.Reporter  // one Step per user path, one for the admin batch; nil = progress.Nop()
 }
 
 // Result is what actually happened.
@@ -86,6 +92,14 @@ func Execute(ctx context.Context, env fsx.Env, p *Plan, d Deps) (*Result, error)
 		}
 	}
 
+	rootWork := len(rootPaths)+len(rootLabels)+len(pkgs) > 0
+	total := len(userPaths)
+	if rootWork {
+		total++
+	}
+	d.Progress.Start("Removing", total)
+	defer d.Progress.Done()
+
 	quitApp(ctx, d.Run, p.App.BundleID)
 	for _, l := range userLabels {
 		if _, err := d.Run(ctx, "launchctl", "bootout", "gui/"+strconv.Itoa(d.UID)+"/"+l); err == nil {
@@ -103,30 +117,35 @@ func Execute(ctx context.Context, env fsx.Env, p *Plan, d Deps) (*Result, error)
 
 	switch p.Mode {
 	case Trash:
-		tr, err := d.Trash.Move(ctx, userPaths)
-		res.Removed = append(res.Removed, tr.Moved...)
-		res.Skipped = append(res.Skipped, tr.Skipped...)
-		for path, e := range tr.Failed {
-			res.Failed[path] = e.Error()
-		}
-		if err != nil && !errors.Is(err, trash.ErrAllFailed) {
-			return res, err
+		for start := 0; start < len(userPaths); start += trashChunk {
+			chunk := userPaths[start:min(start+trashChunk, len(userPaths))]
+			tr, err := d.Trash.Move(ctx, chunk)
+			res.Removed = append(res.Removed, tr.Moved...)
+			res.Skipped = append(res.Skipped, tr.Skipped...)
+			for path, e := range tr.Failed {
+				res.Failed[path] = e.Error()
+			}
+			for _, path := range chunk {
+				d.Progress.Step(path)
+			}
+			if err != nil && !errors.Is(err, trash.ErrAllFailed) {
+				return res, err
+			}
 		}
 	case Permanent:
 		for _, path := range userPaths {
 			if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
 				res.Skipped = append(res.Skipped, path)
-				continue
-			}
-			if err := d.RemoveAll(path); err != nil {
+			} else if err := d.RemoveAll(path); err != nil {
 				res.Failed[path] = err.Error()
 			} else {
 				res.Removed = append(res.Removed, path)
 			}
+			d.Progress.Step(path)
 		}
 	}
 
-	if len(rootPaths)+len(rootLabels)+len(pkgs) > 0 {
+	if rootWork {
 		var cmds []priv.Cmd
 		for _, l := range rootLabels {
 			cmds = append(cmds, priv.Cmd{"launchctl", "bootout", "system/" + l})
@@ -140,7 +159,9 @@ func Execute(ctx context.Context, env fsx.Env, p *Plan, d Deps) (*Result, error)
 			}
 		}
 		res.AdminUsed = true
-		if err := priv.Exec(ctx, cmds, d.Priv); err != nil {
+		err := priv.Exec(ctx, cmds, d.Priv)
+		d.Progress.Step("admin rights")
+		if err != nil {
 			for _, path := range rootPaths {
 				res.Failed[path] = err.Error()
 			}
@@ -182,6 +203,9 @@ func (d Deps) withDefaults() Deps {
 	}
 	if d.UID == 0 {
 		d.UID = os.Getuid()
+	}
+	if d.Progress == nil {
+		d.Progress = progress.Nop()
 	}
 	return d
 }

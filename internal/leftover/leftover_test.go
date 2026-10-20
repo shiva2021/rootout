@@ -12,6 +12,7 @@ import (
 
 	"github.com/shiva2021/rootout/internal/app"
 	"github.com/shiva2021/rootout/internal/fsx"
+	"github.com/shiva2021/rootout/internal/progress"
 	"github.com/shiva2021/rootout/internal/safety"
 	"github.com/shiva2021/rootout/internal/testutil"
 )
@@ -393,6 +394,58 @@ func TestFindRunner(t *testing.T) {
 		cancel()
 		if _, err := Find(ctx, env, a, Options{Run: run}); !errors.Is(err, context.Canceled) {
 			t.Errorf("err = %v, want context.Canceled", err)
+		}
+	})
+}
+
+func TestFindProgress(t *testing.T) {
+	env, a := spotifyHome(t)
+	okRun := func(_ context.Context, _ string, _ ...string) ([]byte, error) { return nil, nil }
+	cases := []struct {
+		name string
+		opts Options
+		last string
+	}{
+		{"rules only", Options{}, "PrivilegedHelperTools"},
+		{"crash reports", Options{CrashReports: true}, "DiagnosticReports"},
+		{"dotfiles and runner", Options{CrashReports: true, Dotfiles: true, Run: okRun}, "Login items"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &progress.Recorder{}
+			tc.opts.Progress = rec
+			find(t, env, a, tc.opts)
+
+			want := 0
+			for _, r := range rules {
+				if r.when == nil || r.when(tc.opts) {
+					want++
+				}
+			}
+			if tc.opts.Run != nil {
+				want += 2
+			}
+			if rec.Label != "Looking for leftovers" || !rec.Finished {
+				t.Errorf("label %q finished %v", rec.Label, rec.Finished)
+			}
+			if rec.Total != want || len(rec.Steps) != want {
+				t.Errorf("Total = %d, Steps = %d, want %d", rec.Total, len(rec.Steps), want)
+			}
+			if rec.Steps[0] != "Preferences" || rec.Steps[len(rec.Steps)-1] != tc.last {
+				t.Errorf("Steps = %v, want first Preferences and last %q", rec.Steps, tc.last)
+			}
+		})
+	}
+
+	t.Run("done on error", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		rec := &progress.Recorder{}
+		if _, err := Find(ctx, env, a, Options{Progress: rec}); !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want context.Canceled", err)
+		}
+		if !rec.Finished {
+			t.Error("Done not called on the error path")
 		}
 	})
 }

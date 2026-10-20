@@ -9,12 +9,24 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/shiva2021/rootout/internal/fsx"
+	"github.com/shiva2021/rootout/internal/progress"
 )
 
 // ErrNotBundle is returned by Read when the path is not a .app directory.
 var ErrNotBundle = errors.New("app: not an application bundle")
+
+// defaultWorkers is the size-walk concurrency when Options.Workers is 0.
+const defaultWorkers = 4
+
+// Options tunes DiscoverWith.
+type Options struct {
+	Progress  progress.Reporter // nil = progress.Nop()
+	SkipSizes bool              // leave SizeBytes 0; used when only ids are needed
+	Workers   int               // size-walk concurrency; 0 = 4
+}
 
 // Discover lists application bundles under env.Sys("Applications") (one level
 // deep, plus one level inside subfolders that are not themselves .app bundles,
@@ -24,30 +36,70 @@ var ErrNotBundle = errors.New("app: not an application bundle")
 // (case-insensitive) and deduplicated by Path. Bundles whose Info.plist cannot
 // be read are still returned with Name = dir name sans ".app" and an empty
 // BundleID; the error is logged via slog.Debug.
+//
+// Discover(env) is DiscoverWith(env, Options{}).
 func Discover(env fsx.Env) ([]App, error) {
+	return DiscoverWith(env, Options{})
+}
+
+// DiscoverWith is Discover with progress reporting, optional size walks and
+// a configurable worker count. Bundle paths are collected first, then each
+// bundle is read (Info.plist and size walk) on a pool of opts.Workers
+// goroutines; opts.Progress sees Start once, one Step per bundle (its Name)
+// and Done at the end. The result is sorted, so the order is deterministic
+// regardless of worker scheduling.
+func DiscoverWith(env fsx.Env, opts Options) ([]App, error) {
+	p := opts.Progress
+	if p == nil {
+		p = progress.Nop()
+	}
+	workers := opts.Workers
+	if workers <= 0 {
+		workers = defaultWorkers
+	}
 	casks := loadCasks(env)
-	var apps []App
+
+	var paths []string
 	seen := map[string]bool{}
 	add := func(path string) {
 		if seen[path] {
 			return
 		}
 		seen[path] = true
-		apps = append(apps, read(env, path, casks))
+		paths = append(paths, path)
 	}
-
 	for _, root := range []string{env.Sys("Applications"), env.User("Applications")} {
-		for _, p := range bundlesIn(root, true) {
-			add(p)
+		for _, b := range bundlesIn(root, true) {
+			add(b)
 		}
 	}
 	sys := env.Sys("System", "Applications")
-	for _, p := range bundlesIn(sys, false) {
-		add(p)
+	for _, b := range bundlesIn(sys, false) {
+		add(b)
 	}
-	for _, p := range bundlesIn(filepath.Join(sys, "Utilities"), false) {
-		add(p)
+	for _, b := range bundlesIn(filepath.Join(sys, "Utilities"), false) {
+		add(b)
 	}
+
+	p.Start("Scanning applications", len(paths))
+	defer p.Done()
+
+	apps := make([]App, len(paths))
+	idx := make(chan int)
+	var wg sync.WaitGroup
+	for range min(workers, len(paths)) {
+		wg.Go(func() {
+			for i := range idx {
+				apps[i] = read(env, paths[i], casks, !opts.SkipSizes)
+				p.Step(apps[i].Name)
+			}
+		})
+	}
+	for i := range paths {
+		idx <- i
+	}
+	close(idx)
+	wg.Wait()
 
 	sort.SliceStable(apps, func(i, j int) bool {
 		a, b := strings.ToLower(apps[i].Name), strings.ToLower(apps[j].Name)
@@ -74,12 +126,12 @@ func Read(env fsx.Env, path string) (App, error) {
 	if _, err := readInfo(path); err != nil {
 		return App{}, err
 	}
-	return read(env, path, loadCasks(env)), nil
+	return read(env, path, loadCasks(env), true), nil
 }
 
 // read builds an App for the bundle at path, tolerating a missing or broken
-// Info.plist.
-func read(env fsx.Env, path string, casks caskIndex) App {
+// Info.plist. With sizes false the size walk is skipped and SizeBytes stays 0.
+func read(env fsx.Env, path string, casks caskIndex, sizes bool) App {
 	a := App{
 		Path: path,
 		Name: strings.TrimSuffix(filepath.Base(path), ".app"),
@@ -99,7 +151,9 @@ func read(env fsx.Env, path string, casks caskIndex) App {
 			a.Version = in.Version
 		}
 	}
-	a.SizeBytes = bundleSize(path)
+	if sizes {
+		a.SizeBytes = bundleSize(path)
+	}
 	a.Protected = under(env.Sys("System"), path) ||
 		strings.HasPrefix(a.BundleID, "com.apple.") ||
 		restricted(path)
