@@ -3,7 +3,7 @@
 _Updated: 2026-10-20 · Session: planning + M0–M4_
 
 ## Status
-M0–M4 code complete; `make test` and `make lint` green; 28 commits on `main`, local only (no GitHub remote yet). Remaining: M2 manual QA on a throwaway account, M5 release pipeline, M6 licensing (needs its own plan).
+M0–M4 code complete; `make test` and `make lint` green; pushed to the private repo https://github.com/shiva2021/rootout (`main`). Remaining: M2 manual QA on a throwaway account, M5 release pipeline, M6 licensing (needs its own plan).
 
 ## Done this session
 - Plan (`docs/PLAN.md`), decisions D-001…D-017, knowledge base.
@@ -20,12 +20,11 @@ M0–M4 code complete; `make test` and `make lint` green; 28 commits on `main`, 
 ## Next steps
 1. M2 task 7: follow `docs/kb/qa.md` on a throwaway macOS user account (cask, App Store and pkg app). Live removal has only run in unit tests.
 2. Try `rootout scan --llm` with a real key or `rootout config models --pick` with Ollama; only recorded-HTTP tests exist so far.
-3. Create the private GitHub repo and push (needs Shivang's go-ahead).
-4. M5: GoReleaser config, notarization (needs Apple Developer account), private Homebrew tap.
-5. M6 licensing: write a separate plan first.
+3. M5: GoReleaser config, notarization (needs Apple Developer account), private Homebrew tap.
+4. M6 licensing: write a separate plan first.
 
 ## Blockers and open questions
-- GitHub push: waiting for explicit go-ahead.
+- `docs/research/vscode-extension-audit/` names Shivang's LeetCode username; remove it before the repo ever goes public.
 - Binary is 26 MB stripped (was 9 MB before the AI wiring). The official SDKs (D-013) are a few MB of that; replacing them with plain HTTP would shrink it but reverses D-013. Shivang to decide.
 - `sfltool dumpbtm` blocks without Full Disk Access; login items probe has a 3 s timeout and is otherwise skipped.
 - The VSIX signature file name is unverified; `unsigned_gallery` is Low for that reason (all 12 local extensions have `.vsixmanifest` but none of the guessed signature files).
