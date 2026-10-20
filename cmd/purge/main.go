@@ -63,7 +63,7 @@ func run(args []string) int {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return errNotYet // TUI lands in M1
+			return runTUI(cmd.Context(), &g)
 		},
 	}
 	root.PersistentFlags().BoolVar(&g.json, "json", false, "machine-readable output on stdout")
