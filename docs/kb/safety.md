@@ -35,3 +35,15 @@ Everything that deletes goes through `internal/safety`. Read this before touchin
 - Sibling bundle ids from the same vendor (`com.spotify.installer` next to `com.spotify.client`) are not matched: a vendor-wide rule would sweep unrelated apps (`com.google.*`). Use `--also` or the TUI "add path".
 - Third-party SDK folders nested under another vendor's directory (`Application Support/io.branch/<id>`) are not matched.
 - Root-owned paths are deleted permanently even in Trash mode (the Trash is per-user); the confirm screen says so.
+
+## Orphaned leftovers (`rootout orphans`, D-020)
+Detection: `leftover.FindOrphans`. Only `~/Library` rows of the rules table are read, and only entries whose name parses as a reverse-DNS id (`leftover.ParseOwner`: strips `.plist`/`.savedState`/`.binarycookies`, a team-id or `group.`/`groups.` prefix and a ByHost UUID; needs ≥ 3 segments; rejects numeric segments and file-extension segments such as `log`, `old`, `sqlite`). Plain names are never candidates.
+
+An id is owned (not an orphan) when any of these hold:
+- an installed app has the id, an extension of it (`<id>.helper`) or a prefix of it (vendor folders);
+- it contains `com.apple.` or is an Apple alias (`is.workflow.*`, Shortcuts);
+- it is a shared analytics/attribution SDK id (`io.branch.`, `com.crashlytics.`, `com.segment.`, …) whose owner cannot be inferred;
+- any app bundle on disk carries it (`mdfind` for application bundles, Info.plist read);
+- a loaded launchd job (`launchctl list`) or a running process (`ps -axo comm=`) uses it.
+
+Groups changed within 30 days (`--min-age`) are marked recently used. Groups sharing a distinctive id segment with an installed app carry `VendorInstalled` ("vendor still installed: Perplexity") and stay listed for the user to judge. Nothing is pre-selected; removal needs the typed word. `/Library` rows and receipts are report-only in this version.

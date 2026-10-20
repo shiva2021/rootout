@@ -10,9 +10,14 @@ rootout remove <app> -n       # dry run: show the bundle and every leftover file
 rootout remove <app>          # move them to the Trash after you confirm
 rootout scan                  # score installed extensions; review and uninstall on a terminal
 rootout scan --llm            # also ask Claude, OpenAI or a local Ollama model
+rootout orphans               # leftovers of apps you already deleted, grouped by old app id
 rootout config models --pick  # choose or download a local model that fits this Mac
 rootout doctor                # check what rootout depends on
+rootout guide                 # a step-by-step tour adapted to this Mac
 ```
+
+Nothing is uninstalled until you type `delete`. In every screen `?` lists the
+keys; in the scan screen `m` picks a local model without leaving the scan.
 
 Every command takes `--json`. Removal goes to the Trash unless `--permanent`.
 System apps are listed but never removable. Nothing runs as root; files that

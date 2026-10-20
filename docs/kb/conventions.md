@@ -38,6 +38,12 @@ golangci-lint run     # config in .golangci.yml
 - One logical change per commit. Reference decisions as `D-0NN` where relevant.
 - Branch `main`; feature branches `m<milestone>/<topic>` when work runs in parallel.
 
+## Long operations and confirmations
+- Every operation that can take more than a second accepts a `progress.Reporter` (nil = `progress.Nop()`), calls `Start/Step/Done`, and the command passes `stderrProgress(g)`. TUI screens that load data do it inside the program and render `renderCount`.
+- Every destructive confirmation goes through `tui.typedConfirm` (screens) or `plan.Prompt`/`confirmTyped` (plain terminal); the word is `plan.ConfirmWord`. `--yes` is the only bypass and calls `yesBanner`.
+- Every screen registers its keys with the `?` overlay (`renderHelp`) and ends its footer with `· ? help`.
+- Every command has `Long` and `Example`.
+
 ## Safety rules that are also conventions
 - Any path destined for deletion is validated by `safety.Validate` at plan time and again immediately before the delete.
 - Name-based leftover matches require `safety.NameOK` and are never the sole basis for anything under `/Library` or `Group Containers`.
