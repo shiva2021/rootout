@@ -7,6 +7,7 @@ package llm
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/shiva2021/purge/internal/heur"
 )
@@ -63,6 +64,7 @@ func Schema() map[string]any {
 // Normalize clamps confidence, lower-cases and validates the verdict, and
 // fills Provider/Model. Unknown verdict strings become Unknown.
 func Normalize(a Assessment, provider, model string) Assessment {
+	a.Verdict = strings.ToLower(strings.TrimSpace(a.Verdict))
 	switch a.Verdict {
 	case Benign, Suspicious, Malicious, Unknown:
 	default:

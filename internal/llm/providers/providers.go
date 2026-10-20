@@ -1,0 +1,28 @@
+// Package providers picks an llm.Provider by name. It lives outside package
+// llm because the adapters import llm, so llm cannot import them.
+package providers
+
+import (
+	"fmt"
+
+	"github.com/shiva2021/purge/internal/llm"
+	"github.com/shiva2021/purge/internal/llm/anthropic"
+	"github.com/shiva2021/purge/internal/llm/ollamachat"
+	"github.com/shiva2021/purge/internal/llm/openai"
+)
+
+// New returns the adapter for provider ("anthropic" | "openai" | "ollama").
+// key is ignored for Ollama; ollamaURL is ignored for the hosted providers.
+// A missing key or model is reported by Assess, so callers can still show
+// which provider is configured.
+func New(provider, model, key, ollamaURL string) (llm.Provider, error) {
+	switch provider {
+	case "anthropic":
+		return anthropic.New(key, model), nil
+	case "openai":
+		return openai.New(key, model), nil
+	case "ollama":
+		return ollamachat.New(ollamaURL, model, nil), nil
+	}
+	return nil, fmt.Errorf("llm: unknown provider %q (want anthropic, openai or ollama)", provider)
+}
