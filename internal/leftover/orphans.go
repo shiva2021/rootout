@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +34,11 @@ type Orphan struct {
 	LastUsed  time.Time  `json:"last_used"`  // newest mtime across Items (bounded walk)
 	Recent    bool       `json:"recent"`     // LastUsed within RecentWindow
 	Reasons   []string   `json:"reasons"`    // why the owner is considered gone
+	// VendorInstalled names an installed app that shares a distinctive id
+	// segment with the owner ("Perplexity" for ai.perplexity.mac when
+	// ai.perplexity.macv3 is installed). Such groups are usually an older
+	// version or a shared component, so the UI flags them; they stay listed.
+	VendorInstalled string `json:"vendor_installed,omitempty"`
 }
 
 // OrphanOptions tunes FindOrphans.
@@ -84,14 +90,43 @@ func ParseOwner(basename string) string {
 		}
 	}
 	s = teamPrefix.ReplaceAllString(s, "")
-	if hasPrefix(s, "group.") {
-		s = s[len("group."):]
+	for _, pre := range []string{"group.", "groups."} {
+		if hasPrefix(s, pre) {
+			s = s[len(pre):]
+			break
+		}
 	}
 	s = hostSuffix.ReplaceAllString(s, "")
 	if !idLike.MatchString(s) {
 		return ""
 	}
+	// Rotated logs and data files ("warp.log.old.3", "x.y.sqlite") parse as
+	// ids by shape; a numeric segment or a file-extension segment rules them out.
+	for _, seg := range strings.Split(s, ".") {
+		if _, err := strconv.Atoi(seg); err == nil || fileSegments[strings.ToLower(seg)] {
+			return ""
+		}
+	}
 	return s
+}
+
+// fileSegments are id segments that mark a file name rather than a bundle id.
+var fileSegments = map[string]bool{
+	"log": true, "old": true, "txt": true, "json": true, "db": true, "sqlite": true, "sqlite3": true,
+	"csv": true, "xml": true, "html": true, "js": true, "bak": true, "tmp": true, "lock": true, "pid": true,
+}
+
+// appleAliases are Apple-owned ids outside com.apple.* (Shortcuts kept the
+// Workflow id for its containers).
+var appleAliases = []string{"is.workflow."}
+
+// sharedSDKPrefixes are analytics and attribution SDKs that write under their
+// own ids inside ~/Library on behalf of whichever app embeds them; the owner
+// cannot be inferred, so they are never candidates.
+var sharedSDKPrefixes = []string{
+	"io.branch.", "com.crashlytics.", "com.segment.", "com.google.firebase", "com.google.gtm", "com.google.measurement",
+	"com.facebook.sdk", "com.microsoft.appcenter", "com.bugsnag.", "io.sentry.", "com.amplitude.", "com.mixpanel.",
+	"com.onesignal.", "com.adjust.", "com.appsflyer.", "com.braze.",
 }
 
 // FindOrphans lists the entries under ~/Library whose name parses as a bundle
@@ -196,6 +231,19 @@ func (s *orphanScan) own(id string) {
 // folders), or its last segment names a running process.
 func (s *orphanScan) owned(id string) bool {
 	c := strings.ToLower(id)
+	if strings.Contains("."+c, ".com.apple.") {
+		return true
+	}
+	for _, pre := range appleAliases {
+		if strings.HasPrefix(c, pre) {
+			return true
+		}
+	}
+	for _, pre := range sharedSDKPrefixes {
+		if strings.HasPrefix(c, pre) {
+			return true
+		}
+	}
 	for o := range s.ids {
 		if c == o || strings.HasPrefix(c, o+".") || strings.HasPrefix(o, c+".") {
 			return true
@@ -408,6 +456,36 @@ func (s *orphanScan) groupForPkg(pkg string) *Orphan {
 	return s.group(owner)
 }
 
+// genericSegments never identify a vendor.
+var genericSegments = map[string]bool{
+	"com": true, "org": true, "net": true, "app": true, "apps": true, "mac": true, "macos": true, "osx": true,
+	"shared": true, "helper": true, "agent": true, "desktop": true, "client": true, "group": true, "groups": true,
+	"data": true, "cache": true, "storage": true, "network": true, "launcher": true, "support": true,
+	"service": true, "services": true, "plugin": true, "extension": true, "installer": true, "updater": true,
+	"beta": true, "stable": true, "nightly": true, "widgets": true, "main": true, "core": true, "tool": true,
+}
+
+// vendorOf returns the name of an installed app whose bundle id shares a
+// distinctive segment (4+ chars, not generic) with owner, or "".
+func (s *orphanScan) vendorOf(owner string) string {
+	for _, seg := range strings.Split(strings.ToLower(owner), ".") {
+		if len(seg) < 4 || genericSegments[seg] {
+			continue
+		}
+		for _, a := range s.opts.Installed {
+			if a.BundleID == "" || strings.HasPrefix(strings.ToLower(a.BundleID), "com.apple.") {
+				continue
+			}
+			for _, as := range strings.Split(strings.ToLower(a.BundleID), ".") {
+				if as == seg {
+					return a.Name
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // result finalises Recent, Reasons and ordering.
 func (s *orphanScan) result() []Orphan {
 	reasons := []string{reasonNotInstalled}
@@ -426,6 +504,10 @@ func (s *orphanScan) result() []Orphan {
 		g := *s.groups[key]
 		g.Recent = !g.LastUsed.IsZero() && now.Sub(g.LastUsed) < s.opts.RecentWindow
 		g.Reasons = append([]string(nil), reasons...)
+		if v := s.vendorOf(g.Owner); v != "" {
+			g.VendorInstalled = v
+			g.Reasons = append(g.Reasons, "vendor still installed: "+v)
+		}
 		sort.SliceStable(g.Items, func(i, j int) bool {
 			if g.Items[i].Kind != g.Items[j].Kind {
 				return g.Items[i].Kind < g.Items[j].Kind

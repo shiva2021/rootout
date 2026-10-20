@@ -15,10 +15,10 @@ import (
 )
 
 const (
-	modelsHelp        = "↑/↓ move · enter choose · esc quit"
-	modelsPullHelp    = "esc cancel download"
-	modelsInstallHelp = "↑/↓ move · enter run · esc quit"
-	modelsStartHelp   = "enter start Ollama · esc quit"
+	modelsHelp        = "↑/↓ move · enter choose · esc quit · ? help"
+	modelsPullHelp    = "esc cancel download · ? help"
+	modelsInstallHelp = "↑/↓ move · enter run · esc quit · ? help"
+	modelsStartHelp   = "enter start Ollama · esc quit · ? help"
 	modelsChromeRows  = 4 // title row, blank row, flash row, help row
 	pullBarWidth      = 40
 )
@@ -157,6 +157,10 @@ type ModelPicker struct {
 	pullWait   tea.Cmd // reads the next pull message
 	chosen     string
 	ok         bool
+
+	help     bool // ? overlay open
+	embedded bool // hosted by another screen: finish instead of quitting
+	finished bool // embedded mode: the picker would have quit
 }
 
 // NewModelPicker builds the picker in the detecting state; Init starts
@@ -178,6 +182,24 @@ func NewModelPicker(ctx context.Context, d ModelDeps, current string) *ModelPick
 // Chosen returns the model name once the program has quit; ok is false
 // when the user cancelled.
 func (m *ModelPicker) Chosen() (string, bool) { return m.chosen, m.ok }
+
+// setEmbedded makes the picker a sub-model: where it would quit the program
+// it sets the done state instead, and the host reads it with done().
+func (m *ModelPicker) setEmbedded(on bool) { m.embedded = on }
+
+// done reports whether an embedded picker has finished and what it chose.
+func (m *ModelPicker) done() (model string, chosen, finished bool) {
+	return m.chosen, m.ok, m.finished
+}
+
+// quit ends the picker: tea.Quit on its own, the done flag when embedded.
+func (m *ModelPicker) quit() tea.Cmd {
+	if m.embedded {
+		m.finished = true
+		return nil
+	}
+	return tea.Quit
+}
 
 // Init starts detection with a spinner.
 func (m *ModelPicker) Init() tea.Cmd {
@@ -263,7 +285,7 @@ func (m *ModelPicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.chosen, m.ok = m.pullName, true
-		return m, tea.Quit
+		return m, m.quit()
 
 	case tea.KeyPressMsg:
 		return m.key(msg)
@@ -276,7 +298,15 @@ func (m *ModelPicker) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.flash = ""
 	if k == "ctrl+c" {
 		m.ok = false
-		return m, tea.Quit
+		return m, m.quit()
+	}
+	if m.help {
+		m.help = false
+		return m, nil
+	}
+	if k == "?" {
+		m.help = true
+		return m, nil
 	}
 	if m.ask != "" {
 		switch k {
@@ -300,7 +330,7 @@ func (m *ModelPicker) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch k {
 	case "esc", "q":
 		m.ok = false
-		return m, tea.Quit
+		return m, m.quit()
 	case "up", "ctrl+p":
 		m.move(-1)
 	case "down", "ctrl+n":
@@ -349,13 +379,13 @@ func (m *ModelPicker) choose() tea.Cmd {
 		m.onYes = m.install
 	case mrInstalled:
 		m.chosen, m.ok = m.installed[r.idx].Name, true
-		return tea.Quit
+		return m.quit()
 	case mrRecommended:
 		rec := m.recs[r.idx]
 		switch {
 		case rec.Installed:
 			m.chosen, m.ok = m.installedName(rec.Name), true
-			return tea.Quit
+			return m.quit()
 		case rec.Fit == ollama.FitTooLarge:
 			m.flash = fmt.Sprintf("%s needs about %s of memory; this Mac has %d GB",
 				rec.Name, output.Bytes(rec.DownloadBytes*12/10), m.deps.Hardware.RAMBytes>>30)
@@ -554,6 +584,9 @@ func (m *ModelPicker) listRows() int {
 }
 
 func (m *ModelPicker) render() string {
+	if m.help {
+		return renderHelp(m.width, m.height, "Keys", m.helpKeys())
+	}
 	s := m.styles
 	var body []string
 	help := modelsHelp
@@ -615,6 +648,29 @@ func (m *ModelPicker) render() string {
 	b.WriteString("\n")
 	b.WriteString(s.dim.Render(help))
 	return b.String()
+}
+
+// helpKeys lists the keys for the ? overlay; y/n appears where a question
+// can be asked (install routes, downloads, starting Ollama).
+func (m *ModelPicker) helpKeys() []keyHelp {
+	keys := []keyHelp{{"↑/↓", "move"}}
+	switch m.state {
+	case stateNotInstalled:
+		keys = append(keys, keyHelp{"enter", "run the selected install route"})
+	case stateNotRunning:
+		keys = append(keys, keyHelp{"enter", "start Ollama"})
+	case statePulling:
+		keys = append(keys, keyHelp{"esc", "cancel the download"})
+	default:
+		keys = append(keys, keyHelp{"enter", "choose the model (downloads it if needed)"})
+	}
+	if m.ask != "" || m.state == stateNotInstalled || m.state == stateNotRunning || m.state == stateReady {
+		keys = append(keys, keyHelp{"y / n", "answer a run or download question"})
+	}
+	if m.state != statePulling {
+		keys = append(keys, keyHelp{"esc", "quit without choosing"})
+	}
+	return append(keys, keyHelp{"?", "this help"})
 }
 
 // renderRows draws up to n rows of the list starting at top.

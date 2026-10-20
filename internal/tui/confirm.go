@@ -14,12 +14,27 @@ import (
 )
 
 const (
-	confirmHelp       = "space toggle · a all · n none · enter confirm · esc cancel"
+	confirmHelp       = "space toggle · a all · n none · enter confirm · esc cancel · ? help"
 	nothingFlash      = "nothing selected"
+	tickHint          = "space to tick what to remove"
+	recentTag         = "[recent]"
+	recentNote        = "recently used"
 	confirmChromeRows = 5 // header row, blank row, flash row, totals row, help row
 	rowIndent         = "  "
 	checkboxWidth     = 4 // "[x] "
 )
+
+// confirmKeys is the ? overlay of the review screen.
+var confirmKeys = []keyHelp{
+	{"space", "tick / untick the row"},
+	{"a", "tick all"},
+	{"n", "untick all"},
+	{"↑/↓", "move"},
+	{"pgup/pgdn", "page"},
+	{"enter", "continue (asks you to type delete)"},
+	{"esc", "cancel"},
+	{"?", "this help"},
+}
 
 // Confirmer implements plan.Confirmer with a full-screen review of the plan.
 // It edits p.Items[i].Selected and p.BrewZap in place and never runs anything.
@@ -41,7 +56,7 @@ type rowKind int
 
 const (
 	rowBrew    rowKind = iota // "[x] brew uninstall --zap <cask> first"
-	rowHeading                // Kind.String() group title
+	rowHeading                // group title: Item.Group, else Kind.String()
 	rowItem                   // one plan item
 	rowNote                   // Note under a login item
 )
@@ -57,8 +72,9 @@ type row struct {
 // confirmStyles extends the shared styles with the ones only this screen uses.
 type confirmStyles struct {
 	styles
-	heading   lipgloss.Style // kind group title
+	heading   lipgloss.Style // group title
 	admin     lipgloss.Style // "[admin]" tag
+	recent    lipgloss.Style // "[recent]" tag
 	tag       lipgloss.Style // "[name]" / "[manual]" tags
 	trash     lipgloss.Style // "→ Trash" badge
 	permanent lipgloss.Style // "PERMANENT" badge
@@ -70,6 +86,7 @@ func defaultConfirmStyles() confirmStyles {
 		styles:    defaultStyles(),
 		heading:   lipgloss.NewStyle().Bold(true),
 		admin:     lipgloss.NewStyle().Foreground(lipgloss.Yellow),
+		recent:    lipgloss.NewStyle().Foreground(lipgloss.Yellow),
 		tag:       lipgloss.NewStyle().Foreground(lipgloss.Magenta),
 		trash:     lipgloss.NewStyle().Foreground(lipgloss.Black).Background(lipgloss.Cyan).Bold(true).Padding(0, 1),
 		permanent: lipgloss.NewStyle().Foreground(lipgloss.White).Background(lipgloss.Red).Bold(true).Padding(0, 1),
@@ -80,13 +97,17 @@ func defaultConfirmStyles() confirmStyles {
 // Confirm is the plan review model. It implements tea.Model and is exported
 // so tests can drive it without a terminal.
 type Confirm struct {
-	plan   *plan.Plan
-	rows   []row
-	styles confirmStyles
+	plan    *plan.Plan
+	rows    []row
+	byGroup bool // rows are grouped by Item.Group rather than Kind
+	styles  confirmStyles
 
 	width, height int
 	cursor, top   int // cursor indexes rows and is always a toggleable row (-1 when none)
 	flash         string
+	showHelp      bool
+	typing        bool // the typed-word box is open
+	typed         typedConfirm
 	accepted      bool
 }
 
@@ -94,13 +115,14 @@ type Confirm struct {
 // toggleable row.
 func NewConfirm(p *plan.Plan) *Confirm {
 	c := &Confirm{
-		plan:   p,
-		rows:   buildRows(p),
-		styles: defaultConfirmStyles(),
-		width:  defaultWidth,
-		height: defaultHeight,
-		cursor: -1,
+		plan:    p,
+		byGroup: len(p.Groups()) > 0,
+		styles:  defaultConfirmStyles(),
+		width:   defaultWidth,
+		height:  defaultHeight,
+		cursor:  -1,
 	}
+	c.rows = buildRows(p, c.byGroup)
 	for i := range c.rows {
 		if c.toggleable(i) {
 			c.cursor = i
@@ -111,21 +133,26 @@ func NewConfirm(p *plan.Plan) *Confirm {
 	return c
 }
 
-// Accepted reports whether the user confirmed the plan.
+// Accepted reports whether the user confirmed the plan by typing the word.
 func (c *Confirm) Accepted() bool { return c.accepted }
 
-// buildRows lays the plan out as rows: the brew toggle, then each kind's
-// heading followed by its items, with a note line under login items.
-func buildRows(p *plan.Plan) []row {
+// buildRows lays the plan out as rows: the brew toggle, then each group's
+// heading followed by its items, with a note line under login items. Groups
+// are Item.Group when byGroup, else the Kind.
+func buildRows(p *plan.Plan, byGroup bool) []row {
 	var rows []row
 	if p.App.Cask != "" {
 		rows = append(rows, row{kind: rowBrew})
 	}
-	var cur leftover.Kind = -1
+	cur := ""
 	for i, it := range p.Items {
-		if it.Kind != cur {
-			cur = it.Kind
-			rows = append(rows, row{kind: rowHeading, text: cur.String()})
+		heading := it.Kind.String()
+		if byGroup {
+			heading = it.Group
+		}
+		if i == 0 || heading != cur {
+			cur = heading
+			rows = append(rows, row{kind: rowHeading, text: cur})
 		}
 		rows = append(rows, row{kind: rowItem, item: i})
 		if it.Kind == leftover.LoginItem && it.Note != "" {
@@ -135,10 +162,17 @@ func buildRows(p *plan.Plan) []row {
 	return rows
 }
 
+// isRecent reports whether an item was flagged as recently used (orphans
+// carry this in their Note).
+func isRecent(it plan.Item) bool {
+	return strings.Contains(strings.ToLower(it.Note), recentNote)
+}
+
 // Init implements tea.Model.
 func (c *Confirm) Init() tea.Cmd { return nil }
 
-// Update handles window resizes and keys.
+// Update handles window resizes and keys. While the typed box is open every
+// message goes to it.
 func (c *Confirm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -147,11 +181,28 @@ func (c *Confirm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return c, nil
 
 	case tea.KeyPressMsg:
-		c.flash = ""
-		switch msg.String() {
-		case "ctrl+c", "esc", "q":
+		if c.showHelp {
+			c.showHelp = false
+			return c, nil
+		}
+		if msg.String() == "ctrl+c" {
 			c.accepted = false
 			return c, tea.Quit
+		}
+		if c.typing {
+			return c.updateTyped(msg)
+		}
+		c.flash = ""
+		k := msg.String()
+		if msg.Text == "?" {
+			k = "?"
+		}
+		switch k {
+		case "esc", "q":
+			c.accepted = false
+			return c, tea.Quit
+		case "?":
+			c.showHelp = true
 		case "up", "ctrl+p":
 			c.move(-1)
 		case "down", "ctrl+n":
@@ -169,8 +220,28 @@ func (c *Confirm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			return c.confirm()
 		}
+		return c, nil
+	}
+	if c.typing {
+		return c.updateTyped(msg)
 	}
 	return c, nil
+}
+
+// updateTyped forwards msg to the typed box and acts on its answer.
+func (c *Confirm) updateTyped(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	var ok, cancel bool
+	c.typed, cmd, ok, cancel = c.typed.Update(msg)
+	switch {
+	case ok:
+		c.accepted = true
+		return c, tea.Quit
+	case cancel:
+		c.typing = false
+		return c, nil
+	}
+	return c, cmd
 }
 
 // View renders the whole screen in the alternate buffer.
@@ -180,14 +251,49 @@ func (c *Confirm) View() tea.View {
 	return v
 }
 
-// confirm accepts the plan unless nothing would happen.
+// confirm opens the typed-word box unless nothing would happen.
 func (c *Confirm) confirm() (tea.Model, tea.Cmd) {
 	if c.selectedItems() == 0 && !c.plan.BrewZap {
 		c.flash = nothingFlash
 		return c, nil
 	}
-	c.accepted = true
-	return c, tea.Quit
+	var cmd tea.Cmd
+	c.typed, cmd = newTypedConfirm(plan.ConfirmWord, c.typedPrompt(), c.plan.Mode == plan.Permanent)
+	c.typing = true
+	return c, cmd
+}
+
+// typedPrompt is the one-line question above the typed box.
+func (c *Confirm) typedPrompt() string {
+	n, _, root := c.plan.Totals()
+	var what string
+	switch c.plan.Mode {
+	case plan.Permanent:
+		what = "permanently delete " + paths(n)
+	case plan.DryRun:
+		what = "review " + paths(n) + " (dry run; nothing is deleted)"
+	default:
+		what = "move " + paths(n) + " to the Trash"
+	}
+	if c.plan.BrewZap && c.plan.App.Cask != "" {
+		if n == 0 {
+			what = "run brew uninstall --zap " + c.plan.App.Cask
+		} else {
+			what += " and run brew uninstall --zap " + c.plan.App.Cask
+		}
+	}
+	s := "Type " + plan.ConfirmWord + " to " + what
+	if root > 0 {
+		s += fmt.Sprintf("; %d need admin rights", root)
+	}
+	return s
+}
+
+func paths(n int) string {
+	if n == 1 {
+		return "1 path"
+	}
+	return fmt.Sprintf("%d paths", n)
 }
 
 // selectedItems counts selected items the user could have toggled.
@@ -293,6 +399,19 @@ func (c *Confirm) listRows() int {
 }
 
 func (c *Confirm) render() string {
+	if c.showHelp {
+		return renderHelp(c.width, c.height, "Keys", confirmKeys)
+	}
+	screen := c.renderList()
+	if c.typing {
+		return overlay(screen, c.typed.View(c.width), c.width, c.height)
+	}
+	return screen
+}
+
+// renderList draws the header, the scrolling rows, the flash or hint line,
+// the totals and the key help.
+func (c *Confirm) renderList() string {
 	var b strings.Builder
 	b.WriteString(c.renderHeader())
 	b.WriteString("\n\n")
@@ -308,8 +427,11 @@ func (c *Confirm) render() string {
 		b.WriteString("\n")
 	}
 
-	if c.flash != "" {
+	switch {
+	case c.flash != "":
 		b.WriteString(c.styles.flash.Render(c.flash))
+	case c.plan.StartUnselected && c.selectedItems() == 0 && !c.plan.BrewZap:
+		b.WriteString(c.styles.dim.Render(tickHint))
 	}
 	b.WriteString("\n")
 	b.WriteString(c.renderTotals())
@@ -318,10 +440,15 @@ func (c *Confirm) render() string {
 	return b.String()
 }
 
-// renderHeader draws "Remove <Name> (<bundle id>)" and the mode badge.
+// renderHeader draws the title (the plan's Label, else "Remove <Name>
+// (<bundle id>)") and the mode badge.
 func (c *Confirm) renderHeader() string {
 	a := c.plan.App
-	title := c.styles.title.Render(fmt.Sprintf("Remove %s (%s)", a.Name, orDash(a.BundleID)))
+	text := c.plan.Label
+	if text == "" {
+		text = fmt.Sprintf("Remove %s (%s)", a.Name, orDash(a.BundleID))
+	}
+	title := c.styles.title.Render(text)
 	var badge string
 	switch c.plan.Mode {
 	case plan.Permanent:
@@ -367,10 +494,11 @@ func (c *Confirm) renderRow(i, width int) string {
 
 // renderItem draws one plan item: checkbox, right-aligned size, path and tags.
 func (c *Confirm) renderItem(it plan.Item, base lipgloss.Style, selected bool, width int) string {
-	dim, admin, tag := c.styles.dim, c.styles.admin, c.styles.tag
+	dim, admin, recent, tag := c.styles.dim, c.styles.admin, c.styles.recent, c.styles.tag
 	if selected {
 		dim = base.Faint(true)
 		admin = base.Foreground(lipgloss.Yellow)
+		recent = admin
 		tag = base.Foreground(lipgloss.Magenta)
 	}
 	login := it.Kind == leftover.LoginItem
@@ -386,14 +514,21 @@ func (c *Confirm) renderItem(it plan.Item, base lipgloss.Style, selected bool, w
 
 	var tags strings.Builder
 	tagsW := 0
+	addTag := func(t string, st lipgloss.Style) {
+		tags.WriteString(base.Render(" ") + st.Render(t))
+		tagsW += 1 + lipgloss.Width(t)
+	}
+	if c.byGroup {
+		addTag("["+it.Kind.String()+"]", dim)
+	}
 	if it.NeedsRoot {
-		tags.WriteString(base.Render(" ") + admin.Render("[admin]"))
-		tagsW += 1 + len("[admin]")
+		addTag("[admin]", admin)
+	}
+	if isRecent(it) {
+		addTag(recentTag, recent)
 	}
 	if it.MatchedBy == leftover.ByName || it.MatchedBy == plan.ByManual {
-		t := "[" + it.MatchedBy + "]"
-		tags.WriteString(base.Render(" ") + tag.Render(t))
-		tagsW += 1 + len(t)
+		addTag("["+it.MatchedBy+"]", tag)
 	}
 
 	prefix := rowIndent + box + fmt.Sprintf("%*s ", sizeWidth, size)

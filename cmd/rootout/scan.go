@@ -28,6 +28,9 @@ type scanFlags struct {
 	provider  string
 	model     string
 	noTUI     bool
+	pickModel bool
+	uninstall []string
+	yes       bool
 }
 
 // scanItem is one JSON row: the heuristic report plus the model's opinion.
@@ -80,6 +83,9 @@ short snippets, never the whole extension.
 	fl.StringVar(&f.provider, "provider", "", "AI provider for this run: anthropic, openai or ollama (implies --llm)")
 	fl.StringVar(&f.model, "model", "", "model id for this run (implies --llm)")
 	fl.BoolVar(&f.noTUI, "no-tui", false, "print results instead of opening the review screen")
+	fl.BoolVar(&f.pickModel, "pick-model", false, "choose a local Ollama model before scanning (terminal only)")
+	fl.StringArrayVar(&f.uninstall, "uninstall", nil, "extension id to uninstall without the review screen (repeatable; asks for the typed word unless --yes)")
+	fl.BoolVarP(&f.yes, "yes", "y", false, "do not ask for confirmation (only with --uninstall)")
 	return cmd
 }
 
@@ -131,33 +137,50 @@ func runScan(ctx context.Context, g *globalFlags, f scanFlags) error {
 	}
 
 	interactive := !g.json && !f.noTUI && isTerminal(os.Stdin) && isTerminal(os.Stdout)
-	var assess func(context.Context, heur.Report) (llm.Assessment, error)
-	if f.llm || f.provider != "" || f.model != "" || interactive {
+	if len(f.uninstall) > 0 {
+		return uninstallByID(ctx, env, exts, f)
+	}
+	if f.yes {
+		return &exitErr{code: exitBadInput, msg: "--yes only applies with --uninstall <id>"}
+	}
+	wantsAI := f.llm || f.provider != "" || f.model != "" || f.pickModel
+	var assessor tui.Assessor
+	if wantsAI || interactive {
 		c, _, err := loadConfig()
 		if err != nil {
 			return err
 		}
-		// In the review screen the model is asked on demand; only build it
-		// eagerly when --llm was requested or a provider is configured.
-		if f.llm || f.provider != "" || f.model != "" || c.LLM.Provider != "" {
-			p, err := buildProvider(ctx, c, f.provider, f.model, interactive)
+		if f.pickModel {
+			if !interactive {
+				return &exitErr{code: exitBadInput, msg: "--pick-model needs a terminal; use `rootout config models` and `--model <name>` in scripts"}
+			}
+			m, err := pickAndSaveModel(ctx)
 			if err != nil {
 				return err
 			}
-			assess = assessFunc(p)
+			f.provider, f.model = "ollama", m
+			c.LLM.Provider, c.LLM.Ollama.Model = "ollama", m
+		}
+		// In the review screen the model is asked on demand; only build it
+		// eagerly when --llm was requested or a provider is configured.
+		if wantsAI || c.LLM.Provider != "" || interactive {
+			assessor, err = buildAssessor(ctx, c, f.provider, f.model, interactive)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
 	if interactive {
-		return reviewAndUninstall(ctx, env, shown, assess)
+		return reviewAndUninstall(ctx, env, shown, assessor)
 	}
 
 	items := make([]scanItem, len(shown))
 	for i, r := range shown {
 		items[i].Report = r
-		if assess != nil && (f.llm || f.provider != "" || f.model != "") {
+		if assessor.Assess != nil && wantsAI {
 			fmt.Fprintf(os.Stderr, "rootout: asking the model about %s...\n", r.Ext.ID)
-			a, err := assess(ctx, r)
+			a, err := assessor.Assess(ctx, r)
 			if err != nil {
 				items[i].AssessErr = err.Error()
 			} else {
@@ -169,20 +192,58 @@ func runScan(ctx context.Context, g *globalFlags, f scanFlags) error {
 }
 
 // reviewAndUninstall opens the results screen and uninstalls what the user ticked.
-func reviewAndUninstall(ctx context.Context, env fsx.Env, shown []heur.Report, assess func(context.Context, heur.Report) (llm.Assessment, error)) error {
-	res, ok, err := tui.ReviewScan(ctx, shown, assess)
+func reviewAndUninstall(ctx context.Context, env fsx.Env, shown []heur.Report, a tui.Assessor) error {
+	res, ok, err := tui.ReviewScan(ctx, shown, a)
 	if err != nil || !ok || len(res.Uninstall) == 0 {
 		return err
 	}
+	var targets []ext.Extension
+	for _, r := range res.Uninstall {
+		targets = append(targets, r.Ext)
+	}
+	return uninstallExtensions(ctx, env, targets)
+}
+
+// uninstallByID is the scripted path: --uninstall <id>... with the typed
+// word on the terminal, or --yes.
+func uninstallByID(ctx context.Context, env fsx.Env, exts []ext.Extension, f scanFlags) error {
+	var targets []ext.Extension
+	for _, id := range f.uninstall {
+		found := false
+		for _, e := range exts {
+			if strings.EqualFold(e.ID, id) {
+				targets = append(targets, e)
+				found = true
+			}
+		}
+		if !found {
+			return &exitErr{code: exitBadInput, msg: fmt.Sprintf("no installed extension %q", id)}
+		}
+	}
+	if f.yes {
+		yesBanner(false)
+	} else {
+		var names []string
+		for _, e := range targets {
+			names = append(names, e.ID+" ("+e.Editor+")")
+		}
+		if !confirmTyped(os.Stdin, os.Stderr, "About to uninstall: "+strings.Join(names, ", ")) {
+			return &exitErr{code: exitDeclined, msg: "nothing uninstalled"}
+		}
+	}
+	return uninstallExtensions(ctx, env, targets)
+}
+
+func uninstallExtensions(ctx context.Context, env fsx.Env, targets []ext.Extension) error {
 	editors := ext.Editors(env, ext.Options{})
 	failed := 0
-	for _, r := range res.Uninstall {
-		if err := ext.Uninstall(ctx, env, r.Ext, editors, ext.Options{}); err != nil {
+	for _, r := range targets {
+		if err := ext.Uninstall(ctx, env, r, editors, ext.Options{}); err != nil {
 			failed++
-			fmt.Fprintf(os.Stderr, "rootout: %s: %v\n", r.Ext.ID, err)
+			fmt.Fprintf(os.Stderr, "rootout: %s: %v\n", r.ID, err)
 			continue
 		}
-		fmt.Printf("uninstalled %s (%s)\n", r.Ext.ID, r.Ext.Editor)
+		fmt.Printf("uninstalled %s (%s)\n", r.ID, r.Editor)
 	}
 	if failed > 0 {
 		return &exitErr{code: exitError, msg: fmt.Sprintf("%d extension(s) could not be uninstalled", failed)}

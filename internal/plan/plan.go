@@ -15,6 +15,7 @@ import (
 	"github.com/shiva2021/rootout/internal/app"
 	"github.com/shiva2021/rootout/internal/fsx"
 	"github.com/shiva2021/rootout/internal/leftover"
+	"github.com/shiva2021/rootout/internal/progress"
 	"github.com/shiva2021/rootout/internal/run"
 	"github.com/shiva2021/rootout/internal/safety"
 )
@@ -66,8 +67,9 @@ type Options struct {
 	Mode         Mode
 	Dotfiles     bool
 	CrashReports bool
-	Also         []string   // extra paths; each must pass safety.Validate
-	Run          run.Runner // for pkgutil / sfltool during discovery; nil skips them
+	Also         []string          // extra paths; each must pass safety.Validate
+	Run          run.Runner        // for pkgutil / sfltool during discovery; nil skips them
+	Progress     progress.Reporter // nil = silent
 }
 
 var (
@@ -87,6 +89,7 @@ func Build(ctx context.Context, env fsx.Env, a app.App, opts Options) (*Plan, er
 		Dotfiles:     opts.Dotfiles,
 		CrashReports: opts.CrashReports,
 		Run:          opts.Run,
+		Progress:     opts.Progress,
 	})
 	if err != nil {
 		return nil, err

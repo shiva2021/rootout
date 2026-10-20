@@ -69,7 +69,8 @@ func runRemove(ctx context.Context, g *globalFlags, f removeFlags, arg string) e
 	if err != nil {
 		return err
 	}
-	apps, err := app.Discover(env)
+	rep := stderrProgress(g)
+	apps, err := app.DiscoverWith(env, app.Options{Progress: rep})
 	if err != nil {
 		return err
 	}
@@ -99,6 +100,7 @@ func runRemove(ctx context.Context, g *globalFlags, f removeFlags, arg string) e
 		CrashReports: !f.noCrash,
 		Also:         f.also,
 		Run:          run.Default,
+		Progress:     rep,
 	})
 	if err != nil {
 		return err
@@ -116,8 +118,8 @@ func runRemove(ctx context.Context, g *globalFlags, f removeFlags, arg string) e
 		return nil
 	}
 
-	if f.yes && f.permanent {
-		fmt.Fprintln(os.Stderr, "\033[31mWARNING: --yes --permanent deletes without confirmation and without the Trash.\033[0m")
+	if f.yes {
+		yesBanner(f.permanent)
 	}
 	ok, err := chooseConfirmer(g, f).Confirm(ctx, p)
 	if err != nil {
@@ -130,6 +132,7 @@ func runRemove(ctx context.Context, g *globalFlags, f removeFlags, arg string) e
 	res, err := plan.Execute(ctx, env, p, plan.Deps{
 		Priv:     priv.Options{UseSudo: f.sudo, Dotfiles: f.dotfiles},
 		Dotfiles: f.dotfiles,
+		Progress: rep,
 	})
 	if res != nil {
 		if g.json {

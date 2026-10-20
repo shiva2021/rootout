@@ -336,16 +336,11 @@ func hasBrew() bool {
 	return err == nil
 }
 
-// pickAndSaveModel runs the picker, then makes the chosen model the default
-// and Ollama the provider.
-func pickAndSaveModel(ctx context.Context) (string, error) {
-	c, path, err := loadConfig()
-	if err != nil {
-		return "", err
-	}
+// modelDeps builds what the model picker needs on this Mac.
+func modelDeps(ctx context.Context, c config.Config) (tui.ModelDeps, error) {
 	hw, err := ollama.Probe(ctx, run.Default)
 	if err != nil {
-		return "", err
+		return tui.ModelDeps{}, err
 	}
 	brew := hasBrew()
 	deps := tui.ModelDeps{Client: ollamaClient(c), Hardware: hw, HasBrew: brew}
@@ -360,6 +355,35 @@ func pickAndSaveModel(ctx context.Context) (string, error) {
 			return nil
 		}
 	}
+	return deps, nil
+}
+
+// saveOllamaModel makes model the default and Ollama the provider.
+func saveOllamaModel(model string) error {
+	c, path, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	c.LLM.Provider = "ollama"
+	c.LLM.Ollama.Model = model
+	if err := config.Save(path, c); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "using Ollama model %s for assessments\n", model)
+	return nil
+}
+
+// pickAndSaveModel runs the picker, then makes the chosen model the default
+// and Ollama the provider.
+func pickAndSaveModel(ctx context.Context) (string, error) {
+	c, _, err := loadConfig()
+	if err != nil {
+		return "", err
+	}
+	deps, err := modelDeps(ctx, c)
+	if err != nil {
+		return "", err
+	}
 	model, ok, err := tui.PickModel(ctx, deps, c.LLM.Ollama.Model)
 	if err != nil {
 		return "", err
@@ -367,13 +391,7 @@ func pickAndSaveModel(ctx context.Context) (string, error) {
 	if !ok {
 		return "", &exitErr{code: exitDeclined, msg: "no model chosen"}
 	}
-	c.LLM.Provider = "ollama"
-	c.LLM.Ollama.Model = model
-	if err := config.Save(path, c); err != nil {
-		return "", err
-	}
-	fmt.Fprintf(os.Stderr, "using Ollama model %s for assessments\n", model)
-	return model, nil
+	return model, saveOllamaModel(model)
 }
 
 func configPull(ctx context.Context, model string) error {

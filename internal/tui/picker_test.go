@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/shiva2021/rootout/internal/app"
+	"github.com/shiva2021/rootout/internal/progress"
 )
 
 func fixture() []app.App {
@@ -268,4 +270,199 @@ func assertQuit(t *testing.T, cmd tea.Cmd) {
 func isQuit(cmd tea.Cmd) bool {
 	_, ok := cmd().(tea.QuitMsg)
 	return ok
+}
+
+// --- loading, orphans row and help ---
+
+func newLoadingPicker(t *testing.T, opts PickOptions) *Picker {
+	t.Helper()
+	p := NewPickerLoading(func(progress.Reporter) ([]app.App, error) { return fixture(), nil }, opts)
+	p.loadID = 1 // what startLoad would assign; tests inject messages directly
+	p.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	return p
+}
+
+func TestLoadingStateRendersProgress(t *testing.T) {
+	p := newLoadingPicker(t, PickOptions{})
+	v := view(p)
+	if !strings.Contains(v, loadLabel) || !strings.Contains(v, "0/0") {
+		t.Fatalf("loading view missing label or count:\n%s", v)
+	}
+	p.Update(loadProgressMsg{id: 1, done: 3, total: 10, detail: "Slack.app"})
+	v = view(p)
+	if !strings.Contains(v, "3/10") || !strings.Contains(v, "Slack.app") {
+		t.Fatalf("progress not rendered:\n%s", v)
+	}
+	if _, cmd := p.Update(tea.KeyPressMsg{Code: tea.KeyEnter}); cmd != nil {
+		t.Error("enter while loading must do nothing")
+	}
+	// Stale or mismatched ids are ignored.
+	p.Update(loadProgressMsg{id: 7, done: 9, total: 10})
+	if p.loadDone != 3 {
+		t.Errorf("stale progress applied: done = %d", p.loadDone)
+	}
+}
+
+func TestLoadedMsgPopulatesList(t *testing.T) {
+	p := newLoadingPicker(t, PickOptions{})
+	p.Update(loadedMsg{id: 1, apps: fixture()})
+	if p.loading || len(p.Matches()) != 6 {
+		t.Fatalf("loading=%v matches=%d after loadedMsg", p.loading, len(p.Matches()))
+	}
+	v := view(p)
+	if strings.Contains(v, loadLabel) || !strings.Contains(v, "Safari") {
+		t.Fatalf("list not shown after load:\n%s", v)
+	}
+}
+
+func TestTypingDuringLoadIsApplied(t *testing.T) {
+	p := newLoadingPicker(t, PickOptions{})
+	typeText(p, "spo")
+	if len(p.Matches()) != 0 {
+		t.Fatalf("matches before load = %d, want 0", len(p.Matches()))
+	}
+	p.Update(loadedMsg{id: 1, apps: fixture()})
+	ms := p.Matches()
+	if len(ms) == 0 || ms[0].App.Name != "Spotify" {
+		t.Fatalf("query typed during load not applied: %v", names(ms))
+	}
+}
+
+func TestLoadErrorShowsAndEscQuits(t *testing.T) {
+	p := newLoadingPicker(t, PickOptions{OrphansRow: true})
+	p.Update(loadedMsg{id: 1, err: errors.New("mdfind exploded")})
+	v := view(p)
+	if !strings.Contains(v, "could not load apps: mdfind exploded") {
+		t.Fatalf("error missing:\n%s", v)
+	}
+	if strings.Contains(v, orphansTitle) {
+		t.Errorf("orphans row must stay hidden on error:\n%s", v)
+	}
+	if _, cmd := p.Update(tea.KeyPressMsg{Code: tea.KeyEnter}); cmd != nil {
+		t.Error("enter after a load error must do nothing")
+	}
+	assertQuit(t, press(p, tea.KeyPressMsg{Code: tea.KeyEscape}))
+}
+
+// TestLoadBridge drives the real goroutine + channel path from startLoad.
+func TestLoadBridge(t *testing.T) {
+	load := func(r progress.Reporter) ([]app.App, error) {
+		apps := fixture()
+		r.Start("Scanning applications", len(apps))
+		for _, a := range apps {
+			r.Step(a.Path)
+		}
+		r.Done()
+		return apps, nil
+	}
+	p := NewPickerLoading(load, PickOptions{})
+	cmd := p.startLoad()
+	var progressSeen int
+	for i := 0; cmd != nil && i < 100; i++ {
+		msg := cmd()
+		if _, ok := msg.(loadProgressMsg); ok {
+			progressSeen++
+		}
+		_, cmd = p.Update(msg)
+	}
+	if p.loading {
+		t.Fatal("picker still loading after the bridge drained")
+	}
+	if progressSeen != 7 { // Start + 6 Steps
+		t.Errorf("progress messages = %d, want 7", progressSeen)
+	}
+	if len(p.Matches()) != 6 {
+		t.Errorf("matches = %d, want 6", len(p.Matches()))
+	}
+}
+
+func TestOrphansRow(t *testing.T) {
+	p := NewPicker(nil)
+	p.opts.OrphansRow = true
+	p.setApps(fixture())
+	p.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	v := view(p)
+	if !strings.Contains(v, "› "+orphansTitle) || !strings.Contains(v, "find files left by apps") {
+		t.Fatalf("orphans row missing or not first:\n%s", v)
+	}
+	if !strings.Contains(v, "1 of 7") {
+		t.Errorf("footer should count the orphans row:\n%s", v)
+	}
+	if p.Cursor() != -1 {
+		t.Errorf("Cursor() on the orphans row = %d, want -1", p.Cursor())
+	}
+	press(p, tea.KeyPressMsg{Code: tea.KeyDown})
+	if p.Cursor() != 0 {
+		t.Errorf("Cursor() after down = %d, want 0 (Safari)", p.Cursor())
+	}
+
+	typeText(p, "sl")
+	if v := view(p); strings.Contains(v, orphansTitle) {
+		t.Fatalf("orphans row should hide while a query is typed:\n%s", v)
+	}
+	if _, ok := p.Picked(); ok {
+		t.Fatal("nothing picked yet")
+	}
+	press(p, tea.KeyPressMsg{Code: tea.KeyBackspace}, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if v := view(p); !strings.Contains(v, orphansTitle) {
+		t.Fatalf("orphans row should return when the query is cleared:\n%s", v)
+	}
+
+	cmd := press(p, tea.KeyPressMsg{Code: tea.KeyEnter})
+	assertQuit(t, cmd)
+	pick, ok := p.Picked()
+	if !ok || !pick.Orphans || pick.App.Name != "" {
+		t.Fatalf("Picked() = %+v, %v; want Orphans", pick, ok)
+	}
+	if _, ok := p.Selected(); ok {
+		t.Error("Selected() must report ok=false for the orphans row")
+	}
+}
+
+func TestOrphansRowAbsentByDefault(t *testing.T) {
+	p := newTestPicker(t)
+	if v := view(p); strings.Contains(v, orphansTitle) {
+		t.Fatalf("orphans row shown without the option:\n%s", v)
+	}
+	if !strings.Contains(view(p), "6 of 6") && !strings.Contains(view(p), "1 of 6") {
+		t.Errorf("footer count wrong:\n%s", view(p))
+	}
+}
+
+func TestPickerHelpOverlay(t *testing.T) {
+	p := newTestPicker(t)
+	if v := view(p); !strings.Contains(v, helpHint) {
+		t.Fatalf("footer should offer ? help when the query is empty:\n%s", v)
+	}
+	press(p, tea.KeyPressMsg{Code: '?', Text: "?"})
+	v := view(p)
+	for _, want := range []string{"Keys", "pgup/pgdn", "filter the list", helpClose} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("help overlay missing %q:\n%s", want, v)
+		}
+	}
+	if strings.Contains(v, searchPrompt) {
+		t.Errorf("overlay should cover the screen:\n%s", v)
+	}
+	// Any key closes the overlay and is consumed.
+	cmd := press(p, tea.KeyPressMsg{Code: 'x', Text: "x"})
+	if cmd != nil && isQuit(cmd) {
+		t.Fatal("closing key must not act")
+	}
+	if p.input.Value() != "" {
+		t.Errorf("closing key leaked into the search: %q", p.input.Value())
+	}
+	if v := view(p); strings.Contains(v, helpClose) {
+		t.Fatalf("overlay still open:\n%s", v)
+	}
+
+	// With a query, ? is a character and the footer drops the hint.
+	typeText(p, "s?")
+	if p.input.Value() != "s?" {
+		t.Errorf("search value = %q, want s?", p.input.Value())
+	}
+	if v := view(p); strings.Contains(v, helpClose) || strings.Contains(v, helpHint) {
+		t.Fatalf("? with a query must not open help or show the hint:\n%s", v)
+	}
 }

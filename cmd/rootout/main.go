@@ -16,6 +16,7 @@ import (
 	"github.com/shiva2021/rootout/internal/config"
 	"github.com/shiva2021/rootout/internal/fsx"
 	"github.com/shiva2021/rootout/internal/license"
+	"github.com/shiva2021/rootout/internal/progress"
 )
 
 // version is set by the linker (see Makefile).
@@ -102,6 +103,7 @@ Getting started
 		newScanCmd(&g),
 		newConfigCmd(&g),
 		newDoctorCmd(&g),
+		newOrphansCmd(&g),
 		newGuideCmd(&g),
 	)
 
@@ -144,6 +146,15 @@ func firstRunHint(cmd *cobra.Command, g *globalFlags) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		slog.Debug("first-run hint: create config dir", "dir", dir, "err", err)
 	}
+}
+
+// stderrProgress reports progress on stderr for human runs and stays silent
+// under --json (progress.Term is also a no-op when stderr is not a terminal).
+func stderrProgress(g *globalFlags) progress.Reporter {
+	if g.json {
+		return progress.Nop()
+	}
+	return progress.Term(os.Stderr)
 }
 
 // exitErr carries a specific exit code out of a command.

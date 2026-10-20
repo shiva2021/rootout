@@ -36,7 +36,7 @@ reference only and can never be removed. Listing only reads; nothing changes.
 			if err != nil {
 				return err
 			}
-			apps, err := app.Discover(env)
+			apps, err := app.DiscoverWith(env, app.Options{Progress: stderrProgress(g)})
 			if err != nil {
 				return err
 			}

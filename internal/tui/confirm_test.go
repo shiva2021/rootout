@@ -8,6 +8,7 @@ import (
 
 	"github.com/shiva2021/rootout/internal/app"
 	"github.com/shiva2021/rootout/internal/leftover"
+	"github.com/shiva2021/rootout/internal/output"
 	"github.com/shiva2021/rootout/internal/plan"
 )
 
@@ -183,16 +184,16 @@ func TestConfirmAllThenEnterAccepts(t *testing.T) {
 			t.Errorf("item %d not selected after a", i)
 		}
 	}
-	assertQuit(t, pressC(c, keyEnter))
+	assertQuit(t, acceptTyped(t, c))
 	if !c.Accepted() {
-		t.Error("Accepted() should be true after enter")
+		t.Error("Accepted() should be true after typing delete")
 	}
 }
 
 func TestConfirmBrewOnlyAccepts(t *testing.T) {
 	c, _ := newTestConfirm(t)
 	pressC(c, keyN)
-	assertQuit(t, pressC(c, keyEnter))
+	assertQuit(t, acceptTyped(t, c))
 	if !c.Accepted() {
 		t.Error("brew zap alone is enough to accept")
 	}
@@ -280,5 +281,212 @@ func TestConfirmSmallHeightScrolls(t *testing.T) {
 	}
 	if lines := strings.Count(v, "\n") + 1; lines != 8 {
 		t.Errorf("view has %d lines at height 8, want 8:\n%s", lines, v)
+	}
+}
+
+// typeC feeds s one key press at a time.
+func typeC(c *Confirm, s string) {
+	for _, r := range s {
+		pressC(c, tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+}
+
+// acceptTyped presses Enter, types the confirm word and presses Enter again,
+// returning the final command.
+func acceptTyped(t *testing.T, c *Confirm) tea.Cmd {
+	t.Helper()
+	pressC(c, keyEnter)
+	if !c.typing {
+		t.Fatal("enter should open the typed box")
+	}
+	typeC(c, plan.ConfirmWord)
+	return pressC(c, keyEnter)
+}
+
+func TestConfirmEnterOpensTypedBox(t *testing.T) {
+	c, _ := newTestConfirm(t)
+	cmd := pressC(c, keyEnter)
+	if cmd != nil && isQuit(cmd) {
+		t.Fatal("enter alone must not quit")
+	}
+	if c.Accepted() {
+		t.Fatal("enter alone must not accept")
+	}
+	if want := "Type delete to move 3 paths to the Trash and run brew uninstall --zap ghostty; 1 need admin rights"; c.typed.prompt != want {
+		t.Errorf("prompt = %q, want %q", c.typed.prompt, want)
+	}
+	v := viewC(c)
+	for _, want := range []string{
+		"Type delete to move 3 paths", typedHelp, "╭", "Remove Ghostty", // the list stays behind the box
+	} {
+		if !strings.Contains(v, want) {
+			t.Errorf("typed view missing %q:\n%s", want, v)
+		}
+	}
+	if lines := strings.Count(v, "\n") + 1; lines != 30 {
+		t.Errorf("view has %d lines, want 30", lines)
+	}
+}
+
+func TestConfirmYDoesNotAccept(t *testing.T) {
+	c, _ := newTestConfirm(t)
+	// On the list y is ignored...
+	if cmd := pressC(c, tea.KeyPressMsg{Code: 'y', Text: "y"}); cmd != nil && isQuit(cmd) {
+		t.Fatal("y on the list must not quit")
+	}
+	// ...and in the typed box it is the wrong word.
+	pressC(c, keyEnter)
+	typeC(c, "y")
+	if cmd := pressC(c, keyEnter); cmd != nil && isQuit(cmd) {
+		t.Fatal("y + enter must not quit")
+	}
+	if c.Accepted() {
+		t.Fatal("y must not accept")
+	}
+	if v := viewC(c); !strings.Contains(v, typedWrongErr) {
+		t.Errorf("wrong-word flash missing:\n%s", v)
+	}
+}
+
+func TestConfirmTypedDeleteAccepts(t *testing.T) {
+	c, _ := newTestConfirm(t)
+	assertQuit(t, acceptTyped(t, c))
+	if !c.Accepted() {
+		t.Error("Accepted() should be true after typing delete")
+	}
+}
+
+func TestConfirmEscFromTypedReturnsToList(t *testing.T) {
+	c, p := newTestConfirm(t)
+	pressC(c, keyEnter)
+	typeC(c, "del")
+	cmd := pressC(c, keyEsc)
+	if cmd != nil && isQuit(cmd) {
+		t.Fatal("esc in the typed box must not quit the screen")
+	}
+	if c.typing || c.Accepted() {
+		t.Fatalf("typing=%v accepted=%v after esc, want back on the list", c.typing, c.Accepted())
+	}
+	if v := viewC(c); strings.Contains(v, "Type delete") {
+		t.Errorf("typed box still visible:\n%s", v)
+	}
+	// Keys work on the list again; the selection was not touched.
+	pressC(c, keySpace)
+	if p.BrewZap {
+		t.Error("space after esc should toggle the brew row")
+	}
+	assertQuit(t, pressC(c, keyEsc))
+}
+
+func TestConfirmPermanentPromptIsDanger(t *testing.T) {
+	p := confirmFixture()
+	p.Mode = plan.Permanent
+	p.App.Cask = ""
+	c := NewConfirm(p)
+	c.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	pressC(c, keyEnter)
+	if !c.typed.danger {
+		t.Error("permanent plan should use the danger box")
+	}
+	if want := "Type delete to permanently delete 3 paths; 1 need admin rights"; c.typed.prompt != want {
+		t.Errorf("prompt = %q, want %q", c.typed.prompt, want)
+	}
+	if v := viewC(c); !strings.Contains(v, "permanently delete 3 paths") {
+		t.Errorf("permanent prompt missing:\n%s", v)
+	}
+}
+
+func groupedFixture() *plan.Plan {
+	items := []plan.Item{
+		{Leftover: leftover.Leftover{Path: "/Users/me/Library/Caches/com.old.app", Kind: leftover.Cache, MatchedBy: leftover.ByBundleID, SizeBytes: 1_500}, Group: "com.old.app"},
+		{Leftover: leftover.Leftover{Path: "/Users/me/Library/Preferences/com.old.app.plist", Kind: leftover.Preferences, MatchedBy: leftover.ByBundleID, SizeBytes: 500, Note: "recently used (changed 3 days ago)"}, Group: "com.old.app"},
+		{Leftover: leftover.Leftover{Path: "/Users/me/Library/Application Support/com.gone.tool", Kind: leftover.AppSupport, MatchedBy: leftover.ByBundleID, SizeBytes: 2_000}, Group: "com.gone.tool"},
+	}
+	return plan.New("Orphaned leftovers", items, plan.Trash, true)
+}
+
+func TestConfirmGroupedPlan(t *testing.T) {
+	c := NewConfirm(groupedFixture())
+	c.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	v := viewC(c)
+	for _, want := range []string{
+		"Orphaned leftovers", "→ Trash", "com.old.app", "com.gone.tool",
+		"[Cache]", "[Preferences]", "[Application Support]",
+		recentTag,
+		tickHint,
+		"0 paths · 0 B",
+	} {
+		if !strings.Contains(v, want) {
+			t.Errorf("grouped view missing %q:\n%s", want, v)
+		}
+	}
+	if strings.Contains(v, "Remove ") {
+		t.Errorf("label plan must not show a Remove title:\n%s", v)
+	}
+	var headings []string
+	for _, r := range c.rows {
+		if r.kind == rowHeading {
+			headings = append(headings, r.text)
+		}
+	}
+	if got := strings.Join(headings, ","); got != "com.old.app,com.gone.tool" {
+		t.Errorf("group headings = %q, want com.old.app,com.gone.tool", got)
+	}
+	if strings.Count(v, "[ ] ") != 3 || strings.Contains(v, "[x] ") {
+		t.Errorf("StartUnselected plan should begin with nothing ticked:\n%s", v)
+	}
+	if c.cursorItem() != 0 {
+		t.Fatalf("cursor should start on the first item, got %d", c.cursorItem())
+	}
+	// Enter with nothing ticked flashes; ticking one row removes the hint.
+	pressC(c, keyEnter)
+	if c.typing {
+		t.Fatal("enter with nothing ticked must not open the typed box")
+	}
+	pressC(c, keySpace)
+	v = viewC(c)
+	if strings.Contains(v, tickHint) || !strings.Contains(v, "1 paths · "+output.Bytes(1_500)) {
+		t.Errorf("after ticking, hint should go and totals update:\n%s", v)
+	}
+	pressC(c, keyEnter)
+	if v := viewC(c); !strings.Contains(v, "Type delete to move 1 path to the Trash") {
+		t.Errorf("typed prompt for one path:\n%s", v)
+	}
+}
+
+func TestConfirmRecentTagOnlyWhenNoted(t *testing.T) {
+	c, _ := newTestConfirm(t)
+	if v := viewC(c); strings.Contains(v, recentTag) {
+		t.Fatalf("app plan has no recent items:\n%s", v)
+	}
+	p := confirmFixture()
+	p.Items[itemByName].Note = "Recently used: changed yesterday"
+	if v := viewC(NewConfirm(p)); !strings.Contains(v, recentTag) {
+		t.Fatalf("recent tag missing:\n%s", v)
+	}
+}
+
+func TestConfirmHelpOverlay(t *testing.T) {
+	c, p := newTestConfirm(t)
+	if !strings.Contains(viewC(c), "? help") {
+		t.Fatal("footer should offer ? help")
+	}
+	pressC(c, tea.KeyPressMsg{Code: '?', Text: "?"})
+	v := viewC(c)
+	for _, want := range []string{"Keys", "space", "pgup/pgdn", "type delete", helpClose} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("help overlay missing %q:\n%s", want, v)
+		}
+	}
+	// Any key closes it without acting.
+	cmd := pressC(c, keySpace)
+	if cmd != nil && isQuit(cmd) {
+		t.Fatal("closing key must not act")
+	}
+	if !p.BrewZap {
+		t.Error("closing key must be consumed, not toggle the brew row")
+	}
+	if strings.Contains(viewC(c), helpClose) {
+		t.Fatal("overlay still open")
 	}
 }

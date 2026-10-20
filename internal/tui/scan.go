@@ -12,12 +12,15 @@ import (
 	"github.com/shiva2021/rootout/internal/heur"
 	"github.com/shiva2021/rootout/internal/llm"
 	"github.com/shiva2021/rootout/internal/output"
+	"github.com/shiva2021/rootout/internal/plan"
 )
 
 const (
-	scanHelp       = "↑/↓ move · space tick · tab focus · f hide low · enter uninstall · esc quit"
-	scanHelpLLM    = "↑/↓ move · space tick · l ask the LLM · tab focus · f hide low · enter uninstall · esc quit"
-	scanChromeRows = 4  // header row, blank row, flash row, help row
+	scanChromeRows = 5 // title row, AI row, blank row, flash row, help row
+	scanNoAI       = "AI: none"
+	scanNoAIPick   = "AI: none · m to pick a local model"
+	scanProvider   = "ollama" // Label prefix whose model the picker pre-selects
+	labelSep       = " · "
 	lowScore       = 30 // reports under this are hidden by `f`
 	highScore      = 70
 	nothingTicked  = "nothing ticked for uninstall"
@@ -32,10 +35,20 @@ type ScanResult struct {
 // AssessFunc runs the configured LLM on one report; nil hides the "assess" action.
 type AssessFunc func(ctx context.Context, r heur.Report) (llm.Assessment, error)
 
+// Assessor is the AI the scan screen can ask, plus how to swap it.
+type Assessor struct {
+	Label  string     // "ollama · qwen3.5:4b", "anthropic · claude-sonnet-5-5"; "" = none configured
+	Assess AssessFunc // nil = none
+	Models *ModelDeps // nil = local model picking unavailable
+	// OnModel is called after the user picks a local model and returns the
+	// replacement Assessor (Label, Assess and Models are taken from it).
+	OnModel func(ctx context.Context, model string) (Assessor, error)
+}
+
 // ReviewScan shows the scan results full screen and returns the extensions
 // the user ticked for removal. ok=false means the user cancelled.
-func ReviewScan(ctx context.Context, reports []heur.Report, assess AssessFunc) (ScanResult, bool, error) {
-	v := NewScanView(reports, assess)
+func ReviewScan(ctx context.Context, reports []heur.Report, a Assessor) (ScanResult, bool, error) {
+	v := NewScanView(reports, a)
 	v.ctx = ctx
 	if _, err := tea.NewProgram(v, tea.WithContext(ctx)).Run(); err != nil {
 		return ScanResult{}, false, fmt.Errorf("tui: review scan: %w", err)
@@ -49,6 +62,12 @@ type assessMsg struct {
 	report int
 	a      llm.Assessment
 	err    error
+}
+
+// assessorMsg carries the Assessor rebuilt after a model pick.
+type assessorMsg struct {
+	a   Assessor
+	err error
 }
 
 // scanStyles extends the shared styles with the ones only this screen uses.
@@ -94,11 +113,11 @@ func defaultScanStyles() scanStyles {
 // ScanView is the scan results model. It implements tea.Model and is
 // exported so tests can drive it without a terminal.
 type ScanView struct {
-	ctx     context.Context
-	reports []heur.Report
-	assess  AssessFunc
-	styles  scanStyles
-	spin    spinner.Model
+	ctx      context.Context
+	reports  []heur.Report
+	assessor Assessor
+	styles   scanStyles
+	spin     spinner.Model
 
 	visible  []int // indexes into reports, in display order
 	ticked   map[int]bool
@@ -112,25 +131,28 @@ type ScanView struct {
 	cursor, top   int // cursor indexes visible
 	detailTop     int // first visible line of the details pane
 	flash         string
-	confirming    bool
+	errLine       string        // red one-liner (model swap failed)
+	confirm       *typedConfirm // typed "delete" box; nil when closed
+	picker        *ModelPicker  // embedded model picker; nil when closed
+	help          bool          // ? overlay open
 	accepted      bool
 }
 
 // NewScanView builds the screen with every report listed and the cursor on
 // the first one.
-func NewScanView(reports []heur.Report, assess AssessFunc) *ScanView {
+func NewScanView(reports []heur.Report, a Assessor) *ScanView {
 	v := &ScanView{
-		ctx:     context.Background(),
-		reports: reports,
-		assess:  assess,
-		styles:  defaultScanStyles(),
-		spin:    spinner.New(spinner.WithSpinner(spinner.MiniDot)),
-		ticked:  map[int]bool{},
-		results: map[int]llm.Assessment{},
-		errs:    map[int]error{},
-		pending: map[int]bool{},
-		width:   defaultWidth,
-		height:  defaultHeight,
+		ctx:      context.Background(),
+		reports:  reports,
+		assessor: a,
+		styles:   defaultScanStyles(),
+		spin:     spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		ticked:   map[int]bool{},
+		results:  map[int]llm.Assessment{},
+		errs:     map[int]error{},
+		pending:  map[int]bool{},
+		width:    defaultWidth,
+		height:   defaultHeight,
 	}
 	v.filter()
 	return v
@@ -154,13 +176,28 @@ func (v *ScanView) Result() (ScanResult, bool) {
 // Init implements tea.Model.
 func (v *ScanView) Init() tea.Cmd { return nil }
 
-// Update handles resizes, keys, assessment results and spinner ticks.
+// Update handles resizes, keys, assessment results and spinner ticks. While
+// the model picker or the typed confirm is open, other messages go to it.
 func (v *ScanView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		v.width, v.height = msg.Width, msg.Height
 		v.scroll()
 		v.clampDetails()
+		if v.picker != nil {
+			v.picker.Update(msg)
+		}
+		return v, nil
+
+	case assessorMsg:
+		if msg.err != nil {
+			v.errLine = "model: " + msg.err.Error()
+			return v, nil
+		}
+		v.assessor.Label, v.assessor.Assess, v.assessor.Models = msg.a.Label, msg.a.Assess, msg.a.Models
+		if msg.a.OnModel != nil {
+			v.assessor.OnModel = msg.a.OnModel
+		}
 		return v, nil
 
 	case assessMsg:
@@ -174,38 +211,45 @@ func (v *ScanView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return v, nil
 
 	case spinner.TickMsg:
-		if len(v.pending) == 0 {
-			return v, nil
+		// Both spinners may be ticking; each ignores the other's ID.
+		var cmds []tea.Cmd
+		if len(v.pending) > 0 {
+			var cmd tea.Cmd
+			v.spin, cmd = v.spin.Update(msg)
+			cmds = append(cmds, cmd)
 		}
-		var cmd tea.Cmd
-		v.spin, cmd = v.spin.Update(msg)
-		return v, cmd
+		if v.picker != nil {
+			cmds = append(cmds, v.delegate(msg))
+		}
+		return v, tea.Batch(cmds...)
 
 	case tea.KeyPressMsg:
-		return v.key(msg)
+		if msg.String() == "ctrl+c" {
+			v.closePicker()
+			v.accepted = false
+			return v, tea.Quit
+		}
+		if v.help {
+			v.help = false
+			return v, nil
+		}
+	}
+
+	switch {
+	case v.picker != nil:
+		return v, v.delegate(msg)
+	case v.confirm != nil:
+		return v, v.confirmUpdate(msg)
+	}
+	if k, ok := msg.(tea.KeyPressMsg); ok {
+		return v.key(k)
 	}
 	return v, nil
 }
 
 func (v *ScanView) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	v.flash = ""
-	k := msg.String()
-	if k == "ctrl+c" {
-		v.accepted = false
-		return v, tea.Quit
-	}
-	if v.confirming {
-		switch k {
-		case "y", "Y":
-			v.accepted = true
-			return v, tea.Quit
-		case "n", "N", "esc":
-			v.confirming = false
-		}
-		return v, nil
-	}
-
-	switch k {
+	v.flash, v.errLine = "", ""
+	switch k := msg.String(); k {
 	case "esc", "q":
 		v.accepted = false
 		return v, tea.Quit
@@ -228,18 +272,93 @@ func (v *ScanView) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		v.filter()
 	case "l":
 		return v, v.startAssess()
+	case "m":
+		return v, v.openPicker()
+	case "?":
+		v.help = true
 	case "enter":
-		if v.tickedCount() == 0 {
+		n := v.tickedCount()
+		if n == 0 {
 			v.flash = nothingTicked
 			return v, nil
 		}
-		v.confirming = true
+		tc, cmd := newTypedConfirm(plan.ConfirmWord, fmt.Sprintf("Type %s to uninstall %d extensions", plan.ConfirmWord, n), false)
+		v.confirm = &tc
+		return v, cmd
 	}
 	return v, nil
 }
 
-// View renders the whole screen in the alternate buffer.
+// confirmUpdate forwards msg to the typed box: the right word quits with
+// the ticks accepted, esc closes the box.
+func (v *ScanView) confirmUpdate(msg tea.Msg) tea.Cmd {
+	tc, cmd, accepted, cancelled := v.confirm.Update(msg)
+	v.confirm = &tc
+	switch {
+	case accepted:
+		v.confirm = nil
+		v.accepted = true
+		return tea.Quit
+	case cancelled:
+		v.confirm = nil
+	}
+	return cmd
+}
+
+// openPicker embeds a model picker over the screen; nil when local model
+// picking is unavailable.
+func (v *ScanView) openPicker() tea.Cmd {
+	if v.assessor.Models == nil {
+		return nil
+	}
+	p := NewModelPicker(v.ctx, *v.assessor.Models, v.currentModel())
+	p.setEmbedded(true)
+	p.Update(tea.WindowSizeMsg{Width: v.width, Height: v.height})
+	v.picker = p
+	return p.Init()
+}
+
+// currentModel is the model part of an "ollama · <model>" label, else "".
+func (v *ScanView) currentModel() string {
+	provider, model, ok := strings.Cut(v.assessor.Label, labelSep)
+	if !ok || provider != scanProvider {
+		return ""
+	}
+	return model
+}
+
+// delegate forwards msg to the embedded picker and, once it has finished,
+// closes it and rebuilds the Assessor for the chosen model.
+func (v *ScanView) delegate(msg tea.Msg) tea.Cmd {
+	_, cmd := v.picker.Update(msg)
+	model, chosen, finished := v.picker.done()
+	if !finished {
+		return cmd
+	}
+	v.closePicker()
+	if !chosen || v.assessor.OnModel == nil {
+		return cmd
+	}
+	ctx, on := v.ctx, v.assessor.OnModel
+	return func() tea.Msg {
+		a, err := on(ctx, model)
+		return assessorMsg{a: a, err: err}
+	}
+}
+
+func (v *ScanView) closePicker() {
+	if v.picker != nil {
+		v.picker.cancelPull()
+		v.picker = nil
+	}
+}
+
+// View renders the whole screen in the alternate buffer; the embedded
+// picker takes it over while open.
 func (v *ScanView) View() tea.View {
+	if v.picker != nil {
+		return v.picker.View()
+	}
 	view := tea.NewView(v.render())
 	view.AltScreen = true
 	return view
@@ -249,13 +368,13 @@ func (v *ScanView) View() tea.View {
 // spinner when it was idle.
 func (v *ScanView) startAssess() tea.Cmd {
 	r, ok := v.current()
-	if v.assess == nil || !ok || v.pending[r] {
+	if v.assessor.Assess == nil || !ok || v.pending[r] {
 		return nil
 	}
 	idle := len(v.pending) == 0
 	v.pending[r] = true
 	delete(v.errs, r)
-	ctx, assess, rep := v.ctx, v.assess, v.reports[r]
+	ctx, assess, rep := v.ctx, v.assessor.Assess, v.reports[r]
 	run := func() tea.Msg {
 		a, err := assess(ctx, rep)
 		return assessMsg{report: r, a: a, err: err}
@@ -352,6 +471,9 @@ func (v *ScanView) columns() (left, right int) {
 }
 
 func (v *ScanView) render() string {
+	if v.help {
+		return renderHelp(v.width, v.height, "Keys", v.helpKeys())
+	}
 	rows := v.paneRows()
 	leftW, rightW := v.columns()
 
@@ -361,26 +483,62 @@ func (v *ScanView) render() string {
 	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, v.renderList(leftW, rows), v.renderDetails(rightW, rows)))
 	b.WriteString("\n")
 	switch {
-	case v.confirming:
-		b.WriteString(v.styles.danger.Render(fmt.Sprintf("Uninstall %d extensions? y/n", v.tickedCount())))
+	case v.errLine != "":
+		b.WriteString(v.styles.danger.Render(output.Truncate(v.errLine, v.width)))
 	case v.flash != "":
 		b.WriteString(v.styles.flash.Render(v.flash))
 	}
 	b.WriteString("\n")
-	help := scanHelp
-	if v.assess != nil {
-		help = scanHelpLLM
+	b.WriteString(v.styles.dim.Render(v.footerHelp()))
+	out := b.String()
+	if v.confirm != nil {
+		out = overlay(out, v.confirm.View(v.width), v.width, v.height)
 	}
-	b.WriteString(v.styles.dim.Render(help))
-	return b.String()
+	return out
 }
 
+// footerHelp lists the keys that currently do something.
+func (v *ScanView) footerHelp() string {
+	parts := []string{"↑/↓ move", "space tick", "tab focus", "f hide low"}
+	if v.assessor.Assess != nil {
+		parts = append(parts, "l ask AI")
+	}
+	if v.assessor.Models != nil {
+		parts = append(parts, "m model")
+	}
+	parts = append(parts, "enter uninstall", "esc quit", "? help")
+	return strings.Join(parts, " · ")
+}
+
+// helpKeys is the ? overlay table.
+func (v *ScanView) helpKeys() []keyHelp {
+	return []keyHelp{
+		{"↑/↓", "move the cursor, or scroll the details when they have focus"},
+		{"space", "tick / untick the extension for uninstall"},
+		{"tab", "switch focus between the list and the details"},
+		{"f", "hide / show extensions scoring under " + fmt.Sprint(lowScore)},
+		{"l", "ask the configured AI about the selected extension"},
+		{"m", "pick a local Ollama model"},
+		{"enter", "uninstall the ticked extensions (asks you to type " + plan.ConfirmWord + ")"},
+		{"esc", "quit without changes"},
+		{"?", "this help"},
+	}
+}
+
+// renderHeader draws the title row and the AI row.
 func (v *ScanView) renderHeader() string {
 	s := fmt.Sprintf("Scan results · %d extensions · %d ticked", len(v.reports), v.tickedCount())
 	if v.hideLow {
 		s += fmt.Sprintf(" · hiding %d under %d", len(v.reports)-len(v.visible), lowScore)
 	}
-	return v.styles.title.Render(s)
+	ai := scanNoAI
+	switch {
+	case v.assessor.Label != "":
+		ai = "AI: " + v.assessor.Label
+	case v.assessor.Models != nil:
+		ai = scanNoAIPick
+	}
+	return v.styles.title.Render(s) + "\n" + v.styles.dim.Render(output.Truncate(ai, v.width))
 }
 
 // renderList draws rows list lines, each exactly width cells wide.

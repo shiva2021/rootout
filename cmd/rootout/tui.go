@@ -10,34 +10,47 @@ import (
 	"github.com/shiva2021/rootout/internal/fsx"
 	"github.com/shiva2021/rootout/internal/plan"
 	"github.com/shiva2021/rootout/internal/priv"
+	"github.com/shiva2021/rootout/internal/progress"
 	"github.com/shiva2021/rootout/internal/run"
 	"github.com/shiva2021/rootout/internal/tui"
 )
 
-// runTUI is the bare `rootout` command: pick an app, review its leftovers in
-// the confirm screen, then remove. Loops back to the picker after each app
-// until the user quits.
+// runTUI is the bare `rootout` command: pick an app (or the orphans row),
+// review what would be removed, type delete, remove. Loops back to the
+// picker after each round until the user quits.
 func runTUI(ctx context.Context, g *globalFlags) error {
 	if g.json {
-		return &exitErr{code: exitBadInput, msg: "--json needs a subcommand (list, remove, scan); the TUI is interactive"}
+		return &exitErr{code: exitBadInput, msg: "--json needs a subcommand (list, remove, scan, orphans); the TUI is interactive"}
 	}
 	env, err := fsx.Real()
 	if err != nil {
 		return err
 	}
 	for {
-		apps, err := app.Discover(env)
-		if err != nil {
-			return err
+		load := func(rep progress.Reporter) ([]app.App, error) {
+			return app.DiscoverWith(env, app.Options{Progress: rep})
 		}
-		chosen, ok, err := tui.PickApp(ctx, apps)
+		pick, ok, err := tui.PickAppLoad(ctx, load, tui.PickOptions{OrphansRow: true})
 		if err != nil {
 			return err
 		}
 		if !ok {
 			return nil
 		}
-		p, err := plan.Build(ctx, env, chosen, plan.Options{Mode: plan.Trash, CrashReports: true, Run: run.Default})
+		if pick.Orphans {
+			if err := runOrphans(ctx, g, orphanFlags{}); err != nil {
+				var ee *exitErr
+				if errors.As(err, &ee) && ee.code == exitDeclined {
+					continue
+				}
+				return err
+			}
+			continue
+		}
+		// Discovery and removal run between screens, so the terminal is in
+		// normal mode and the stderr progress line is visible.
+		rep := progress.Term(os.Stderr)
+		p, err := plan.Build(ctx, env, pick.App, plan.Options{Mode: plan.Trash, CrashReports: true, Run: run.Default, Progress: rep})
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "rootout:", err)
 			continue
@@ -49,7 +62,7 @@ func runTUI(ctx context.Context, g *globalFlags) error {
 		if !ok {
 			continue
 		}
-		res, err := plan.Execute(ctx, env, p, plan.Deps{Priv: priv.Options{}})
+		res, err := plan.Execute(ctx, env, p, plan.Deps{Priv: priv.Options{}, Progress: rep})
 		if res != nil {
 			report(res)
 		}

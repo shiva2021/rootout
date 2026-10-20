@@ -231,3 +231,66 @@ func TestModelPickerNotRunning(t *testing.T) {
 		t.Fatal("esc should cancel")
 	}
 }
+
+func TestModelPickerEmbedded(t *testing.T) {
+	m := newReadyPicker(t, "qwen2.5-coder:7b")
+	m.setEmbedded(true)
+	if _, _, finished := m.done(); finished {
+		t.Fatal("finished before anything happened")
+	}
+	if cmd := pressM(m, keyEnter); cmd != nil {
+		t.Fatal("embedded picker must not quit the program")
+	}
+	if model, chosen, finished := m.done(); !finished || !chosen || model != "qwen2.5-coder:7b" {
+		t.Fatalf("done = %q %v %v", model, chosen, finished)
+	}
+
+	m = newReadyPicker(t, "")
+	m.setEmbedded(true)
+	if cmd := pressM(m, keyEsc); cmd != nil {
+		t.Fatal("esc should not quit when embedded")
+	}
+	if _, chosen, finished := m.done(); !finished || chosen {
+		t.Fatalf("esc: chosen=%v finished=%v", chosen, finished)
+	}
+
+	m = newReadyPicker(t, "")
+	m.setEmbedded(true)
+	cursorTo(t, m, "qwen3.5:9b")
+	pressM(m, keyEnter, tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if _, cmd := m.Update(pullDoneMsg{id: m.pullID}); cmd != nil {
+		t.Fatal("finished pull should not quit when embedded")
+	}
+	if model, chosen, finished := m.done(); !finished || !chosen || model != "qwen3.5:9b" {
+		t.Fatalf("pull done = %q %v %v", model, chosen, finished)
+	}
+}
+
+func TestModelPickerHelpOverlay(t *testing.T) {
+	m := newReadyPicker(t, "")
+	if !strings.Contains(viewM(m), "? help") {
+		t.Fatal("footer missing the help hint")
+	}
+	pressM(m, tea.KeyPressMsg{Code: '?', Text: "?"})
+	out := viewM(m)
+	for _, want := range []string{helpClose, "choose the model", "y / n", "quit without choosing"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("help missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Installed") {
+		t.Fatal("overlay should replace the list")
+	}
+	before := m.cursor
+	pressM(m, keyDown)
+	if m.help || m.cursor != before || !strings.Contains(viewM(m), "Installed") {
+		t.Fatal("any key should only close the help")
+	}
+
+	m = NewModelPicker(context.Background(), ModelDeps{HasBrew: true}, "")
+	m.Update(detectedMsg{err: ollama.ErrNotInstalled})
+	pressM(m, tea.KeyPressMsg{Code: '?', Text: "?"})
+	if out := viewM(m); !strings.Contains(out, "install route") || !strings.Contains(out, "y / n") {
+		t.Fatalf("install-state help:\n%s", out)
+	}
+}
