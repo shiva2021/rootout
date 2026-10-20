@@ -65,6 +65,10 @@ type Report struct {
 	Findings  []Finding     `json:"findings"`
 	Truncated bool          `json:"truncated"` // caps hit; some files were not scanned
 	Scanned   int           `json:"scanned_files"`
+
+	// kept so Rescore can re-run extension rules without another walk
+	files    []string
+	weighted []weighted
 }
 
 // Limits bound the walk so a hostile extension cannot exhaust memory or time.
