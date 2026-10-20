@@ -589,7 +589,7 @@ func (m *ModelPicker) render() string {
 		if m.pullTotal > 0 {
 			status += fmt.Sprintf("  %s / %s", output.Bytes(m.pullDone), output.Bytes(m.pullTotal))
 		}
-		body = []string{m.renderBar(pct), "", s.dim.Render(status)}
+		body = []string{renderBar(pct, pullBarWidth), "", s.dim.Render(status)}
 	case stateReady:
 		body = m.renderRows(m.listRows())
 	}
@@ -695,14 +695,4 @@ func (m *ModelPicker) fitStyle(fit string) lipgloss.Style {
 		return m.styles.tight
 	}
 	return m.styles.tooLarge
-}
-
-// renderBar draws a pullBarWidth-cell bar and the percentage. (bubbles'
-// progress package needs harmonica, which go.sum does not carry yet.)
-func (m *ModelPicker) renderBar(pct float64) string {
-	pct = max(0, min(1, pct))
-	full := int(pct*pullBarWidth + 0.5)
-	return m.styles.installed.Render(strings.Repeat("█", full)) +
-		m.styles.dim.Render(strings.Repeat("░", pullBarWidth-full)) +
-		fmt.Sprintf(" %3.0f%%", pct*100)
 }
