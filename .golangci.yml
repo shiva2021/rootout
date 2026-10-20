@@ -6,3 +6,13 @@ linters:
     - gosec
     - misspell
     - unconvert
+  exclusions:
+    rules:
+      # G304: the tool's job is to read and remove paths chosen at runtime;
+      # every such path passes internal/safety first.
+      - linters: [gosec]
+        text: "G304"
+      # Test fixtures create world-readable temp files on purpose.
+      - linters: [gosec]
+        path: _test\.go
+        text: "G30[16]"
