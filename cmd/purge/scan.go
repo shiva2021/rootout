@@ -12,8 +12,10 @@ import (
 	"github.com/shiva2021/purge/internal/ext"
 	"github.com/shiva2021/purge/internal/fsx"
 	"github.com/shiva2021/purge/internal/heur"
+	"github.com/shiva2021/purge/internal/llm"
 	"github.com/shiva2021/purge/internal/output"
 	"github.com/shiva2021/purge/internal/registry"
+	"github.com/shiva2021/purge/internal/tui"
 )
 
 type scanFlags struct {
@@ -22,6 +24,17 @@ type scanFlags struct {
 	editor    string
 	listRules bool
 	all       bool
+	llm       bool
+	provider  string
+	model     string
+	noTUI     bool
+}
+
+// scanItem is one JSON row: the heuristic report plus the model's opinion.
+type scanItem struct {
+	heur.Report
+	Assessment *llm.Assessment `json:"assessment,omitempty"`
+	AssessErr  string          `json:"assessment_error,omitempty"`
 }
 
 func newScanCmd(g *globalFlags) *cobra.Command {
@@ -43,6 +56,10 @@ score with the reasons; --online adds publisher trust data from the registry.`,
 	fl.StringVar(&f.editor, "editor", "", "limit to one editor id: vscode, vscode-insiders, cursor, vscodium, windsurf")
 	fl.BoolVar(&f.listRules, "list-rules", false, "print the rule names and exit")
 	fl.BoolVarP(&f.all, "all", "a", false, "shorthand for --min-score 0")
+	fl.BoolVar(&f.llm, "llm", false, "ask the configured AI model about each shown extension")
+	fl.StringVar(&f.provider, "provider", "", "AI provider for this run: anthropic, openai or ollama (implies --llm)")
+	fl.StringVar(&f.model, "model", "", "model id for this run (implies --llm)")
+	fl.BoolVar(&f.noTUI, "no-tui", false, "print results instead of opening the review screen")
 	return cmd
 }
 
@@ -64,8 +81,11 @@ func runScan(ctx context.Context, g *globalFlags, f scanFlags) error {
 		exts = filterEditor(exts, f.editor)
 	}
 	if len(exts) == 0 {
+		if g.json {
+			return w.Emit([]scanItem{})
+		}
 		w.Printf("no extensions found\n")
-		return w.Emit([]heur.Report{})
+		return nil
 	}
 	reports := heur.ScanAll(ctx, exts, heur.Limits{})
 	if f.online {
@@ -89,7 +109,65 @@ func runScan(ctx context.Context, g *globalFlags, f scanFlags) error {
 			shown = append(shown, r)
 		}
 	}
-	return printReports(w, shown, len(reports), min)
+
+	interactive := !g.json && !f.noTUI && isTerminal(os.Stdin) && isTerminal(os.Stdout)
+	var assess func(context.Context, heur.Report) (llm.Assessment, error)
+	if f.llm || f.provider != "" || f.model != "" || interactive {
+		c, _, err := loadConfig()
+		if err != nil {
+			return err
+		}
+		// In the review screen the model is asked on demand; only build it
+		// eagerly when --llm was requested or a provider is configured.
+		if f.llm || f.provider != "" || f.model != "" || c.LLM.Provider != "" {
+			p, err := buildProvider(ctx, c, f.provider, f.model, interactive)
+			if err != nil {
+				return err
+			}
+			assess = assessFunc(p)
+		}
+	}
+
+	if interactive {
+		return reviewAndUninstall(ctx, env, shown, assess)
+	}
+
+	items := make([]scanItem, len(shown))
+	for i, r := range shown {
+		items[i].Report = r
+		if assess != nil && (f.llm || f.provider != "" || f.model != "") {
+			fmt.Fprintf(os.Stderr, "purge: asking the model about %s...\n", r.Ext.ID)
+			a, err := assess(ctx, r)
+			if err != nil {
+				items[i].AssessErr = err.Error()
+			} else {
+				items[i].Assessment = &a
+			}
+		}
+	}
+	return printReports(w, items, len(reports), min)
+}
+
+// reviewAndUninstall opens the results screen and uninstalls what the user ticked.
+func reviewAndUninstall(ctx context.Context, env fsx.Env, shown []heur.Report, assess func(context.Context, heur.Report) (llm.Assessment, error)) error {
+	res, ok, err := tui.ReviewScan(ctx, shown, assess)
+	if err != nil || !ok || len(res.Uninstall) == 0 {
+		return err
+	}
+	editors := ext.Editors(env, ext.Options{})
+	failed := 0
+	for _, r := range res.Uninstall {
+		if err := ext.Uninstall(ctx, env, r.Ext, editors, ext.Options{}); err != nil {
+			failed++
+			fmt.Fprintf(os.Stderr, "purge: %s: %v\n", r.Ext.ID, err)
+			continue
+		}
+		fmt.Printf("uninstalled %s (%s)\n", r.Ext.ID, r.Ext.Editor)
+	}
+	if failed > 0 {
+		return &exitErr{code: exitError, msg: fmt.Sprintf("%d extension(s) could not be uninstalled", failed)}
+	}
+	return nil
 }
 
 func filterEditor(exts []ext.Extension, id string) []ext.Extension {
@@ -102,21 +180,34 @@ func filterEditor(exts []ext.Extension, id string) []ext.Extension {
 	return out
 }
 
-func printReports(w *output.Writer, reports []heur.Report, total, min int) error {
+func printReports(w *output.Writer, items []scanItem, total, min int) error {
 	t := output.Table{
-		Columns: []string{"score", "extension", "editor", "version", "top findings"},
-		Rows:    reports,
+		Columns: []string{"score", "extension", "editor", "version", "ai verdict", "top findings"},
+		Rows:    items,
 	}
-	for _, r := range reports {
+	for _, it := range items {
+		verdict := ""
+		switch {
+		case it.Assessment != nil:
+			verdict = fmt.Sprintf("%s %d%%", it.Assessment.Verdict, int(it.Assessment.Confidence*100))
+		case it.AssessErr != "":
+			verdict = "error"
+		}
 		t.Cells = append(t.Cells, []string{
-			fmt.Sprintf("%3d", r.Score), r.Ext.ID, r.Ext.Editor, r.Ext.Version, topFindings(r, 3),
+			fmt.Sprintf("%3d", it.Score), it.Ext.ID, it.Ext.Editor, it.Ext.Version, verdict, topFindings(it.Report, 3),
 		})
 	}
 	if err := w.Print(t); err != nil {
 		return err
 	}
-	w.Printf("\n%d of %d extensions at score >= %d\n", len(reports), total, min)
-	for _, r := range reports {
+	w.Printf("\n%d of %d extensions at score >= %d\n", len(items), total, min)
+	for _, it := range items {
+		r := it.Report
+		if it.Assessment != nil {
+			w.Printf("\n%s: AI verdict %s (%d%%, %s)\n  %s\n", r.Ext.ID, it.Assessment.Verdict, int(it.Assessment.Confidence*100), it.Assessment.Model, it.Assessment.Reasoning)
+		} else if it.AssessErr != "" {
+			w.Printf("\n%s: AI assessment failed: %s\n", r.Ext.ID, it.AssessErr)
+		}
 		if r.Score < 50 {
 			continue
 		}

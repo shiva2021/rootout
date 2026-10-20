@@ -27,8 +27,6 @@ const (
 	exitLicensing = 4
 )
 
-var errNotYet = errors.New("not implemented yet")
-
 type globalFlags struct {
 	json    bool
 	verbose bool
@@ -73,8 +71,8 @@ func runMain(args []string) int {
 		newListCmd(&g),
 		newRemoveCmd(&g),
 		newScanCmd(&g),
-		stub("config", "Manage providers, models and API keys"),
-		stub("doctor", "Check the environment purge depends on"),
+		newConfigCmd(&g),
+		newDoctorCmd(&g),
 	)
 
 	root.SetArgs(args)
@@ -98,13 +96,3 @@ type exitErr struct {
 }
 
 func (e *exitErr) Error() string { return e.msg }
-
-func stub(use, short string) *cobra.Command {
-	return &cobra.Command{
-		Use:   use,
-		Short: short,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return fmt.Errorf("%s: %w", cmd.Name(), errNotYet)
-		},
-	}
-}
