@@ -14,5 +14,5 @@ linters:
         text: "G304"
       # Test fixtures create world-readable temp files on purpose.
       - linters: [gosec]
-        path: _test\.go
+        path: (_test\.go|internal/testutil/)
         text: "G30[16]"
