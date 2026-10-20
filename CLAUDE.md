@@ -14,9 +14,6 @@ make lint           # go vet + golangci-lint
 
 Try it read-only: `./bin/purge doctor`, `./bin/purge remove <app> --dry-run`, `./bin/purge scan --all --no-tui`.
 
-```bash
-```
-
 ## Where things are
 
 - `docs/HANDOVER.md` — current state of work; read first every session.
