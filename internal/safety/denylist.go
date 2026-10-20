@@ -1,0 +1,176 @@
+package safety
+
+import (
+	"sort"
+	"strings"
+)
+
+// denylist holds generic names that are never used for name-based leftover
+// matching. Matching is case-insensitive and exact. Each group is sorted
+// case-insensitively; a name appears once even if it belongs to several groups.
+var denylist = []string{
+	// Standard top-level ~/Library directory names.
+	"Accounts",
+	"Application Scripts",
+	"Application Support",
+	"Assistant",
+	"Audio",
+	"Autosave Information",
+	"Biome",
+	"Books",
+	"Caches",
+	"Calendars",
+	"Colors",
+	"Contacts",
+	"Containers",
+	"Cookies",
+	"Daemon Containers",
+	"Developer",
+	"Dictionaries",
+	"Favorites",
+	"Finder",
+	"FontCollections",
+	"Fonts",
+	"Frameworks",
+	"Google",
+	"Group Containers",
+	"Home",
+	"HTTPStorages",
+	"iMovie",
+	"Input Methods",
+	"Internet Plug-Ins",
+	"Keyboard Layouts",
+	"KeyboardServices",
+	"Keychains",
+	"LaunchAgents",
+	"Logs",
+	"Mail",
+	"Maps",
+	"Messages",
+	"Metadata",
+	"Mobile Documents",
+	"Music",
+	"News",
+	"Notes",
+	"Passes",
+	"Photos",
+	"PreferencePanes",
+	"Preferences",
+	"Printers",
+	"PubSub",
+	"QuickLook",
+	"Reminders",
+	"Safari",
+	"Saved Application State",
+	"Screen Savers",
+	"Scripts",
+	"Services",
+	"Sharing",
+	"Shortcuts",
+	"Sounds",
+	"Spelling",
+	"StatusKit",
+	"Stocks",
+	"Suggestions",
+	"SyncedPreferences",
+	"System",
+	"Translation",
+	"Trial",
+	"TV",
+	"Weather",
+	"WebKit",
+	// Apple application names (those that are also ~/Library directories, such as Mail or Photos, are listed above).
+	"Calendar",
+	"Console",
+	"FaceTime",
+	"Freeform",
+	"GarageBand",
+	"Keynote",
+	"Numbers",
+	"Pages",
+	"Podcasts",
+	"Preview",
+	"Siri",
+	"Terminal",
+	"Xcode",
+	// Languages, tools and generic directory words (System is listed above).
+	"App",
+	"Application",
+	"Applications",
+	"Apps",
+	"Code",
+	"Dart",
+	"Data",
+	"Default",
+	"Demo",
+	"Desktop",
+	"Documents",
+	"Downloads",
+	"Global",
+	"Go",
+	"Java",
+	"Julia",
+	"Kotlin",
+	"Library",
+	"Local",
+	"Lua",
+	"Movies",
+	"Node",
+	"Perl",
+	"PHP",
+	"Pictures",
+	"Public",
+	"Python",
+	"R",
+	"Ruby",
+	"Rust",
+	"Scala",
+	"Shared",
+	"Swift",
+	"Temp",
+	"Test",
+	"Tmp",
+	"User",
+	"Users",
+	"Volumes",
+	// Vendors whose names span many products (Google is listed above).
+	"Adobe",
+	"Amazon",
+	"Apple",
+	"Canon",
+	"Dell",
+	"Dropbox",
+	"Epson",
+	"Facebook",
+	"HP",
+	"Intel",
+	"Lenovo",
+	"Logitech",
+	"Meta",
+	"Microsoft",
+	"Mozilla",
+	"Nvidia",
+	"Oracle",
+	"Samsung",
+	"Slack",
+	"Sony",
+	"Zoom",
+}
+
+// denied is the lowercase lookup set built from denylist.
+var denied = func() map[string]struct{} {
+	m := make(map[string]struct{}, len(denylist))
+	for _, n := range denylist {
+		m[strings.ToLower(n)] = struct{}{}
+	}
+	return m
+}()
+
+// Denylist returns a sorted copy of the generic names that are never used for
+// name matching.
+func Denylist() []string {
+	out := make([]string, len(denylist))
+	copy(out, denylist)
+	sort.Strings(out)
+	return out
+}
