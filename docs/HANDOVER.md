@@ -1,47 +1,47 @@
 # Handover
 
-_Updated: 2026-10-20 08:40 · Session: planning + M0–M2_
+_Updated: 2026-10-20 · Session: planning + M0–M4_
 
 ## Status
-M0, M1 and M2 code complete and green (`make test`, `make lint`). `purge list`, bare `purge` (TUI picker) and `purge remove` (dry-run verified on real apps; live removal not yet exercised) work. M2 task 7 (manual QA on a throwaway account) is pending. M3 (extension scanner) not started.
+M0–M4 code complete; `make test` and `make lint` green; 28 commits on `main`, local only (no GitHub remote yet). Remaining: M2 manual QA on a throwaway account, M5 release pipeline, M6 licensing (needs its own plan).
 
 ## Done this session
-- Plan (`docs/PLAN.md`), decisions D-001…D-016, knowledge base.
-- Packages: `fsx`, `license`, `run`, `safety`, `testutil`, `output`, `app` (Discover/Fuzzy/Resolve), `brew`, `trash`, `priv`, `leftover`, `plan`, `tui` (picker + confirm).
-- Commands: `purge list [--system --search --json]`, `purge` (picker; prints choice until remove is wired into the TUI flow), `purge remove <app> [--dry-run --permanent --yes --dotfiles --no-crash-reports --no-brew --sudo --also <path>]`.
-- Real-machine dry run: Spotify → 9 paths / 3.8 GB; Mail refused (apple bundle id); "Epson" reports ambiguity with candidates.
+- Plan (`docs/PLAN.md`), decisions D-001…D-017, knowledge base.
+- Apps: `purge` (picker → review → remove, loops), `list`, `remove` (Trash/permanent/dry-run, brew zap, one admin elevation, receipts, launchd bootout).
+- Extensions: `scan` (5 editors, 4 rule groups, capability/intent scoring, `--online` registry data, review screen with uninstall), golden corpus.
+- AI: Anthropic and OpenAI via official SDKs with structured JSON, Ollama via HTTP (`think:false`); keys in Keychain; `config` command; Ollama picker that detects, installs, starts, recommends by RAM tier and pulls with progress.
+- `doctor`.
 
-## In progress (exact state)
-- Nothing mid-flight. Last change: helper-id prefix matching for HTTPStorages/WebKit/Saved State/Cookies and `/Library/Logs/DiagnosticReports` row; root-owned crash reports default to unselected.
+## Real-machine results (this Mac: M1, 8 GB, 47 user apps, 12 VS Code extensions)
+- `purge remove Spotify -n`: bundle + 7 leftovers, 3.8 GB; `Mail` refused.
+- `purge scan --all`: scores 5–30. The 30 is `ms-python.vscode-python-envs`, which pipes the official uv installer from astral.sh into `sh` (true finding, Medium).
+- Review screen and app picker verified under a pseudo-terminal (render + quit). Live removal and live LLM calls have not been run.
 
 ## Next steps
-1. Wire the bare `purge` flow end to end: picker → plan.Build → tui.Confirmer → plan.Execute (today it prints the chosen app). ~30 lines in `cmd/purge/tui.go`.
-2. M2 task 7: run `docs/kb/qa.md` on a throwaway user account against a cask, an App Store app and a pkg app; log results there.
-3. M3: define `internal/heur` and `internal/ext` types, then dispatch ext.Enumerate/Uninstall, heur engine, rule groups A–D, registry (see `docs/PLAN.md` M3).
-4. Create the private GitHub repo and push (needs Shivang's go-ahead).
+1. M2 task 7: follow `docs/kb/qa.md` on a throwaway macOS user account (cask, App Store and pkg app). Live removal has only run in unit tests.
+2. Try `purge scan --llm` with a real key or `purge config models --pick` with Ollama; only recorded-HTTP tests exist so far.
+3. Create the private GitHub repo and push (needs Shivang's go-ahead).
+4. M5: GoReleaser config, notarization (needs Apple Developer account), private Homebrew tap.
+5. M6 licensing: write a separate plan first.
 
 ## Blockers and open questions
-- Push to GitHub: waiting for explicit go-ahead.
-- `sfltool dumpbtm` blocks without Full Disk Access; login items are probed with a 3 s timeout and otherwise silently skipped. Decide later whether to drop the probe or ask for FDA.
-- Apple Developer account needed only at M5.
-
-## Decisions this session
-- D-001 … D-016 (see docs/DECISIONS.md).
+- GitHub push: waiting for explicit go-ahead.
+- Binary is 26 MB stripped (was 9 MB before the AI wiring). The official SDKs (D-013) are a few MB of that; replacing them with plain HTTP would shrink it but reverses D-013. Shivang to decide.
+- `sfltool dumpbtm` blocks without Full Disk Access; login items probe has a 3 s timeout and is otherwise skipped.
+- The VSIX signature file name is unverified; `unsigned_gallery` is Low for that reason (all 12 local extensions have `.vsixmanifest` but none of the guessed signature files).
 
 ## How to verify
 ```bash
 make build && make test && make lint && scripts/toolchain_check.sh
-./bin/purge list | tail -1                      # "47 applications" on this Mac
-./bin/purge remove Spotify --dry-run            # lists bundle + leftovers, no changes
-./bin/purge remove Mail --dry-run               # refuses: apple_bundle_id
+./bin/purge doctor
+./bin/purge remove Spotify --dry-run
+./bin/purge scan --all --no-tui
 ```
 
-## Files touched
-- Everything under the repo; first session.
-
 ## Gotchas
-- Homebrew's Go is 1.27.2; go.mod asks for toolchain go1.27.3 and auto-downloads it.
-- Charm v2 lives at `charm.land/...`; `tea.WithAltScreen` is gone (set `view.AltScreen = true` in View); `tea.KeyPressMsg{Code, Text, Mod}`.
-- `/usr/bin/trash` rejects `--` and Homebrew's `trash` is incompatible; `trash.Mover` targets the system binary by absolute path.
-- macOS has no `timeout(1)`; use `perl -e 'alarm N; exec @ARGV' -- cmd` in scripts.
-- gosec G204/G304 are excluded by design: argv-only exec lives in `internal/run`, and every deleted path passes `internal/safety`.
+- A failing `go test` piped into `tail` hides the exit code; one bad commit slipped through that way (fixed in the next commit). Check `${PIPESTATUS[0]}` or grep for FAIL.
+- Charm v2: `charm.land/...` imports, alt screen via `view.AltScreen`, lipgloss sizes include borders.
+- `/usr/bin/trash` rejects `--`; Homebrew's `trash` is a different tool.
+- Minified bundles are one line: any rule pairing two patterns needs a byte window (see `docs/kb/heuristics.md`).
+- macOS has no `timeout(1)`: `perl -e 'alarm N; exec @ARGV' -- cmd`.
+- gosec G101 flags constant names containing "Assess"/"Key"-like words; rename rather than suppress.
