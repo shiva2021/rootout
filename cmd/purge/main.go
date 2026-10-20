@@ -70,7 +70,7 @@ func run(args []string) int {
 	root.PersistentFlags().BoolVarP(&g.verbose, "verbose", "v", false, "debug logging on stderr")
 
 	root.AddCommand(
-		stub("list", "List installed applications"),
+		newListCmd(&g),
 		stub("remove <app>", "Remove an application and its leftover files"),
 		stub("scan", "Scan editor extensions for malicious behaviour"),
 		stub("config", "Manage providers, models and API keys"),
