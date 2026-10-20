@@ -1,0 +1,1 @@
+[{"identifier":{"id":"some.ext"},"version":"1.0.0","location":{"$mid":1,"path":"HOME/.cursor/extensions/some.ext-1.0.0-darwin-arm64","scheme":"file"},"metadata":{"targetPlatform":"darwin-arm64","updated":1750000000000,"isPreReleaseVersion":false,"installedTimestamp":1749000000000,"source":"vsix","isBuiltin":true}}]

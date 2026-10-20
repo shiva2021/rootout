@@ -1,0 +1,34 @@
+{
+  "name": "python",
+  "displayName": "Python",
+  "description": "Python language support with extension access points for IntelliSense (Pylance), Debugging (Python Debugger), linting, formatting, refactoring, unit tests, and more.",
+  "version": "2026.10.0",
+  "publisher": "ms-python",
+  "homepage": "https://github.com/Microsoft/vscode-python",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Microsoft/vscode-python"
+  },
+  "categories": ["Programming Languages", "Debuggers", "Linters"],
+  "main": "./out/client/extension",
+  "browser": "./dist/extension.browser.js",
+  "activationEvents": [
+    "onLanguage:python",
+    "onDebugResolve:python",
+    "workspaceContains:mspythonconfig.json"
+  ],
+  "contributes": {
+    "commands": [{"command": "python.startREPL", "title": "Start REPL"}],
+    "configuration": {"type": "object", "properties": {}},
+    "languages": [{"id": "python"}],
+    "debuggers": []
+  },
+  "scripts": {
+    "postinstall": "node ./build/ci/postInstall.js",
+    "compile": "tsc -p ./"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1",
+    "semver": "^7.5.4"
+  }
+}

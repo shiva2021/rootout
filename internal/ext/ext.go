@@ -21,8 +21,9 @@ type Extension struct {
 	Name        string `json:"name"`
 	DisplayName string `json:"display_name,omitempty"`
 	Version     string `json:"version"`
-	Dir         string `json:"dir"`            // absolute folder
-	Main        string `json:"main,omitempty"` // package.json "main" / "browser", relative to Dir
+	Platform    string `json:"platform,omitempty"` // folder-name target platform suffix, e.g. "darwin-arm64"
+	Dir         string `json:"dir"`                // absolute folder
+	Main        string `json:"main,omitempty"`     // package.json "main" / "browser", relative to Dir
 	Description string `json:"description,omitempty"`
 	Repository  string `json:"repository,omitempty"` // normalised URL from package.json
 	Homepage    string `json:"homepage,omitempty"`
@@ -33,14 +34,15 @@ type Extension struct {
 	Contributes      []string          `json:"contributes,omitempty"`  // keys of package.json "contributes"
 	Categories       []string          `json:"categories,omitempty"`
 
-	InstalledAt    time.Time `json:"installed_at,omitempty"` // extensions.json metadata.installedTimestamp
-	UpdatedAt      time.Time `json:"updated_at,omitempty"`   // extensions.json metadata.updated, else newest file mtime
-	Source         string    `json:"source,omitempty"`       // extensions.json metadata.source, e.g. "gallery", "vsix"
-	Builtin        bool      `json:"builtin,omitempty"`
-	PreRelease     bool      `json:"pre_release,omitempty"`
-	Orphaned       bool      `json:"orphaned"` // folder exists but is listed in .obsolete or missing from extensions.json
-	SizeBytes      int64     `json:"size_bytes"`
-	FileCount      int       `json:"file_count"`
-	HasNodeModules bool      `json:"has_node_modules"`
-	Signed         bool      `json:"signed"` // a marketplace signature file is present in the folder
+	InstalledAt     time.Time `json:"installed_at,omitempty"` // extensions.json metadata.installedTimestamp
+	UpdatedAt       time.Time `json:"updated_at,omitempty"`   // extensions.json metadata.updated, else newest file mtime
+	Source          string    `json:"source,omitempty"`       // extensions.json metadata.source, e.g. "gallery", "vsix"
+	Builtin         bool      `json:"builtin,omitempty"`
+	PreRelease      bool      `json:"pre_release,omitempty"`
+	Orphaned        bool      `json:"orphaned"` // folder exists but is listed in .obsolete or missing from extensions.json
+	SizeBytes       int64     `json:"size_bytes"`
+	FileCount       int       `json:"file_count"`
+	HasNodeModules  bool      `json:"has_node_modules"`
+	Signed          bool      `json:"signed"`           // a marketplace signature file is present in the folder
+	HasVsixManifest bool      `json:"has_vsixmanifest"` // .vsixmanifest present (every gallery install has one)
 }
