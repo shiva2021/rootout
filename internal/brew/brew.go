@@ -9,25 +9,19 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
-)
 
-// Runner executes an external command and returns its combined output.
-type Runner func(ctx context.Context, name string, args ...string) ([]byte, error)
+	"github.com/shiva2021/purge/internal/run"
+)
 
 // Brew wraps the brew CLI.
 type Brew struct {
-	Run      Runner
+	Run      run.Runner
 	LookPath func(string) (string, error)
 }
 
 // New returns a Brew that executes the real CLI.
 func New() *Brew {
-	return &Brew{
-		Run: func(ctx context.Context, name string, args ...string) ([]byte, error) {
-			return exec.CommandContext(ctx, name, args...).CombinedOutput()
-		},
-		LookPath: exec.LookPath,
-	}
+	return &Brew{Run: run.Default, LookPath: exec.LookPath}
 }
 
 // ErrNotInstalled is returned when brew is not on PATH.
