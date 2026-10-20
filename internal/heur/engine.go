@@ -257,6 +257,9 @@ func (s *scanner) symlink(p, rel string) {
 func (s *scanner) runFile(r FileRule, fc *FileCtx) {
 	defer s.recoverRule(r.Name, fc.Rel)
 	for _, f := range r.Check(fc) {
+		if f.Rule == "" {
+			f.Rule = r.Name
+		}
 		if f.File == "" {
 			f.File = fc.Rel
 		}
@@ -267,6 +270,9 @@ func (s *scanner) runFile(r FileRule, fc *FileCtx) {
 func (s *scanner) runExt(r ExtRule, ec *ExtCtx) {
 	defer s.recoverRule(r.Name, "")
 	for _, f := range r.Check(ec) {
+		if f.Rule == "" {
+			f.Rule = r.Name
+		}
 		s.add(f, s.multiplier(f.Rule, false))
 	}
 }
