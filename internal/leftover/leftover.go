@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/shiva2021/purge/internal/app"
 	"github.com/shiva2021/purge/internal/fsx"
@@ -308,10 +309,13 @@ func (s *scan) receipts(ctx context.Context) error {
 	if id == "" {
 		return nil
 	}
+	parent := ctx
+	ctx, cancel := context.WithTimeout(ctx, toolTimeout)
+	defer cancel()
 	out, err := s.opts.Run(ctx, "pkgutil", "--pkgs")
 	if err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if parent.Err() != nil {
+			return parent.Err()
 		}
 		slog.Debug("leftover: pkgutil --pkgs", "err", err)
 		return nil
@@ -336,10 +340,15 @@ func (s *scan) receipts(ctx context.Context) error {
 // loginItem runs `sfltool dumpbtm` and reports (never deletes) a login item
 // that mentions the bundle id or the bundle path.
 func (s *scan) loginItem(ctx context.Context) error {
+	// sfltool can block indefinitely without Full Disk Access; never let a
+	// report-only step stall discovery.
+	parent := ctx
+	ctx, cancel := context.WithTimeout(ctx, loginItemTimeout)
+	defer cancel()
 	out, err := s.opts.Run(ctx, "sfltool", "dumpbtm")
 	if err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if parent.Err() != nil {
+			return parent.Err()
 		}
 		slog.Debug("leftover: sfltool dumpbtm", "err", err)
 		return nil
@@ -379,6 +388,14 @@ func (s *scan) needsRoot(path string) bool {
 
 // Ownership probes, split out as variables so tests can override them. The
 // defaults are in owner_darwin.go and owner_other.go.
+// toolTimeout bounds every external tool run during discovery; the login
+// item probe gets less because sfltool blocks without Full Disk Access and
+// the result is report-only.
+const (
+	toolTimeout      = 10 * time.Second
+	loginItemTimeout = 3 * time.Second
+)
+
 var (
 	uidOf       = lstatUID
 	dirWritable = accessWrite

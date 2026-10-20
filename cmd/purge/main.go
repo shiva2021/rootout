@@ -35,10 +35,10 @@ type globalFlags struct {
 }
 
 func main() {
-	os.Exit(run(os.Args[1:]))
+	os.Exit(runMain(os.Args[1:]))
 }
 
-func run(args []string) int {
+func runMain(args []string) int {
 	if os.Geteuid() == 0 {
 		fmt.Fprintln(os.Stderr, "purge: refusing to run as root; run it as your normal user and it will ask for admin rights only when needed")
 		return exitError
@@ -71,7 +71,7 @@ func run(args []string) int {
 
 	root.AddCommand(
 		newListCmd(&g),
-		stub("remove <app>", "Remove an application and its leftover files"),
+		newRemoveCmd(&g),
 		stub("scan", "Scan editor extensions for malicious behaviour"),
 		stub("config", "Manage providers, models and API keys"),
 		stub("doctor", "Check the environment purge depends on"),
