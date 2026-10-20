@@ -321,37 +321,13 @@ func (s *scanner) report() Report {
 	})
 	return Report{
 		Ext:       *s.ext,
-		Score:     score(s.found),
+		Score:     score(s.found, s.trusted),
 		Findings:  findings,
 		Truncated: s.truncated,
 		Scanned:   s.scanned,
 		files:     s.files,
 		weighted:  s.found,
 	}
-}
-
-// score folds weighted findings into 0..100. Per rule, the effective
-// weights (Weight × multiplier) are summed and capped at PerRuleCap × the
-// rule's highest effective weight; the capped sums are added, rounded up
-// from halves to points and clamped.
-func score(ws []weighted) int {
-	type acc struct{ sum, top int }
-	per := map[string]*acc{}
-	for _, w := range ws {
-		h := w.Severity.Weight() * w.halves
-		a := per[w.Rule]
-		if a == nil {
-			a = &acc{}
-			per[w.Rule] = a
-		}
-		a.sum += h
-		a.top = max(a.top, h)
-	}
-	total := 0
-	for _, a := range per {
-		total += min(a.sum, PerRuleCap*a.top)
-	}
-	return max(0, min(100, (total+1)/2))
 }
 
 // classify says whether a file is read (and handed to file rules) and

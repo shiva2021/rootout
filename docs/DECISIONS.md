@@ -129,3 +129,11 @@ Append-only. Newest at the bottom. Never edit an old entry; add a new one that s
 **Alternatives.** Hard-coded list only.
 **Consequences.** Works for renamed or portable installs; adds one plist-free JSON read per editor.
 **Status.** Accepted
+
+## D-017 · 2026-10-20 · Score capability and intent separately
+
+**Context.** The first real scan of this Mac's 12 VS Code extensions gave 9 of them a score of 100, including Microsoft's Python and Jupyter extensions. Two causes: rules matching unrelated code in minified single-line bundles, and a scoring model where ordinary capabilities (`eval`, spawning processes, minification) each added up to 60 points.
+**Decision.** Rules are split into capability rules (eval, child processes, obfuscation, environment reads, activation, staleness, unsigned) and intent indicators (hidden payloads, credential access, exfiltration hosts, download-and-run chains, typosquats, permission bypass). Capability findings together add at most 35 points (15 for publishers in `heur.TrustedPublishers`). Indicators contribute their top severity weight, plus up to 50% for repeats, and combine as 1 - Π(1 - p). Indicators are never discounted for trusted publishers, because a hijacked publisher is the supply-chain case. Rules that pair two patterns now require them within a short byte window, not just in the same file. npm lifecycle scripts drop to Low because VS Code does not run them on install; `vscode:uninstall` is flagged instead. Advisories carry one fixed version per release line.
+**Alternatives.** A flat per-rule cap (saturates on any large bundle); discounting everything for trusted publishers (hides a compromised publisher); allowlisting known extensions by id (unmaintainable and blind to hijacked updates).
+**Consequences.** `internal/heur/score.go` holds the capability list; a new rule is an indicator unless added there. `internal/heur/corpus_test.go` pins both directions: benign samples stay under 30, malicious samples clear 50. On this Mac the 12 real extensions now score 5 to 30; the 30 is `ms-python.vscode-python-envs`, which pipes the official uv installer from astral.sh into `sh`.
+**Status.** Accepted

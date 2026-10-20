@@ -28,29 +28,52 @@ func init() {
 
 // ---- install_hook -----------------------------------------------------------
 
-var metaHookNames = []string{"preinstall", "install", "postinstall", "prepare"}
+// npm lifecycle scripts ship in package.json but VS Code does not run them
+// when it installs an extension from a VSIX; they matter only as evidence of
+// what the package does. `vscode:uninstall` is the one hook VS Code runs: a
+// Node script executed after the extension is uninstalled.
+var metaNPMHooks = []string{"preinstall", "install", "postinstall", "prepare"}
 
-var metaHookDangerous = []string{"curl", "wget", "node -e", "base64", "powershell", "bash -c", "sh -c", "eval"}
+const metaUninstallHook = "vscode:uninstall"
+
+var metaHookDangerous = []string{"curl", "wget", "node -e", "base64", "powershell", "bash -c", "sh -c", "eval", "http://", "https://"}
+
+func metaHookIsDangerous(script string) bool {
+	lower := strings.ToLower(script)
+	for _, tok := range metaHookDangerous {
+		if strings.Contains(lower, tok) {
+			return true
+		}
+	}
+	return false
+}
 
 func metaInstallHook(c *ExtCtx) []Finding {
 	var out []Finding
-	for _, hook := range metaHookNames {
-		script, ok := c.Ext.Scripts[hook]
-		if !ok || strings.TrimSpace(script) == "" {
+	for _, hook := range metaNPMHooks {
+		script := strings.TrimSpace(c.Ext.Scripts[hook])
+		if script == "" {
 			continue
 		}
-		sev := High
-		lower := strings.ToLower(script)
-		for _, tok := range metaHookDangerous {
-			if strings.Contains(lower, tok) {
-				sev = Critical
-				break
-			}
+		sev, why := Low, "build-time npm script (VS Code does not run it on install)"
+		if metaHookIsDangerous(script) {
+			sev, why = High, "npm script downloads or decodes code (not run by VS Code on install, but shows intent)"
 		}
 		out = append(out, Finding{
 			Rule:     "install_hook",
 			Severity: sev,
-			Detail:   fmt.Sprintf("package.json %q script runs at install time: %s", hook, metaTruncate(script, 160)),
+			Detail:   fmt.Sprintf("package.json %q: %s: %s", hook, why, metaTruncate(script, 160)),
+		})
+	}
+	if script := strings.TrimSpace(c.Ext.Scripts[metaUninstallHook]); script != "" {
+		sev := Medium
+		if metaHookIsDangerous(script) {
+			sev = Critical
+		}
+		out = append(out, Finding{
+			Rule:     "install_hook",
+			Severity: sev,
+			Detail:   fmt.Sprintf("package.json %q runs a Node script after uninstall: %s", metaUninstallHook, metaTruncate(script, 160)),
 		})
 	}
 	return out

@@ -326,7 +326,7 @@ func TestHygienePlaintextTokenWrite(t *testing.T) {
 		{
 			name: "leetcode user.json",
 			src:  "const user = { cookie, sessionId, csrfToken };\nfs.writeFileSync(path.join(os.homedir(), '.lc', 'user.json'), JSON.stringify(user));\n",
-			want: 1, sev: High, detail: "cookie/session/csrf",
+			want: 1, sev: High, detail: "cookie/sessionid/csrftoken",
 		},
 		{
 			name: "inline object with HOME env",
@@ -343,6 +343,13 @@ func TestHygienePlaintextTokenWrite(t *testing.T) {
 			rel:  "scripts/login.py",
 			src:  "with open(os.path.expanduser('~/.tool/session'), 'w') as f:\n    f.write(json.dumps({'jwt': jwt}))\n",
 			want: 1, sev: High, detail: "jwt",
+		},
+		{
+			// regression: ms-python.vscode-python-envs writes .gitignore into
+			// a venv; `t.token` there is a cancellation token.
+			name: "gitignore next to a cancellation token",
+			src:  "(0,E.throwIfCancelled)(t.token),this.addEnvironment(r);try{await s.writeFile(c.join(n,\".gitignore\"),\"*\\n\",{flag:\"w\"})}catch(e){}\n",
+			want: 0,
 		},
 		{
 			name: "plain cache file",
@@ -468,4 +475,29 @@ func TestHygieneAgentConfigWrite(t *testing.T) {
 			want: 0,
 		},
 	})
+}
+
+// Regression: backported fixes on older release lines are not vulnerable
+// (ms-toolsai.jupyter bundles semver ^5.7.2 and ws ^6.2.3).
+func TestHygieneAdvisoryBackports(t *testing.T) {
+	tests := []struct {
+		name, version string
+		want          bool
+	}{
+		{"semver", "^5.7.2", false},
+		{"semver", "5.7.1", true},
+		{"semver", "6.3.0", true},
+		{"semver", "7.6.0", false},
+		{"ws", "^6.2.3", false},
+		{"ws", "6.2.1", true},
+		{"ws", "4.1.0", true}, // older line, no backport
+		{"ws", "8.18.0", false},
+		{"tar", "4.4.19", false},
+		{"lodash", "4.17.20", true},
+	}
+	for _, tc := range tests {
+		if got := len(hygVulnerable(tc.name, tc.version)) > 0; got != tc.want {
+			t.Errorf("%s@%s vulnerable = %v, want %v", tc.name, tc.version, got, tc.want)
+		}
+	}
 }

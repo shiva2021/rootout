@@ -217,8 +217,12 @@ var (
 	hygWriteCallRe = regexp.MustCompile(`\b(?:writeFile|writeFileSync|outputFile|outputFileSync|open)\(`)
 	hygPyOpenWRe   = regexp.MustCompile(`['"][wa]b?['"]`)
 	hygHomeRe      = regexp.MustCompile(`homedir\(\)|\bHOME\b|\bUSERPROFILE\b|['"\x60]~[/'"\x60]`)
-	hygDotDirRe    = regexp.MustCompile(`['"\x60](\.[A-Za-z][\w-]*)[/'"\x60]`)
-	hygSecretKeyRe = regexp.MustCompile(`(?i)\b(cookie|session|token|jwt|csrf|password|secret|api_?key|access_token|refresh_token)`)
+	// A dot-name only counts as a home dot-directory when it is a directory
+	// component ('.lc/…' or '.lc', 'x'); a lone '.gitignore' is a file.
+	hygDotDirRe = regexp.MustCompile(`['"\x60](\.[A-Za-z][\w-]*)(?:/|['"\x60]\s*,\s*['"\x60])`)
+	// Secret names only as object keys or shorthand properties: never after
+	// a dot (t.token is a property read, e.g. a cancellation token).
+	hygSecretKeyRe = regexp.MustCompile(`(?i)(?:^|[^.\w$])((?:cookie|session|token|jwt|csrf|password|secret|api_?key|access_?token|refresh_?token)\w*)['"\x60]?\s*[:,}=]`)
 )
 
 // hygFileExts are dot-prefixed literals that are extensions, not dot-dirs.

@@ -72,6 +72,9 @@ var (
 	exfilDottedIP   = regexp.MustCompile(`^\d{1,3}(?:\.\d{1,3}){3}$`)
 )
 
+// exfilAccessCtx: evidence that a credential path is actually resolved or read.
+var exfilAccessCtx = regexp.MustCompile(`(?i)homedir|\bhome(?:dir|path)?\b|process\.env\.(?:HOME|USERPROFILE)|\$HOME|%USERPROFILE%|['"\x60]~/|expanduser|Path\.home\(|readFile|createReadStream|readdir|existsSync|\bopen\(`)
+
 // exfilCredTokens are credential and wallet paths. Common words (atomic,
 // ledger, keystore, Cookies, Exodus) need path or product context so an
 // ordinary identifier does not fire.
@@ -108,7 +111,7 @@ var exfilCredTokens = []exfilPat{
 var exfilEnvDump = []exfilPat{
 	{regexp.MustCompile(`JSON\.stringify\(\s*process\.env\s*\)`), "JSON.stringify(process.env)", Medium},
 	{regexp.MustCompile(`Object\.(?:keys|entries|values)\(\s*process\.env\s*\)`), "Object.keys(process.env)", Medium},
-	{regexp.MustCompile(`(?m)(?:\bfetch\s*\(|\baxios\b|\.post\s*\(|https?\.request\s*\(|\bbody\s*:|\bdata\s*:|\bjson\s*:)[^\n]*?(?:\.\.\.)?\bprocess\.env\s*(?:[,)\]}]|$)`), "process.env sent whole", Medium},
+	{regexp.MustCompile(`(?m)(?:\bfetch\s*\(|\baxios\b|\.post\s*\(|https?\.request\s*\(|\bbody\s*:|\bdata\s*:|\bjson\s*:)[^\n]{0,120}?(?:\.\.\.)?\bprocess\.env\s*(?:[,)\]}]|$)`), "process.env sent whole", Medium},
 	{regexp.MustCompile(`dict\(\s*os\.environ\s*\)`), "dict(os.environ)", Medium},
 	{regexp.MustCompile(`json\.dumps\(\s*os\.environ`), "json.dumps(os.environ)", Medium},
 	{regexp.MustCompile(`\bprintenv\b`), "printenv", Medium},
@@ -123,7 +126,7 @@ var exfilKeychain = []exfilPat{
 
 var exfilCapture = []exfilPat{
 	{regexp.MustCompile(`\bpbpaste\b`), "pbpaste", Medium},
-	{regexp.MustCompile(`clipboard\.readText\b`), "clipboard.readText", Medium},
+	{regexp.MustCompile(`\bclipboard\.readText\b`), "clipboard.readText", Medium},
 	{regexp.MustCompile(`\bscreencapture\b`), "screencapture", Medium},
 	{regexp.MustCompile(`\bxclip\s+-o\b`), "xclip -o", Medium},
 	{regexp.MustCompile(`\bGet-Clipboard\b`), "Get-Clipboard", Medium},
@@ -353,7 +356,12 @@ func exfilCredentialFileAccess(c *FileCtx) []Finding {
 	e := exfilNew(c, "credential_file_access")
 	shell := strings.EqualFold(path.Ext(c.Rel), ".sh")
 	e.scan(exfilCredTokens, "references credential path %s", func(off, end int) bool {
-		return shell || exfilQuoted(c.Data, off, end)
+		if shell {
+			return true
+		}
+		// A bare file name in a list (syntax-highlighting tables, file
+		// watchers) is not access; require a home-dir or file-read context.
+		return exfilQuoted(c.Data, off, end) && exfilAccessCtx.Match(c.Data[max(0, off-200):min(len(c.Data), end+120)])
 	})
 	return e.out
 }
@@ -364,7 +372,18 @@ func exfilEnvDumpRule(c *FileCtx) []Finding {
 		return nil
 	}
 	e := exfilNew(c, "env_dump")
-	e.scan(exfilEnvDump, "whole environment serialised: %s", nil)
+	for _, p := range exfilEnvDump {
+		for _, m := range p.re.FindAllIndex(c.Data, exfilCap*8) {
+			// Passing the environment to a child process is routine; sending
+			// it to the network is exfiltration (an intent rule, see D-017).
+			win := c.Data[max(0, m[0]-300):min(len(c.Data), m[1]+300)]
+			if exfilHTTPClient.Match(win) {
+				e.add("env_exfil", High, m[0], "whole environment sent in a network request: "+p.label)
+			} else {
+				e.add("", p.sev, m[0], "whole environment serialised: "+p.label)
+			}
+		}
+	}
 	if strings.EqualFold(path.Ext(c.Rel), ".sh") {
 		for _, m := range exfilEnvShell.FindAllIndex(c.Data, exfilCap) {
 			e.add("", Medium, m[0], "whole environment serialised: env > file")
@@ -390,7 +409,11 @@ func exfilClipboardOrScreenCapture(c *FileCtx) []Finding {
 		return nil
 	}
 	e := exfilNew(c, "clipboard_or_screen_capture")
-	e.scan(exfilCapture, "reads clipboard or screen via %s", nil)
+	e.scan(exfilCapture, "reads clipboard or screen via %s", func(off, _ int) bool {
+		// vscode.env.clipboard is the editor API behind paste-a-URL prompts,
+		// not a covert read.
+		return !bytes.HasSuffix(c.Data[:off], []byte("env."))
+	})
 	return e.out
 }
 

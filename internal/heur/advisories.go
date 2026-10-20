@@ -6,8 +6,9 @@ import (
 )
 
 // hygAdvisory says that versions of a package below fixedIn carry a known
-// vulnerability. An empty fixedIn means every version is affected (the
-// package is deprecated with no fix).
+// vulnerability. fixedIn may list one fixed version per release line,
+// space-separated, for advisories that were backported ("5.7.2 6.3.1 7.5.2").
+// An empty fixedIn means every version is affected (deprecated, no fix).
 type hygAdvisory struct {
 	name     string
 	fixedIn  string
@@ -31,12 +32,12 @@ var hygAdvisories = []hygAdvisory{
 	// Well-known.
 	{"lodash", "4.17.21", "CVE-2021-23337"},
 	{"minimist", "1.2.6", "CVE-2021-44906"},
-	{"node-fetch", "2.6.7", "CVE-2022-0235"},
-	{"ws", "7.4.6", "CVE-2021-32640"},
-	{"tar", "6.1.9", "CVE-2021-37713"},
+	{"node-fetch", "2.6.7 3.1.1", "CVE-2022-0235"},
+	{"ws", "5.2.3 6.2.2 7.4.6", "CVE-2021-32640"},
+	{"tar", "4.4.18 5.0.10 6.1.9", "CVE-2021-37713"},
 	{"shelljs", "0.8.5", "CVE-2022-0144"},
 	{"xml2js", "0.5.0", "CVE-2023-0842"},
-	{"semver", "7.5.2", "CVE-2022-25883"},
+	{"semver", "5.7.2 6.3.1 7.5.2", "CVE-2022-25883"},
 	{"ejs", "3.1.7", "CVE-2022-29078"},
 	{"jsonwebtoken", "9.0.0", "CVE-2022-23529"},
 	{"node-forge", "1.3.0", "CVE-2022-24771"},
@@ -102,13 +103,41 @@ func hygVulnerable(name, version string) []hygAdvisory {
 		if !ok {
 			continue
 		}
-		fixed, ok := hygParseSemver(a.fixedIn)
-		if !ok {
-			continue
-		}
-		if hygLess(have, fixed) {
+		fixed, ok := hygFixFor(have, a.fixedIn)
+		if ok && hygLess(have, fixed) {
 			hits = append(hits, a)
 		}
 	}
 	return hits
+}
+
+// hygFixFor picks the fixed version that applies to have: the fix on the same
+// major.minor line, else the same major line, else the lowest fix above have
+// (an older line with no backport). ok is false when have is newer than every
+// listed line.
+func hygFixFor(have hygSemver, fixedIn string) (hygSemver, bool) {
+	var fixes []hygSemver
+	for _, f := range strings.Fields(fixedIn) {
+		if v, ok := hygParseSemver(f); ok {
+			fixes = append(fixes, v)
+		}
+	}
+	for _, f := range fixes {
+		if f[0] == have[0] && f[1] == have[1] {
+			return f, true
+		}
+	}
+	for _, f := range fixes {
+		if f[0] == have[0] {
+			return f, true
+		}
+	}
+	var best hygSemver
+	found := false
+	for _, f := range fixes {
+		if hygLess(have, f) && (!found || hygLess(f, best)) {
+			best, found = f, true
+		}
+	}
+	return best, found
 }

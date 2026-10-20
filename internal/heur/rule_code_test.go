@@ -183,7 +183,9 @@ func TestCodeInvisibleUnicode(t *testing.T) {
 	glass := "const s = \"" + strings.Repeat(string(rune(0xE0100+7)), 40) + "\"; eval(decode(s));"
 	codeRun(t, "invisible_unicode", []codeCase{
 		{name: "glassworm", src: "x();\n" + glass, want: 2, sev: Critical, detail: "40 invisible code points (variation selectors supplement"},
-		{name: "zero width in identifier", src: "const a\u200B = 1;", want: 1, sev: Critical, detail: "zero-width"},
+		{name: "zero width in identifier", rule: "invisible_identifier", src: "const a\u200B = 1;", want: 1, sev: High, detail: "zero-width"},
+		{name: "lone zero width is not a payload", src: "const a\u200B = 1;", want: 1, sev: Info, detail: "isolated"},
+		{name: "scattered in charset table", src: "var t = '\\ufeff\u200b\u2013'; var h = {af:'\u2061'};", want: 1, sev: Info, detail: "isolated"},
 		{name: "pua run", src: "const p = '" + strings.Repeat("\uE123", 10) + "';", want: 1, sev: Critical, detail: "private use"},
 		{name: "lone BOM", src: string(rune(0xFEFF)) + "const a = 1;"},
 		{name: "emoji with VS16", src: "log('\u26A0\uFE0F warning');"},
@@ -248,4 +250,17 @@ func TestCodeEntropy(t *testing.T) {
 	if h := codeEntropy([]byte("abcd")); h != 2 {
 		t.Errorf("entropy(abcd) = %v", h)
 	}
+}
+
+// Regressions from the first real-machine scan (Microsoft Python/Jupyter
+// bundles): unrelated code in one minified file must not form a chain.
+func TestCodeRemoteExecChainProximity(t *testing.T) {
+	far := "fetch(u);" + strings.Repeat("x", 5000) + "fs.chmodSync(p,493);"
+	codeRun(t, "remote_exec_chain", []codeCase{
+		{name: "download far from chmod", src: far},
+		{name: "shell-name regex is not a pipe", src: "fetch(u); const isShell = /bash|zsh|fish/i.test(p);"},
+		{name: "official https installer", src: `fetch(u); args: ["-c", "curl -LsSf https://astral.sh/uv/install.sh | sh"]`, want: 1, sev: Medium, detail: "fixed HTTPS"},
+		{name: "variable url into sh", src: "exec(`curl -s ${u} | sh`)", want: 1, sev: Critical, detail: "non-fixed"},
+		{name: "download then chmod nearby", src: "https.get(u, r => r.pipe(f)); fs.chmodSync(p, 0o755);", want: 1, sev: Critical, detail: "chmod"},
+	})
 }

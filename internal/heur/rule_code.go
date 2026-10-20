@@ -443,6 +443,21 @@ func codeInvisibleBlock(r rune) string {
 	return ""
 }
 
+func codeIdentByte(r rune) bool {
+	return r == '_' || r == '$' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9'
+}
+
+// codeIdentNext: the byte after the character is plain code (ASCII, not a quote).
+func codeIdentNext(b byte) bool {
+	return b < utf8.RuneSelf && b != '"' && b != '\'' && b != '`' && b != '\\'
+}
+
+// Thresholds for invisible_unicode: a payload run vs. a suspicious density.
+const (
+	codeInvisibleRun       = 8
+	codeInvisibleScattered = 64
+)
+
 func codeInvisibleUnicode(c *FileCtx) []codeHit {
 	d := c.Data
 	ascii := true
@@ -455,11 +470,13 @@ func codeInvisibleUnicode(c *FileCtx) []codeHit {
 	if ascii {
 		return nil
 	}
-	type blk struct{ count, first int }
+	type blk struct{ count, first, run, maxRun int }
 	blocks := map[string]*blk{}
 	invalid := blk{first: -1}
 	prev := rune(-1) // -1: start of file
 	prevHit := false
+	var cur *blk // block of the run in progress
+	spoof := -1  // first invisible character inside an identifier
 	for off := 0; off < len(d); {
 		r, size := utf8.DecodeRune(d[off:])
 		if r == utf8.RuneError && size == 1 {
@@ -488,6 +505,9 @@ func codeInvisibleUnicode(c *FileCtx) []codeHit {
 			// Follows a non-ASCII base (emoji + VS16, CJK + IVS, ZWJ in an
 			// emoji sequence, bidi marks in RTL text): legitimate.
 		}
+		if hit && spoof < 0 && codeIdentByte(prev) && off+size < len(d) && codeIdentNext(d[off+size]) {
+			spoof = off
+		}
 		if hit {
 			b := blocks[name]
 			if b == nil {
@@ -495,17 +515,36 @@ func codeInvisibleUnicode(c *FileCtx) []codeHit {
 				blocks[name] = b
 			}
 			b.count++
+			if cur != b {
+				if cur != nil {
+					cur.run = 0
+				}
+				cur = b
+			}
+			b.run++
+			b.maxRun = max(b.maxRun, b.run)
+		} else if cur != nil {
+			cur.run, cur = 0, nil
 		}
 		prev, prevHit = r, hit
 		off += size
 	}
 	var hits []codeHit
 	for name, b := range blocks {
-		sev := Critical
-		if name == codeBlockPUA && b.count < 8 {
-			sev = Medium // a few icon-font glyphs; a payload needs many
+		// A hidden payload encodes bytes as long unbroken runs of invisible
+		// characters. Scattered single ones appear legitimately in Unicode
+		// data tables, HTML entity maps and charset tables.
+		switch {
+		case b.maxRun >= codeInvisibleRun:
+			hits = append(hits, codeHit{off: b.first, sev: Critical, detail: fmt.Sprintf("run of %d invisible code points (%s; %d in file): GlassWorm-style hidden payload, invisible in editors and diffs", b.maxRun, name, b.count)})
+		case b.count >= codeInvisibleScattered:
+			hits = append(hits, codeHit{off: b.first, sev: Medium, detail: fmt.Sprintf("%d scattered invisible code points (%s): unusual density for source code", b.count, name)})
+		default:
+			hits = append(hits, codeHit{off: b.first, sev: Info, detail: fmt.Sprintf("%d isolated invisible code points (%s), typical of character tables", b.count, name)})
 		}
-		hits = append(hits, codeHit{off: b.first, sev: sev, detail: fmt.Sprintf("%d invisible code points (%s) in source: GlassWorm-style hidden payload, invisible in editors and diffs", b.count, name)})
+	}
+	if spoof >= 0 {
+		hits = append(hits, codeHit{off: spoof, sev: High, rule: "invisible_identifier", detail: "zero-width or invisible character inside an identifier: two names that look identical can differ (Trojan Source-style spoofing)"})
 	}
 	if invalid.count > 0 {
 		hits = append(hits, codeHit{off: invalid.first, sev: Info, rule: "invalid_utf8", detail: fmt.Sprintf("%d invalid UTF-8 bytes: not valid source text", invalid.count)})
@@ -524,6 +563,21 @@ var (
 	reCodeExecSite  = regexp.MustCompile(`\b(?:exec|execSync|spawn|spawnSync|execFile|execFileSync)\s*\(|subprocess\.\w+\s*\(|os\.system\s*\(`)
 )
 
+// codeChainWindow is how far apart (bytes) a download and an exec/chmod may
+// be to count as one chain. Minified bundles put unrelated code in one file,
+// so "same file" is meaningless; "same few lines" is not.
+const codeChainWindow = 1500
+
+// reCodeCLIDownload: only a command-line downloader can be piped into sh.
+var reCodeCLIDownload = regexp.MustCompile(`\b(?:curl|wget)\s|Invoke-WebRequest|\biwr\s`)
+
+var reCodeLiteralHTTPS = regexp.MustCompile(`(?:curl|wget)[^\n|]{0,80}?['"]?https://[A-Za-z0-9.-]+\.[a-z]{2,}/[^\s'"|]*['"]?\s*\|`)
+
+// codeNear reports whether re matches within window bytes before off.
+func codeNear(d []byte, off, window int, re *regexp.Regexp) bool {
+	return re.Match(d[max(0, off-window):off])
+}
+
 func codeRemoteExecChain(c *FileCtx) []codeHit {
 	d := c.Data
 	if !reCodeDownload.Match(d) {
@@ -531,22 +585,38 @@ func codeRemoteExecChain(c *FileCtx) []codeHit {
 	}
 	var hits []codeHit
 	for _, m := range reCodeChmodX.FindAllIndex(d, -1) {
-		hits = append(hits, codeHit{off: m[0], sev: Critical, detail: "downloads content and marks a file executable: the classic fetch -> chmod +x -> run second-stage loader"})
+		if codeNear(d, m[0], codeChainWindow, reCodeDownload) {
+			hits = append(hits, codeHit{off: m[0], sev: Critical, detail: "downloads content and marks a file executable: the classic fetch -> chmod +x -> run second-stage loader"})
+		}
 	}
 	for _, m := range reCodePSEnc.FindAllIndex(d, -1) {
-		hits = append(hits, codeHit{off: m[0], sev: Critical, detail: "downloads content and runs a base64-encoded PowerShell command"})
+		if codeNear(d, m[0], codeChainWindow, reCodeDownload) {
+			hits = append(hits, codeHit{off: m[0], sev: Critical, detail: "downloads content and runs a base64-encoded PowerShell command"})
+		}
 	}
 	for _, m := range reCodePipeShell.FindAllIndex(d, -1) {
-		hits = append(hits, codeHit{off: m[0], sev: Critical, detail: "pipes downloaded content straight into a shell"})
+		// The download tool must be on the same line, just before the pipe.
+		line := d[max(bytes.LastIndexByte(d[:m[0]], '\n')+1, m[0]-300):m[1]]
+		if !reCodeCLIDownload.Match(line) {
+			continue
+		}
+		if reCodeLiteralHTTPS.Match(line) {
+			hits = append(hits, codeHit{off: m[0], sev: Medium, detail: "pipes a fixed HTTPS install script into a shell (common for official installers, but runs whatever that URL serves)"})
+		} else {
+			hits = append(hits, codeHit{off: m[0], sev: Critical, detail: "pipes downloaded content from a non-fixed or plain-HTTP source straight into a shell"})
+		}
 	}
 	if !bytes.Contains(d, []byte("child_process")) && !bytes.Contains(d, []byte("subprocess")) && !bytes.Contains(d, []byte("os.system")) {
 		return hits
 	}
 	writes := reCodeWrite.FindAllIndex(d, -1)
 	for _, e := range reCodeExecSite.FindAllIndex(d, -1) {
+		if !codeNear(d, e[0], codeChainWindow, reCodeDownload) {
+			continue
+		}
 		for _, w := range writes {
-			if w[0] < e[0] && e[0]-w[0] <= 2048 {
-				hits = append(hits, codeHit{off: e[0], sev: Critical, detail: "downloads content, writes a file and executes it within the same code path: remote second-stage loader"})
+			if w[0] < e[0] && e[0]-w[0] <= codeChainWindow {
+				hits = append(hits, codeHit{off: e[0], sev: Critical, detail: "downloads content, writes a file and executes it within a few lines: remote second-stage loader"})
 				break
 			}
 		}

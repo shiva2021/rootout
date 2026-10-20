@@ -222,27 +222,31 @@ func TestScore(t *testing.T) {
 	w := func(rule string, sev Severity, halves int) weighted {
 		return weighted{Finding: Finding{Rule: rule, Severity: sev}, halves: halves}
 	}
+	full, half := fullWeight, halfWeight
 	tests := []struct {
-		name string
-		in   []weighted
-		want int
+		name    string
+		in      []weighted
+		trusted bool
+		want    int
 	}{
-		{"empty", nil, 0},
-		{"info only", []weighted{w("a", Info, fullWeight)}, 0},
-		{"one low", []weighted{w("a", Low, fullWeight)}, 5},
-		{"sum below cap", []weighted{w("a", High, fullWeight), w("a", Low, fullWeight)}, 35},
-		{"per-rule cap", []weighted{w("a", High, fullWeight), w("a", High, fullWeight), w("a", High, fullWeight)}, 60},
-		{"cap uses highest weight", []weighted{w("a", Medium, fullWeight), w("a", Low, fullWeight), w("a", Low, fullWeight), w("a", Low, fullWeight), w("a", Low, fullWeight)}, 30},
-		{"rules add up", []weighted{w("a", High, fullWeight), w("b", Medium, fullWeight)}, 45},
-		{"clamp at 100", []weighted{w("a", Critical, fullWeight), w("a", Critical, fullWeight), w("b", Critical, fullWeight)}, 100},
-		{"half weight", []weighted{w("obf_a", High, halfWeight)}, 15},
-		{"half rounds up", []weighted{w("obf_a", Low, halfWeight)}, 3},
-		{"half weight capped on half", []weighted{w("obf_a", High, halfWeight), w("obf_a", High, halfWeight), w("obf_a", High, halfWeight)}, 30},
-		{"mixed weights in one rule", []weighted{w("obf_a", High, fullWeight), w("obf_a", High, halfWeight)}, 45},
+		{"empty", nil, false, 0},
+		{"info only", []weighted{w("x", Info, full)}, false, 0},
+		{"one low indicator", []weighted{w("x", Low, full)}, false, 5},
+		{"indicator repeats add 25% each", []weighted{w("x", High, full), w("x", High, full)}, false, 38},
+		{"indicator repeats cap at +50%", []weighted{w("x", High, full), w("x", High, full), w("x", High, full), w("x", High, full)}, false, 45},
+		{"indicators combine with diminishing returns", []weighted{w("x", High, full), w("y", Medium, full)}, false, 41},
+		{"criticals approach 100", []weighted{w("x", Critical, full), w("x", Critical, full), w("y", Critical, full)}, false, 81},
+		{"capabilities capped", []weighted{w("eval_dynamic", High, full), w("child_process_shell", Medium, full), w("obf_a", High, full)}, false, CapabilityCap},
+		{"capabilities capped lower when trusted", []weighted{w("eval_dynamic", High, full), w("obf_a", High, full)}, true, TrustedCapabilityCap},
+		{"capability below cap counts fully", []weighted{w("child_process_shell", Medium, full)}, false, 15},
+		{"half-weight obf", []weighted{w("obf_a", High, half)}, false, 15},
+		{"indicators not discounted for trusted", []weighted{w("x", Critical, full)}, true, 50},
+		{"capability plus indicator", []weighted{w("eval_dynamic", High, full), w("obf_a", High, full), w("x", Critical, full)}, false, 85},
+		{"clamp at 100", []weighted{w("eval_dynamic", High, full), w("obf_a", High, full), w("x", Critical, full), w("y", Critical, full), w("z", Critical, full)}, false, 100},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := score(tc.in); got != tc.want {
+			if got := score(tc.in, tc.trusted); got != tc.want {
 				t.Errorf("score = %d, want %d", got, tc.want)
 			}
 		})

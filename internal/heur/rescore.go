@@ -49,7 +49,7 @@ func Rescore(_ context.Context, r Report, m *Marketplace) Report {
 			cmp.Compare(a.Line, b.Line),
 		)
 	})
-	out.Score = score(found)
+	out.Score = score(found, trusted)
 	return out
 }
 
