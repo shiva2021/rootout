@@ -46,15 +46,19 @@ const ByManual = "manual"
 // Item is one leftover plus the user's selection.
 type Item struct {
 	leftover.Leftover
-	Selected bool `json:"selected"`
+	Selected bool   `json:"selected"`
+	Group    string `json:"group,omitempty"` // display group; overrides grouping by Kind when set
 }
 
 // Plan is the reviewed removal.
 type Plan struct {
 	App     app.App `json:"app"`
+	Label   string  `json:"label,omitempty"` // title for plans not about one app, e.g. "Orphaned leftovers"
 	Items   []Item  `json:"items"`
 	Mode    Mode    `json:"-"`
 	BrewZap bool    `json:"brew_zap"` // run `brew uninstall --zap` first; only meaningful when App.Cask != ""
+	// StartUnselected tells UIs that nothing is ticked by default; New sets it.
+	StartUnselected bool `json:"-"`
 }
 
 // Options for Build.
@@ -102,6 +106,20 @@ func Build(ctx context.Context, env fsx.Env, a app.App, opts Options) (*Plan, er
 	return p, nil
 }
 
+// New wraps already-discovered items in a plan that is not about one app,
+// such as orphaned leftovers. App stays zero, so Execute neither quits an app
+// nor runs brew zap; Validate still re-checks every path before deletion.
+// When startUnselected is set every item begins unselected.
+func New(label string, items []Item, mode Mode, startUnselected bool) *Plan {
+	p := &Plan{Label: label, Items: items, Mode: mode, StartUnselected: startUnselected}
+	if startUnselected {
+		for i := range p.Items {
+			p.Items[i].Selected = false
+		}
+	}
+	return p
+}
+
 // Add appends a user-chosen path after validating it. Missing paths are an error.
 func (p *Plan) Add(env fsx.Env, path string, so safety.Options) error {
 	path = filepath.Clean(path)
@@ -140,6 +158,21 @@ func (p *Plan) Selected() []Item {
 		if it.Selected {
 			out = append(out, it)
 		}
+	}
+	return out
+}
+
+// Groups returns the distinct Item.Group values in first-seen order; empty
+// when no item has one.
+func (p *Plan) Groups() []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, it := range p.Items {
+		if it.Group == "" || seen[it.Group] {
+			continue
+		}
+		seen[it.Group] = true
+		out = append(out, it.Group)
 	}
 	return out
 }
