@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/shiva2021/purge/internal/heur"
+	"github.com/shiva2021/rootout/internal/heur"
 )
 
 // Fake is a Provider for tests: it records each report and returns Result

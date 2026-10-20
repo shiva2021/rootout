@@ -10,13 +10,13 @@ never on the main account.
    - a Mac App Store app (any free one),
    - a pkg-installed app that ships a LaunchAgent or privileged helper (e.g. a printer utility).
 2. Launch each app once so it writes preferences, caches and saved state.
-3. Build purge from the main account and copy `bin/purge` over, or `make build` in the QA account.
+3. Build rootout from the main account and copy `bin/rootout` over, or `make build` in the QA account.
 
 ## Checklist per app
 ```bash
-purge list --json | jq '.[] | select(.name=="<App>")'
-purge remove "<App>" --dry-run            # inspect every path and its MatchedBy
-purge remove "<App>"                       # confirm in the prompt
+rootout list --json | jq '.[] | select(.name=="<App>")'
+rootout remove "<App>" --dry-run            # inspect every path and its MatchedBy
+rootout remove "<App>"                       # confirm in the prompt
 find ~/Library /Library -iname '*<bundle-id>*' 2>/dev/null   # expect nothing
 ls ~/.Trash                                # bundle + leftovers present
 ```
@@ -26,9 +26,9 @@ whether the admin prompt appeared exactly once when root-owned items existed.
 
 ## Negative checks (must refuse)
 ```bash
-purge remove Mail      # protected: com.apple.*
-purge remove Safari
-purge remove Finder
+rootout remove Mail      # protected: com.apple.*
+rootout remove Safari
+rootout remove Finder
 ```
 
 ## Results log

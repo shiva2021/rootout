@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/shiva2021/purge/internal/ext"
+	"github.com/shiva2021/rootout/internal/ext"
 )
 
 // Severity of one finding.
@@ -195,7 +195,7 @@ func RegisterExt(r ExtRule) {
 	extRules = append(extRules, r)
 }
 
-// Rules returns the registered rule names, for `purge scan --list-rules`.
+// Rules returns the registered rule names, for `rootout scan --list-rules`.
 func Rules() (files, exts []string) {
 	regMu.Lock()
 	defer regMu.Unlock()

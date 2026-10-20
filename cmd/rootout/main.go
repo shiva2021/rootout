@@ -1,5 +1,5 @@
-// Command purge uninstalls macOS apps completely and scans VS Code-family
-// extensions for malicious behaviour. Bare `purge` opens the TUI; subcommands
+// Command rootout uninstalls macOS apps completely and scans VS Code-family
+// extensions for malicious behaviour. Bare `rootout` opens the TUI; subcommands
 // do the same work non-interactively.
 package main
 
@@ -12,7 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/shiva2021/purge/internal/license"
+	"github.com/shiva2021/rootout/internal/license"
 )
 
 // version is set by the linker (see Makefile).
@@ -38,13 +38,13 @@ func main() {
 
 func runMain(args []string) int {
 	if os.Geteuid() == 0 {
-		fmt.Fprintln(os.Stderr, "purge: refusing to run as root; run it as your normal user and it will ask for admin rights only when needed")
+		fmt.Fprintln(os.Stderr, "rootout: refusing to run as root; run it as your normal user and it will ask for admin rights only when needed")
 		return exitError
 	}
 
 	var g globalFlags
 	root := &cobra.Command{
-		Use:           "purge",
+		Use:           "rootout",
 		Short:         "Uninstall macOS apps completely and scan editor extensions for threats",
 		Version:       version,
 		SilenceUsage:  true,
@@ -82,10 +82,10 @@ func runMain(args []string) int {
 	}
 	var ee *exitErr
 	if errors.As(err, &ee) {
-		fmt.Fprintln(os.Stderr, "purge:", ee.msg)
+		fmt.Fprintln(os.Stderr, "rootout:", ee.msg)
 		return ee.code
 	}
-	fmt.Fprintln(os.Stderr, "purge:", err)
+	fmt.Fprintln(os.Stderr, "rootout:", err)
 	return exitError
 }
 

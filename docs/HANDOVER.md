@@ -7,19 +7,19 @@ M0–M4 code complete; `make test` and `make lint` green; 28 commits on `main`, 
 
 ## Done this session
 - Plan (`docs/PLAN.md`), decisions D-001…D-017, knowledge base.
-- Apps: `purge` (picker → review → remove, loops), `list`, `remove` (Trash/permanent/dry-run, brew zap, one admin elevation, receipts, launchd bootout).
+- Apps: `rootout` (picker → review → remove, loops), `list`, `remove` (Trash/permanent/dry-run, brew zap, one admin elevation, receipts, launchd bootout).
 - Extensions: `scan` (5 editors, 4 rule groups, capability/intent scoring, `--online` registry data, review screen with uninstall), golden corpus.
 - AI: Anthropic and OpenAI via official SDKs with structured JSON, Ollama via HTTP (`think:false`); keys in Keychain; `config` command; Ollama picker that detects, installs, starts, recommends by RAM tier and pulls with progress.
 - `doctor`.
 
 ## Real-machine results (this Mac: M1, 8 GB, 47 user apps, 12 VS Code extensions)
-- `purge remove Spotify -n`: bundle + 7 leftovers, 3.8 GB; `Mail` refused.
-- `purge scan --all`: scores 5–30. The 30 is `ms-python.vscode-python-envs`, which pipes the official uv installer from astral.sh into `sh` (true finding, Medium).
+- `rootout remove Spotify -n`: bundle + 7 leftovers, 3.8 GB; `Mail` refused.
+- `rootout scan --all`: scores 5–30. The 30 is `ms-python.vscode-python-envs`, which pipes the official uv installer from astral.sh into `sh` (true finding, Medium).
 - Review screen and app picker verified under a pseudo-terminal (render + quit). Live removal and live LLM calls have not been run.
 
 ## Next steps
 1. M2 task 7: follow `docs/kb/qa.md` on a throwaway macOS user account (cask, App Store and pkg app). Live removal has only run in unit tests.
-2. Try `purge scan --llm` with a real key or `purge config models --pick` with Ollama; only recorded-HTTP tests exist so far.
+2. Try `rootout scan --llm` with a real key or `rootout config models --pick` with Ollama; only recorded-HTTP tests exist so far.
 3. Create the private GitHub repo and push (needs Shivang's go-ahead).
 4. M5: GoReleaser config, notarization (needs Apple Developer account), private Homebrew tap.
 5. M6 licensing: write a separate plan first.
@@ -33,9 +33,9 @@ M0–M4 code complete; `make test` and `make lint` green; 28 commits on `main`, 
 ## How to verify
 ```bash
 make build && make test && make lint && scripts/toolchain_check.sh
-./bin/purge doctor
-./bin/purge remove Spotify --dry-run
-./bin/purge scan --all --no-tui
+./bin/rootout doctor
+./bin/rootout remove Spotify --dry-run
+./bin/rootout scan --all --no-tui
 ```
 
 ## Gotchas

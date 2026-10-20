@@ -6,15 +6,15 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/shiva2021/purge/internal/app"
-	"github.com/shiva2021/purge/internal/fsx"
-	"github.com/shiva2021/purge/internal/plan"
-	"github.com/shiva2021/purge/internal/priv"
-	"github.com/shiva2021/purge/internal/run"
-	"github.com/shiva2021/purge/internal/tui"
+	"github.com/shiva2021/rootout/internal/app"
+	"github.com/shiva2021/rootout/internal/fsx"
+	"github.com/shiva2021/rootout/internal/plan"
+	"github.com/shiva2021/rootout/internal/priv"
+	"github.com/shiva2021/rootout/internal/run"
+	"github.com/shiva2021/rootout/internal/tui"
 )
 
-// runTUI is the bare `purge` command: pick an app, review its leftovers in
+// runTUI is the bare `rootout` command: pick an app, review its leftovers in
 // the confirm screen, then remove. Loops back to the picker after each app
 // until the user quits.
 func runTUI(ctx context.Context, g *globalFlags) error {
@@ -39,7 +39,7 @@ func runTUI(ctx context.Context, g *globalFlags) error {
 		}
 		p, err := plan.Build(ctx, env, chosen, plan.Options{Mode: plan.Trash, CrashReports: true, Run: run.Default})
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "purge:", err)
+			fmt.Fprintln(os.Stderr, "rootout:", err)
 			continue
 		}
 		ok, err = tui.Confirmer{}.Confirm(ctx, p)

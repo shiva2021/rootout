@@ -10,8 +10,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/shiva2021/purge/internal/llm/ollama"
-	"github.com/shiva2021/purge/internal/output"
+	"github.com/shiva2021/rootout/internal/llm/ollama"
+	"github.com/shiva2021/rootout/internal/output"
 )
 
 const (
@@ -342,7 +342,7 @@ func (m *ModelPicker) choose() tea.Cmd {
 	case mrRoute:
 		route := m.routes[r.idx]
 		if !route.Runnable || m.deps.RunInstall == nil {
-			m.flash = "install Ollama as shown above, then run purge again"
+			m.flash = "install Ollama as shown above, then run rootout again"
 			return nil
 		}
 		m.ask = fmt.Sprintf("Run `%s`? y/n", route.Command)

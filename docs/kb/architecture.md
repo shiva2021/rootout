@@ -3,7 +3,7 @@
 ## Shape
 
 ```
-cmd/purge/main.go            cobra root; bare command -> tui
+cmd/rootout/main.go            cobra root; bare command -> tui
 internal/
   safety/    protected prefixes, generic-name denylist, Validate(path)  <- every deletion passes here, twice
   fsx/       Env{Home, Root}, size walk, lstat helpers (tests point Env at temp dirs)
@@ -19,7 +19,7 @@ internal/
   llm/       Provider interface, Assessment, BuildPrompt, fake + anthropic/openai/ollama adapters
   llm/ollama/ Detect, ListInstalled, Recommend (catalog.go), Pull, Hardware probe
   keychain/  Get/Set/Delete via zalando/go-keyring behind an interface
-  config/    ~/.config/purge/config.toml: provider, model, defaults (never secrets)
+  config/    ~/.config/rootout/config.toml: provider, model, defaults (never secrets)
   license/   Check(ctx) Status — always Allowed until M6
   output/    human table + JSON renderers shared by subcommands
   tui/       Bubble Tea models: app list/search, removal confirm, scan results, model picker
@@ -49,8 +49,8 @@ file caps) → sort by score → optional `registry` enrichment (`--online`) →
 
 ## Data
 
-- No database. State is the filesystem plus `~/.config/purge/config.toml`.
-- Secrets only in Keychain (service `purge`, account = provider name).
+- No database. State is the filesystem plus `~/.config/rootout/config.toml`.
+- Secrets only in Keychain (service `rootout`, account = provider name).
 - Key types live in the package that owns them: `app.App`, `leftover.Leftover`,
   `plan.RemovalPlan`, `ext.Extension`, `heur.Finding/Report`, `llm.Assessment/Provider`.
 

@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shiva2021/purge/internal/fsx"
-	"github.com/shiva2021/purge/internal/run"
+	"github.com/shiva2021/rootout/internal/fsx"
+	"github.com/shiva2021/rootout/internal/run"
 )
 
 // Options injects the two things this package touches outside the
@@ -251,7 +251,7 @@ func parseFolderName(folder string) (publisher, name, version, platform string) 
 	return publisher, name, "", ""
 }
 
-// packageJSON is the subset of an extension manifest purge reads.
+// packageJSON is the subset of an extension manifest rootout reads.
 type packageJSON struct {
 	Publisher        string                     `json:"publisher"`
 	Name             string                     `json:"name"`

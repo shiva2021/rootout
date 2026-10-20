@@ -9,9 +9,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/shiva2021/purge/internal/heur"
-	"github.com/shiva2021/purge/internal/llm"
-	"github.com/shiva2021/purge/internal/output"
+	"github.com/shiva2021/rootout/internal/heur"
+	"github.com/shiva2021/rootout/internal/llm"
+	"github.com/shiva2021/rootout/internal/output"
 )
 
 const (

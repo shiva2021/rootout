@@ -6,9 +6,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/shiva2021/purge/internal/app"
-	"github.com/shiva2021/purge/internal/fsx"
-	"github.com/shiva2021/purge/internal/output"
+	"github.com/shiva2021/rootout/internal/app"
+	"github.com/shiva2021/rootout/internal/fsx"
+	"github.com/shiva2021/rootout/internal/output"
 )
 
 func newListCmd(g *globalFlags) *cobra.Command {

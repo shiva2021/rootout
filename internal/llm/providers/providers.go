@@ -5,10 +5,10 @@ package providers
 import (
 	"fmt"
 
-	"github.com/shiva2021/purge/internal/llm"
-	"github.com/shiva2021/purge/internal/llm/anthropic"
-	"github.com/shiva2021/purge/internal/llm/ollamachat"
-	"github.com/shiva2021/purge/internal/llm/openai"
+	"github.com/shiva2021/rootout/internal/llm"
+	"github.com/shiva2021/rootout/internal/llm/anthropic"
+	"github.com/shiva2021/rootout/internal/llm/ollamachat"
+	"github.com/shiva2021/rootout/internal/llm/openai"
 )
 
 // New returns the adapter for provider ("anthropic" | "openai" | "ollama").

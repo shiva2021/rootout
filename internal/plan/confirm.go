@@ -7,8 +7,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/shiva2021/purge/internal/leftover"
-	"github.com/shiva2021/purge/internal/output"
+	"github.com/shiva2021/rootout/internal/leftover"
+	"github.com/shiva2021/rootout/internal/output"
 )
 
 // Confirmer decides whether a plan runs. It may change Item.Selected and

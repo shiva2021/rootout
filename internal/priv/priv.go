@@ -11,12 +11,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/shiva2021/purge/internal/run"
+	"github.com/shiva2021/rootout/internal/run"
 	"regexp"
 	"strings"
 
-	"github.com/shiva2021/purge/internal/fsx"
-	"github.com/shiva2021/purge/internal/safety"
+	"github.com/shiva2021/rootout/internal/fsx"
+	"github.com/shiva2021/rootout/internal/safety"
 )
 
 // Options controls how privileged commands are run.

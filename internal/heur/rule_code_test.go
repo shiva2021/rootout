@@ -5,7 +5,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/shiva2021/purge/internal/ext"
+	"github.com/shiva2021/rootout/internal/ext"
 )
 
 // codeCase is one fixture for a code rule. want == 0 means the rule must

@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/shiva2021/purge/internal/plan"
-	"github.com/shiva2021/purge/internal/tui"
+	"github.com/shiva2021/rootout/internal/plan"
+	"github.com/shiva2021/rootout/internal/tui"
 )
 
 // tuiConfirmer is the full-screen review used on a terminal.

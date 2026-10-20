@@ -1,4 +1,4 @@
-# purge
+# rootout
 
 macOS CLI that uninstalls apps completely (bundle + leftovers, to Trash) and scans VS Code-family extensions for malicious behaviour with local heuristics and optional LLM assessment (Claude, OpenAI, Ollama). Go, cgo-free, Bubble Tea TUI + Cobra subcommands.
 
@@ -6,13 +6,13 @@ macOS CLI that uninstalls apps completely (bundle + leftovers, to Trash) and sca
 
 ```bash
 go version          # Go 1.27 pinned in go.mod (go/toolchain lines); GOTOOLCHAIN=auto fetches it
-make build          # CGO_ENABLED=0 -> ./bin/purge
+make build          # CGO_ENABLED=0 -> ./bin/rootout
 make test           # go test ./...
 make lint           # go vet + golangci-lint
-./bin/purge         # TUI; or: purge list|remove|scan|config|doctor [--json]
+./bin/rootout         # TUI; or: rootout list|remove|scan|config|doctor [--json]
 ```
 
-Try it read-only: `./bin/purge doctor`, `./bin/purge remove <app> --dry-run`, `./bin/purge scan --all --no-tui`.
+Try it read-only: `./bin/rootout doctor`, `./bin/rootout remove <app> --dry-run`, `./bin/rootout scan --all --no-tui`.
 
 ## Where things are
 

@@ -10,7 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/shiva2021/purge/internal/llm/ollama"
+	"github.com/shiva2021/rootout/internal/llm/ollama"
 )
 
 var testHW = ollama.Hardware{Chip: "Apple M1", AppleSilicon: true, RAMBytes: 16 << 30, Cores: 8}

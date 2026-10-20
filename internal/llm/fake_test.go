@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/shiva2021/purge/internal/heur"
+	"github.com/shiva2021/rootout/internal/heur"
 )
 
 func TestFake(t *testing.T) {

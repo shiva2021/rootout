@@ -12,9 +12,9 @@ import (
 
 	"github.com/openai/openai-go/v3/option"
 
-	"github.com/shiva2021/purge/internal/ext"
-	"github.com/shiva2021/purge/internal/heur"
-	"github.com/shiva2021/purge/internal/llm"
+	"github.com/shiva2021/rootout/internal/ext"
+	"github.com/shiva2021/rootout/internal/heur"
+	"github.com/shiva2021/rootout/internal/llm"
 )
 
 // responseBody is a minimal Responses API reply with one output_text part.

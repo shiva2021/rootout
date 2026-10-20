@@ -7,11 +7,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/shiva2021/purge/internal/config"
-	"github.com/shiva2021/purge/internal/heur"
-	"github.com/shiva2021/purge/internal/keychain"
-	"github.com/shiva2021/purge/internal/llm"
-	"github.com/shiva2021/purge/internal/llm/providers"
+	"github.com/shiva2021/rootout/internal/config"
+	"github.com/shiva2021/rootout/internal/heur"
+	"github.com/shiva2021/rootout/internal/keychain"
+	"github.com/shiva2021/rootout/internal/llm"
+	"github.com/shiva2021/rootout/internal/llm/providers"
 )
 
 // assessTimeout bounds one model call; local models on small Macs are slow.
@@ -26,7 +26,7 @@ func buildProvider(ctx context.Context, c config.Config, provider, model string,
 	}
 	switch provider {
 	case "":
-		fmt.Fprintln(os.Stderr, "purge: no AI provider configured; run `purge config set llm.provider <anthropic|openai|ollama>` (continuing with heuristics only)")
+		fmt.Fprintln(os.Stderr, "rootout: no AI provider configured; run `rootout config set llm.provider <anthropic|openai|ollama>` (continuing with heuristics only)")
 		return nil, nil
 	case "ollama":
 		if model == "" {
@@ -34,7 +34,7 @@ func buildProvider(ctx context.Context, c config.Config, provider, model string,
 		}
 		if model == "" {
 			if !interactive {
-				fmt.Fprintln(os.Stderr, "purge: no Ollama model selected; run `purge config models --pick` (continuing with heuristics only)")
+				fmt.Fprintln(os.Stderr, "rootout: no Ollama model selected; run `rootout config models --pick` (continuing with heuristics only)")
 				return nil, nil
 			}
 			m, err := pickAndSaveModel(ctx)
@@ -53,7 +53,7 @@ func buildProvider(ctx context.Context, c config.Config, provider, model string,
 		}
 		key, _, err := keychain.Resolve(keychain.New(), provider, os.Getenv)
 		if errors.Is(err, keychain.ErrNotFound) {
-			fmt.Fprintf(os.Stderr, "purge: no %s API key; run `purge config set-key %s` (continuing with heuristics only)\n", provider, provider)
+			fmt.Fprintf(os.Stderr, "rootout: no %s API key; run `rootout config set-key %s` (continuing with heuristics only)\n", provider, provider)
 			return nil, nil
 		}
 		if err != nil {

@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/shiva2021/purge/internal/ext"
+	"github.com/shiva2021/rootout/internal/ext"
 )
 
 // Test rules are registered globally and stay registered for the whole test

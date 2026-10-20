@@ -9,7 +9,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/shiva2021/purge/internal/heur"
+	"github.com/shiva2021/rootout/internal/heur"
 )
 
 // Verdict values the model may return.

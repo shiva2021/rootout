@@ -56,7 +56,7 @@ Append-only. Newest at the bottom. Never edit an old entry; add a new one that s
 **Decision.** Module `github.com/shiva2021/purge`, private repository, command name `purge`.
 **Alternatives.** Public/open-core repo; local-only; names `macsweep`, `uninstallr`, `cleanslate`.
 **Consequences.** Homebrew distribution uses a private tap.
-**Status.** Accepted
+**Status.** Superseded by D-018
 
 ## D-008 · 2026-10-20 · Licensing is a no-op seam until the last milestone
 
@@ -136,4 +136,12 @@ Append-only. Newest at the bottom. Never edit an old entry; add a new one that s
 **Decision.** Rules are split into capability rules (eval, child processes, obfuscation, environment reads, activation, staleness, unsigned) and intent indicators (hidden payloads, credential access, exfiltration hosts, download-and-run chains, typosquats, permission bypass). Capability findings together add at most 35 points (15 for publishers in `heur.TrustedPublishers`). Indicators contribute their top severity weight, plus up to 50% for repeats, and combine as 1 - Π(1 - p). Indicators are never discounted for trusted publishers, because a hijacked publisher is the supply-chain case. Rules that pair two patterns now require them within a short byte window, not just in the same file. npm lifecycle scripts drop to Low because VS Code does not run them on install; `vscode:uninstall` is flagged instead. Advisories carry one fixed version per release line.
 **Alternatives.** A flat per-rule cap (saturates on any large bundle); discounting everything for trusted publishers (hides a compromised publisher); allowlisting known extensions by id (unmaintainable and blind to hijacked updates).
 **Consequences.** `internal/heur/score.go` holds the capability list; a new rule is an indicator unless added there. `internal/heur/corpus_test.go` pins both directions: benign samples stay under 30, malicious samples clear 50. On this Mac the 12 real extensions now score 5 to 30; the 30 is `ms-python.vscode-python-envs`, which pipes the official uv installer from astral.sh into `sh`.
+**Status.** Accepted
+
+## D-018 · 2026-10-20 · Rename the tool from `purge` to `rootout`
+
+**Context.** macOS ships `/usr/sbin/purge` (flushes the disk cache, needs root). Running `purge` before the tool was installed hit Apple's command ("Unable to purge disk buffers: Operation not permitted"). Even once installed, the name would depend on PATH order, and `sudo purge` would always run Apple's tool.
+**Decision.** Command, module (`github.com/shiva2021/rootout`), repo folder (`~/Projects/rootout`), config dir (`~/.config/rootout`), env var (`ROOTOUT_CONFIG`) and Keychain service (`rootout`) all renamed. Nothing had been stored under the old names, so there is no migration.
+**Alternatives.** Keep `purge` and rely on Homebrew's PATH order (fragile); `macsweep` (free as a command, but about 30 GitHub projects use it, almost all Mac cleaners); `appgone`, `leavenone`, `traceout` (also clean). 32 names were checked for a macOS command, a Homebrew formula or cask, and same-category GitHub projects; `rootout` had none of the first two and 4 unrelated GitHub repos.
+**Consequences.** Trademark and domain availability are not yet checked; do that before a paid release.
 **Status.** Accepted

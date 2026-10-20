@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shiva2021/purge/internal/brew"
-	"github.com/shiva2021/purge/internal/fsx"
-	"github.com/shiva2021/purge/internal/leftover"
-	"github.com/shiva2021/purge/internal/priv"
-	"github.com/shiva2021/purge/internal/run"
-	"github.com/shiva2021/purge/internal/trash"
+	"github.com/shiva2021/rootout/internal/brew"
+	"github.com/shiva2021/rootout/internal/fsx"
+	"github.com/shiva2021/rootout/internal/leftover"
+	"github.com/shiva2021/rootout/internal/priv"
+	"github.com/shiva2021/rootout/internal/run"
+	"github.com/shiva2021/rootout/internal/trash"
 )
 
 // Deps are the side-effecting collaborators Execute uses; tests inject fakes.

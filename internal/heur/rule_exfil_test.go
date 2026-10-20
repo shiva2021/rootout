@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shiva2021/purge/internal/ext"
+	"github.com/shiva2021/rootout/internal/ext"
 )
 
 // The snippets below are inert pattern samples: they contain the strings the

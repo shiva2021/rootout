@@ -12,11 +12,11 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/shiva2021/purge/internal/app"
-	"github.com/shiva2021/purge/internal/fsx"
-	"github.com/shiva2021/purge/internal/leftover"
-	"github.com/shiva2021/purge/internal/run"
-	"github.com/shiva2021/purge/internal/safety"
+	"github.com/shiva2021/rootout/internal/app"
+	"github.com/shiva2021/rootout/internal/fsx"
+	"github.com/shiva2021/rootout/internal/leftover"
+	"github.com/shiva2021/rootout/internal/run"
+	"github.com/shiva2021/rootout/internal/safety"
 )
 
 // Mode is what Execute does with the selected paths.

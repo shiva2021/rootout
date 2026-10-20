@@ -1,5 +1,5 @@
-// Package config loads and saves purge's TOML settings file
-// (~/.config/purge/config.toml). It never holds secrets; API keys live in the
+// Package config loads and saves rootout's TOML settings file
+// (~/.config/rootout/config.toml). It never holds secrets; API keys live in the
 // Keychain (D-006).
 package config
 
@@ -17,7 +17,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/shiva2021/purge/internal/fsx"
+	"github.com/shiva2021/rootout/internal/fsx"
 )
 
 // Config is the whole settings file.
@@ -63,14 +63,14 @@ func Default() Config {
 	}
 }
 
-// Path returns $PURGE_CONFIG if set, else ~/.config/purge/config.toml.
+// Path returns $ROOTOUT_CONFIG if set, else ~/.config/rootout/config.toml.
 func Path(env fsx.Env, getenv func(string) string) string {
 	if getenv != nil {
-		if p := getenv("PURGE_CONFIG"); p != "" {
+		if p := getenv("ROOTOUT_CONFIG"); p != "" {
 			return p
 		}
 	}
-	return env.User(".config", "purge", "config.toml")
+	return env.User(".config", "rootout", "config.toml")
 }
 
 // Load reads path. A missing file yields Default(). Unknown keys are an error.

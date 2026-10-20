@@ -13,7 +13,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/shiva2021/purge/internal/fsx"
+	"github.com/shiva2021/rootout/internal/fsx"
 )
 
 // Options widens the allowlist for explicit opt-ins.

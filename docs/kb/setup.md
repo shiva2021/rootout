@@ -8,9 +8,9 @@
 
 ## First run
 ```bash
-cd ~/Projects/purge
+cd ~/Projects/rootout
 go mod download
-make build && ./bin/purge --help
+make build && ./bin/rootout --help
 make test
 scripts/toolchain_check.sh
 ```
@@ -20,10 +20,10 @@ scripts/toolchain_check.sh
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Overrides the Keychain entry for the Anthropic provider | console.anthropic.com |
 | `OPENAI_API_KEY` | Overrides the Keychain entry for the OpenAI provider | platform.openai.com |
-| `PURGE_CONFIG` | Alternate config file path (default `~/.config/purge/config.toml`) | — |
+| `ROOTOUT_CONFIG` | Alternate config file path (default `~/.config/rootout/config.toml`) | — |
 | `GOTOOLCHAIN` | Leave at `auto` so the pinned toolchain is used | — |
 
-Keys are normally stored with `purge config set-key <provider>` (Keychain service `purge`).
+Keys are normally stored with `rootout config set-key <provider>` (Keychain service `rootout`).
 
 ## Common problems
 - Keychain "allow access" dialog on each read → click "Always Allow"; the caller is `/usr/bin/security`, not the binary (D-012).

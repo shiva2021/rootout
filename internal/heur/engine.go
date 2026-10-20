@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/shiva2021/purge/internal/ext"
+	"github.com/shiva2021/rootout/internal/ext"
 )
 
 // ErrNoDir is returned when the extension has no directory to scan.

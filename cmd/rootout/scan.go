@@ -9,13 +9,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/shiva2021/purge/internal/ext"
-	"github.com/shiva2021/purge/internal/fsx"
-	"github.com/shiva2021/purge/internal/heur"
-	"github.com/shiva2021/purge/internal/llm"
-	"github.com/shiva2021/purge/internal/output"
-	"github.com/shiva2021/purge/internal/registry"
-	"github.com/shiva2021/purge/internal/tui"
+	"github.com/shiva2021/rootout/internal/ext"
+	"github.com/shiva2021/rootout/internal/fsx"
+	"github.com/shiva2021/rootout/internal/heur"
+	"github.com/shiva2021/rootout/internal/llm"
+	"github.com/shiva2021/rootout/internal/output"
+	"github.com/shiva2021/rootout/internal/registry"
+	"github.com/shiva2021/rootout/internal/tui"
 )
 
 type scanFlags struct {
@@ -94,7 +94,7 @@ func runScan(ctx context.Context, g *globalFlags, f scanFlags) error {
 			if m := meta[reports[i].Ext.ID]; m != nil {
 				reports[i] = heur.Rescore(ctx, reports[i], m)
 			} else if e := errs[reports[i].Ext.ID]; e != nil {
-				fmt.Fprintf(os.Stderr, "purge: registry: %s: %v\n", reports[i].Ext.ID, e)
+				fmt.Fprintf(os.Stderr, "rootout: registry: %s: %v\n", reports[i].Ext.ID, e)
 			}
 		}
 	}
@@ -136,7 +136,7 @@ func runScan(ctx context.Context, g *globalFlags, f scanFlags) error {
 	for i, r := range shown {
 		items[i].Report = r
 		if assess != nil && (f.llm || f.provider != "" || f.model != "") {
-			fmt.Fprintf(os.Stderr, "purge: asking the model about %s...\n", r.Ext.ID)
+			fmt.Fprintf(os.Stderr, "rootout: asking the model about %s...\n", r.Ext.ID)
 			a, err := assess(ctx, r)
 			if err != nil {
 				items[i].AssessErr = err.Error()
@@ -159,7 +159,7 @@ func reviewAndUninstall(ctx context.Context, env fsx.Env, shown []heur.Report, a
 	for _, r := range res.Uninstall {
 		if err := ext.Uninstall(ctx, env, r.Ext, editors, ext.Options{}); err != nil {
 			failed++
-			fmt.Fprintf(os.Stderr, "purge: %s: %v\n", r.Ext.ID, err)
+			fmt.Fprintf(os.Stderr, "rootout: %s: %v\n", r.Ext.ID, err)
 			continue
 		}
 		fmt.Printf("uninstalled %s (%s)\n", r.Ext.ID, r.Ext.Editor)

@@ -12,8 +12,8 @@ import (
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 
-	"github.com/shiva2021/purge/internal/heur"
-	"github.com/shiva2021/purge/internal/llm"
+	"github.com/shiva2021/rootout/internal/heur"
+	"github.com/shiva2021/rootout/internal/llm"
 )
 
 const maxTokens = 1024

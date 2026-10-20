@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/shiva2021/purge/internal/fsx"
+	"github.com/shiva2021/rootout/internal/fsx"
 )
 
 // caskIndex maps installed Homebrew casks to the .app bundles they ship, built

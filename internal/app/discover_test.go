@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shiva2021/purge/internal/testutil"
+	"github.com/shiva2021/rootout/internal/testutil"
 )
 
 const displayPlist = `<?xml version="1.0" encoding="UTF-8"?>

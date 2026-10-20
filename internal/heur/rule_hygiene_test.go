@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shiva2021/purge/internal/ext"
+	"github.com/shiva2021/rootout/internal/ext"
 )
 
 func hygExtRule(t *testing.T, name string) ExtRule {

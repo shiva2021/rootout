@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/shiva2021/purge/internal/heur"
+	"github.com/shiva2021/rootout/internal/heur"
 )
 
 // DefaultMaxPromptBytes caps the user message when BuildPrompt gets maxBytes <= 0.

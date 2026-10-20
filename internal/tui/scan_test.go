@@ -8,9 +8,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/shiva2021/purge/internal/ext"
-	"github.com/shiva2021/purge/internal/heur"
-	"github.com/shiva2021/purge/internal/llm"
+	"github.com/shiva2021/rootout/internal/ext"
+	"github.com/shiva2021/rootout/internal/heur"
+	"github.com/shiva2021/rootout/internal/llm"
 )
 
 func runeKey(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Text: string(r)} }

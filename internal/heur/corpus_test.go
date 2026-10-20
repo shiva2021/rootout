@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shiva2021/purge/internal/ext"
+	"github.com/shiva2021/rootout/internal/ext"
 )
 
 // Golden corpus (plan M3 task 4): synthetic extensions modelled on published

@@ -7,14 +7,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shiva2021/purge/internal/app"
-	"github.com/shiva2021/purge/internal/brew"
-	"github.com/shiva2021/purge/internal/fsx"
-	"github.com/shiva2021/purge/internal/leftover"
-	"github.com/shiva2021/purge/internal/priv"
-	"github.com/shiva2021/purge/internal/safety"
-	"github.com/shiva2021/purge/internal/testutil"
-	"github.com/shiva2021/purge/internal/trash"
+	"github.com/shiva2021/rootout/internal/app"
+	"github.com/shiva2021/rootout/internal/brew"
+	"github.com/shiva2021/rootout/internal/fsx"
+	"github.com/shiva2021/rootout/internal/leftover"
+	"github.com/shiva2021/rootout/internal/priv"
+	"github.com/shiva2021/rootout/internal/safety"
+	"github.com/shiva2021/rootout/internal/testutil"
+	"github.com/shiva2021/rootout/internal/trash"
 )
 
 const spotifyID = "com.spotify.client"

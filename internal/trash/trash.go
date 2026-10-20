@@ -10,7 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/shiva2021/purge/internal/run"
+	"github.com/shiva2021/rootout/internal/run"
 	"os"
 	"os/exec"
 	"path/filepath"

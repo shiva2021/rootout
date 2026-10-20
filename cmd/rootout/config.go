@@ -11,13 +11,13 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/shiva2021/purge/internal/config"
-	"github.com/shiva2021/purge/internal/fsx"
-	"github.com/shiva2021/purge/internal/keychain"
-	"github.com/shiva2021/purge/internal/llm/ollama"
-	"github.com/shiva2021/purge/internal/output"
-	"github.com/shiva2021/purge/internal/run"
-	"github.com/shiva2021/purge/internal/tui"
+	"github.com/shiva2021/rootout/internal/config"
+	"github.com/shiva2021/rootout/internal/fsx"
+	"github.com/shiva2021/rootout/internal/keychain"
+	"github.com/shiva2021/rootout/internal/llm/ollama"
+	"github.com/shiva2021/rootout/internal/output"
+	"github.com/shiva2021/rootout/internal/run"
+	"github.com/shiva2021/rootout/internal/tui"
 )
 
 // hostedProviders need an API key; ollama does not.
@@ -37,7 +37,7 @@ func newConfigCmd(g *globalFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
 		Short: "Manage AI providers, models, API keys and defaults",
-		Long: `Settings live in ~/.config/purge/config.toml (override with PURGE_CONFIG).
+		Long: `Settings live in ~/.config/rootout/config.toml (override with ROOTOUT_CONFIG).
 API keys are stored in the macOS Keychain, never in the file; the
 ANTHROPIC_API_KEY and OPENAI_API_KEY environment variables override them.`,
 	}
@@ -140,7 +140,7 @@ func configShow(g *globalFlags) error {
 	fmt.Println("\nAPI keys:")
 	for _, k := range keys {
 		if k.Source == "none" {
-			fmt.Printf("  %-10s not set (purge config set-key %s)\n", k.Provider, k.Provider)
+			fmt.Printf("  %-10s not set (rootout config set-key %s)\n", k.Provider, k.Provider)
 		} else {
 			fmt.Printf("  %-10s %s (from %s)\n", k.Provider, k.Masked, k.Source)
 		}
@@ -244,9 +244,9 @@ func listModels(ctx context.Context, g *globalFlags) error {
 		for _, r := range ollama.InstallGuide(hasBrew()) {
 			fmt.Printf("  %s: %s\n", r.Label, r.Command)
 		}
-		fmt.Println("or run `purge config models --pick` to be guided through it.")
+		fmt.Println("or run `rootout config models --pick` to be guided through it.")
 	case errors.Is(derr, ollama.ErrNotRunning):
-		fmt.Println("\nOllama is installed but not running. `purge config models --pick` can start it.")
+		fmt.Println("\nOllama is installed but not running. `rootout config models --pick` can start it.")
 	case derr != nil:
 		return derr
 	default:
@@ -274,7 +274,7 @@ func listModels(ctx context.Context, g *globalFlags) error {
 		}
 		fmt.Printf("  %-26s %8s  %-11s %s\n", r.Name, output.Bytes(r.DownloadBytes), state, r.Why)
 	}
-	fmt.Println("\nDownload one with: purge config pull <model>")
+	fmt.Println("\nDownload one with: rootout config pull <model>")
 	return nil
 }
 
@@ -330,7 +330,7 @@ func configPull(ctx context.Context, model string) error {
 	}
 	cl := ollamaClient(c)
 	if _, err := cl.Detect(ctx); err != nil {
-		return fmt.Errorf("%w (run `purge config models --pick` to install or start it)", err)
+		return fmt.Errorf("%w (run `rootout config models --pick` to install or start it)", err)
 	}
 	last := ""
 	err = cl.Pull(ctx, model, func(status string, done, total int64) {

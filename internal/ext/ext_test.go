@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shiva2021/purge/internal/fsx"
-	"github.com/shiva2021/purge/internal/testutil"
+	"github.com/shiva2021/rootout/internal/fsx"
+	"github.com/shiva2021/rootout/internal/testutil"
 )
 
 func fixture(t *testing.T, name string) string {

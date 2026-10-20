@@ -1,11 +1,11 @@
-BIN := bin/purge
+BIN := bin/rootout
 PKG := ./...
 export CGO_ENABLED = 0
 
-.PHONY: build test lint fmt clean
+.PHONY: build test lint fmt clean install
 
 build:
-	go build -trimpath -ldflags "-s -w -X main.version=$$(git describe --tags --always --dirty 2>/dev/null || echo dev)" -o $(BIN) ./cmd/purge
+	go build -trimpath -ldflags "-s -w -X main.version=$$(git describe --tags --always --dirty 2>/dev/null || echo dev)" -o $(BIN) ./cmd/rootout
 
 test:
 	go test $(PKG)
@@ -20,3 +20,8 @@ fmt:
 
 clean:
 	rm -rf bin dist
+
+# install copies the binary to ~/.local/bin (first on PATH on this machine).
+install: build
+	mkdir -p $(HOME)/.local/bin
+	install -m 0755 $(BIN) $(HOME)/.local/bin/rootout

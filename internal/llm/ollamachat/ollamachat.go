@@ -13,8 +13,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/shiva2021/purge/internal/heur"
-	"github.com/shiva2021/purge/internal/llm"
+	"github.com/shiva2021/rootout/internal/heur"
+	"github.com/shiva2021/rootout/internal/llm"
 )
 
 // DefaultURL is Ollama's standard local address.
@@ -24,7 +24,7 @@ const DefaultURL = "http://127.0.0.1:11434"
 const maxBody = 4 << 20
 
 // ErrNoModel means no Ollama model has been chosen yet.
-var ErrNoModel = errors.New("no Ollama model selected; run purge config models")
+var ErrNoModel = errors.New("no Ollama model selected; run rootout config models")
 
 type provider struct {
 	baseURL, model string

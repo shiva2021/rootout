@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/shiva2021/purge/internal/fsx"
+	"github.com/shiva2021/rootout/internal/fsx"
 )
 
 // ErrNotBundle is returned by Read when the path is not a .app directory.

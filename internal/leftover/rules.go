@@ -1,6 +1,6 @@
 package leftover
 
-import "github.com/shiva2021/purge/internal/fsx"
+import "github.com/shiva2021/rootout/internal/fsx"
 
 // matchKind names one way a directory entry can belong to an app. The engine
 // in leftover.go (scan.match) implements each one.

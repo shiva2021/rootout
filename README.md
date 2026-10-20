@@ -1,17 +1,17 @@
-# purge
+# rootout
 
 Uninstall macOS apps completely, and find risky extensions in VS Code, Cursor,
 VSCodium, Windsurf and VS Code Insiders.
 
 ```bash
-purge                       # pick an app, review everything it left behind, remove it
-purge list [--search q]     # installed apps
-purge remove <app> -n       # dry run: show the bundle and every leftover file
-purge remove <app>          # move them to the Trash after you confirm
-purge scan                  # score installed extensions; review and uninstall on a terminal
-purge scan --llm            # also ask Claude, OpenAI or a local Ollama model
-purge config models --pick  # choose or download a local model that fits this Mac
-purge doctor                # check what purge depends on
+rootout                       # pick an app, review everything it left behind, remove it
+rootout list [--search q]     # installed apps
+rootout remove <app> -n       # dry run: show the bundle and every leftover file
+rootout remove <app>          # move them to the Trash after you confirm
+rootout scan                  # score installed extensions; review and uninstall on a terminal
+rootout scan --llm            # also ask Claude, OpenAI or a local Ollama model
+rootout config models --pick  # choose or download a local model that fits this Mac
+rootout doctor                # check what rootout depends on
 ```
 
 Every command takes `--json`. Removal goes to the Trash unless `--permanent`.

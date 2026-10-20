@@ -8,7 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/shiva2021/purge/internal/app"
+	"github.com/shiva2021/rootout/internal/app"
 )
 
 func fixture() []app.App {

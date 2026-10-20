@@ -15,7 +15,7 @@ Read before adding or tuning a rule in `internal/heur`.
 3. When a rule pairs two patterns, require them within a byte window (see `codeChainWindow`), never "same file": minified bundles put the whole extension on one line.
 4. Cap findings per file (5) and give each a `Detail` a user can act on.
 5. Tests: at least two positives and two negatives, including a negative taken from a real legitimate bundle if the rule is noisy. Add a corpus case for any new attack class.
-6. Run `purge scan --all` on a real machine and look at every finding above Low before committing.
+6. Run `rootout scan --all` on a real machine and look at every finding above Low before committing.
 
 ## Calibration targets
 - Benign large bundles from trusted publishers: under 30.

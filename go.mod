@@ -1,4 +1,4 @@
-module github.com/shiva2021/purge
+module github.com/shiva2021/rootout
 
 go 1.27.0
 

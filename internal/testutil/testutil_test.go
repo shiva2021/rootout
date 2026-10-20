@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shiva2021/purge/internal/fsx"
+	"github.com/shiva2021/rootout/internal/fsx"
 )
 
 func TestFakeHome(t *testing.T) {

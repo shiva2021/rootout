@@ -9,7 +9,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/shiva2021/purge/internal/fsx"
+	"github.com/shiva2021/rootout/internal/fsx"
 )
 
 func TestLoadMissingReturnsDefault(t *testing.T) {
@@ -24,7 +24,7 @@ func TestLoadMissingReturnsDefault(t *testing.T) {
 
 func TestSaveLoadRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "sub", "purge", "config.toml")
+	path := filepath.Join(dir, "sub", "rootout", "config.toml")
 	want := Default()
 	want.LLM.Provider = "ollama"
 	want.LLM.Ollama.Model = "llama3.3"
@@ -199,11 +199,11 @@ func TestKeysSortedAndGettable(t *testing.T) {
 func TestPath(t *testing.T) {
 	env := fsx.Env{Home: "/fake/home", Root: "/fake/root"}
 	none := func(string) string { return "" }
-	if got := Path(env, none); got != "/fake/home/.config/purge/config.toml" {
+	if got := Path(env, none); got != "/fake/home/.config/rootout/config.toml" {
 		t.Errorf("default Path = %q", got)
 	}
 	override := func(k string) string {
-		if k == "PURGE_CONFIG" {
+		if k == "ROOTOUT_CONFIG" {
 			return "/elsewhere/c.toml"
 		}
 		return ""

@@ -11,8 +11,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/shiva2021/purge/internal/fsx"
-	"github.com/shiva2021/purge/internal/safety"
+	"github.com/shiva2021/rootout/internal/fsx"
+	"github.com/shiva2021/rootout/internal/safety"
 )
 
 // ErrEditorRunning is returned when the editor is open, no CLI is available,
@@ -185,7 +185,7 @@ func writeAtomic(path string, data []byte) error {
 	if fi, err := os.Stat(path); err == nil {
 		mode = fi.Mode().Perm()
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".purge-*")
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".rootout-*")
 	if err != nil {
 		return fmt.Errorf("ext: temp file for %s: %w", path, err)
 	}

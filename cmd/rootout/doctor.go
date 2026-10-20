@@ -9,13 +9,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/shiva2021/purge/internal/ext"
-	"github.com/shiva2021/purge/internal/fsx"
-	"github.com/shiva2021/purge/internal/keychain"
-	"github.com/shiva2021/purge/internal/llm/ollama"
-	"github.com/shiva2021/purge/internal/output"
-	"github.com/shiva2021/purge/internal/run"
-	"github.com/shiva2021/purge/internal/trash"
+	"github.com/shiva2021/rootout/internal/ext"
+	"github.com/shiva2021/rootout/internal/fsx"
+	"github.com/shiva2021/rootout/internal/keychain"
+	"github.com/shiva2021/rootout/internal/llm/ollama"
+	"github.com/shiva2021/rootout/internal/output"
+	"github.com/shiva2021/rootout/internal/run"
+	"github.com/shiva2021/rootout/internal/trash"
 )
 
 // check is one doctor line.
@@ -29,7 +29,7 @@ type check struct {
 func newDoctorCmd(g *globalFlags) *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
-		Short: "Check the environment purge depends on",
+		Short: "Check the environment rootout depends on",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			checks := runChecks(cmd.Context())
@@ -62,7 +62,7 @@ func runChecks(ctx context.Context) []check {
 
 	if v, err := run.Default(ctx, "sw_vers", "-productVersion"); err == nil {
 		ver := strings.TrimSpace(string(v))
-		add(check{Name: "macOS", OK: !strings.HasPrefix(ver, "13.") && !strings.HasPrefix(ver, "12."), Detail: ver, Fix: "purge supports macOS 14 and later"})
+		add(check{Name: "macOS", OK: !strings.HasPrefix(ver, "13.") && !strings.HasPrefix(ver, "12."), Detail: ver, Fix: "rootout supports macOS 14 and later"})
 	}
 
 	tm := trash.New()
@@ -72,7 +72,7 @@ func runChecks(ctx context.Context) []check {
 		trash.BackendFinder: "Finder (asks for Automation permission once)",
 	}[backend]})
 
-	add(check{Name: "Homebrew", OK: hasBrew(), Detail: map[bool]string{true: "found (cask uninstalls use brew --zap)", false: "not found (cask apps are removed by purge's own sweep)"}[hasBrew()]})
+	add(check{Name: "Homebrew", OK: hasBrew(), Detail: map[bool]string{true: "found (cask uninstalls use brew --zap)", false: "not found (cask apps are removed by rootout's own sweep)"}[hasBrew()]})
 
 	env, err := fsx.Real()
 	if err == nil {
@@ -109,7 +109,7 @@ func runChecks(ctx context.Context) []check {
 		case err == nil:
 			add(check{Name: p + " key", OK: true, Detail: keychain.Mask(k) + " from " + src})
 		case errors.Is(err, keychain.ErrNotFound):
-			add(check{Name: p + " key", OK: c.LLM.Provider != p, Detail: "not set", Fix: "purge config set-key " + p})
+			add(check{Name: p + " key", OK: c.LLM.Provider != p, Detail: "not set", Fix: "rootout config set-key " + p})
 		default:
 			add(check{Name: p + " key", OK: false, Detail: err.Error()})
 		}
@@ -126,9 +126,9 @@ func runChecks(ctx context.Context) []check {
 		installed, _ := ollamaClient(c).ListInstalled(ctx, hw)
 		add(check{Name: "Ollama", OK: true, Detail: fmt.Sprintf("%s running, %d model(s); %s", ver, len(installed), tier)})
 	case errors.Is(oerr, ollama.ErrNotRunning):
-		add(check{Name: "Ollama", OK: c.LLM.Provider != "ollama", Detail: "installed, not running; " + tier, Fix: "purge config models --pick"})
+		add(check{Name: "Ollama", OK: c.LLM.Provider != "ollama", Detail: "installed, not running; " + tier, Fix: "rootout config models --pick"})
 	default:
-		add(check{Name: "Ollama", OK: c.LLM.Provider != "ollama", Detail: "not installed (optional, for local models); " + tier, Fix: "purge config models --pick"})
+		add(check{Name: "Ollama", OK: c.LLM.Provider != "ollama", Detail: "not installed (optional, for local models); " + tier, Fix: "rootout config models --pick"})
 	}
 	return out
 }

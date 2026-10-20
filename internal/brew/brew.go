@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/shiva2021/purge/internal/run"
+	"github.com/shiva2021/rootout/internal/run"
 )
 
 // Brew wraps the brew CLI.

@@ -9,7 +9,7 @@ Follow these so every module reads as if one person wrote it.
 - Errors: sentinel `var ErrX = errors.New("...")` for conditions callers branch on.
 
 ## Layout
-- `cmd/purge/` has only Cobra wiring; no logic.
+- `cmd/rootout/` has only Cobra wiring; no logic.
 - `internal/<pkg>/` owns its types. Shared cross-cutting helpers live in `fsx`, `output`, `testutil`.
 - Every package that touches the filesystem takes a `fsx.Env{Home, Root}` and never calls `os.UserHomeDir()` itself. Only `cmd/` and `config/` build the real `Env`.
 - External commands (`security`, `trash`, `osascript`, `brew`, `sysctl`, `launchctl`, editor CLIs) go through an injectable `Runner` so tests never exec them.

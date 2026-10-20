@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/shiva2021/purge/internal/run"
+	"github.com/shiva2021/rootout/internal/run"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -18,9 +18,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shiva2021/purge/internal/app"
-	"github.com/shiva2021/purge/internal/fsx"
-	"github.com/shiva2021/purge/internal/safety"
+	"github.com/shiva2021/rootout/internal/app"
+	"github.com/shiva2021/rootout/internal/fsx"
+	"github.com/shiva2021/rootout/internal/safety"
 )
 
 // Kind classifies a leftover. The zero value is the application bundle itself.

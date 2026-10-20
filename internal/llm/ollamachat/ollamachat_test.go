@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shiva2021/purge/internal/ext"
-	"github.com/shiva2021/purge/internal/heur"
-	"github.com/shiva2021/purge/internal/llm"
+	"github.com/shiva2021/rootout/internal/ext"
+	"github.com/shiva2021/rootout/internal/heur"
+	"github.com/shiva2021/rootout/internal/llm"
 )
 
 // chatBody is a minimal non-streaming /api/chat reply (shape from docs/api.md).
@@ -113,7 +113,7 @@ func TestAssess(t *testing.T) {
 
 func TestNoModel(t *testing.T) {
 	_, err := New("", "", nil).Assess(context.Background(), report)
-	if !errors.Is(err, ErrNoModel) || !strings.Contains(err.Error(), "purge config models") {
+	if !errors.Is(err, ErrNoModel) || !strings.Contains(err.Error(), "rootout config models") {
 		t.Errorf("err = %v", err)
 	}
 }

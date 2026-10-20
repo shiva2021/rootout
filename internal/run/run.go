@@ -1,4 +1,4 @@
-// Package run is the single place purge executes external commands. Every
+// Package run is the single place rootout executes external commands. Every
 // command is an argv list; nothing is ever passed through a shell. Packages
 // accept a Runner so tests inject fakes and never exec anything real.
 package run

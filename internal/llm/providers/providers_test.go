@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/shiva2021/purge/internal/heur"
-	"github.com/shiva2021/purge/internal/llm"
+	"github.com/shiva2021/rootout/internal/heur"
+	"github.com/shiva2021/rootout/internal/llm"
 )
 
 func TestNew(t *testing.T) {

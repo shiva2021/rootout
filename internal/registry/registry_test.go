@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shiva2021/purge/internal/ext"
+	"github.com/shiva2021/rootout/internal/ext"
 )
 
 // Minimal recorded bodies, trimmed to the fields the parser reads plus a few
@@ -83,7 +83,7 @@ func cursorExt(publisher, name string) ext.Extension {
 }
 
 func TestMarketplaceRequestShape(t *testing.T) {
-	UserAgent = "purge/test"
+	UserAgent = "rootout/test"
 	var got mpQuery
 	var hdr http.Header
 	var method string
@@ -109,7 +109,7 @@ func TestMarketplaceRequestShape(t *testing.T) {
 	for k, want := range map[string]string{
 		"Accept":       "application/json;api-version=3.0-preview.1",
 		"Content-Type": "application/json",
-		"User-Agent":   "purge/test",
+		"User-Agent":   "rootout/test",
 	} {
 		if h := hdr.Get(k); h != want {
 			t.Errorf("header %s = %q, want %q", k, h, want)
@@ -211,7 +211,7 @@ func TestOpenVSX(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			UserAgent = "purge/test"
+			UserAgent = "rootout/test"
 			var path, ua string
 			srv := serve(t, func(w http.ResponseWriter, r *http.Request) {
 				path, ua = r.URL.Path, r.Header.Get("User-Agent")
@@ -223,7 +223,7 @@ func TestOpenVSX(t *testing.T) {
 			if path != "/api/ms-python/python" {
 				t.Errorf("path = %q, want /api/ms-python/python", path)
 			}
-			if ua != "purge/test" {
+			if ua != "rootout/test" {
 				t.Errorf("User-Agent = %q", ua)
 			}
 			switch {

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/shiva2021/purge/internal/run"
+	"github.com/shiva2021/rootout/internal/run"
 )
 
 // Hardware is what Recommend needs to know about the Mac.

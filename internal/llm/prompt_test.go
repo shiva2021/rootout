@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shiva2021/purge/internal/ext"
-	"github.com/shiva2021/purge/internal/heur"
+	"github.com/shiva2021/rootout/internal/ext"
+	"github.com/shiva2021/rootout/internal/heur"
 )
 
 var update = flag.Bool("update", false, "rewrite golden files")

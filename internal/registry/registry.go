@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shiva2021/purge/internal/ext"
-	"github.com/shiva2021/purge/internal/heur"
+	"github.com/shiva2021/rootout/internal/ext"
+	"github.com/shiva2021/rootout/internal/heur"
 )
 
 const (
@@ -32,8 +32,8 @@ const (
 	maxInFlight    = 4
 )
 
-// UserAgent is sent on every request; cmd/purge sets it to "purge/<version>".
-var UserAgent = "purge/dev"
+// UserAgent is sent on every request; cmd/rootout sets it to "rootout/<version>".
+var UserAgent = "rootout/dev"
 
 // ErrNotFound is returned when the registry has no such extension. That usually
 // means it was sideloaded from a .vsix or has since been removed from the store;

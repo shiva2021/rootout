@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shiva2021/purge/internal/fsx"
-	"github.com/shiva2021/purge/internal/testutil"
+	"github.com/shiva2021/rootout/internal/fsx"
+	"github.com/shiva2021/rootout/internal/testutil"
 )
 
 // newEnv builds a sandboxed Env: Root is a temp dir and Home is <root>/home.

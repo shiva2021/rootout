@@ -1,6 +1,6 @@
 package safety
 
-import "github.com/shiva2021/purge/internal/fsx"
+import "github.com/shiva2021/rootout/internal/fsx"
 
 // allowedPrefixes are the only roots deletions may live under. Dotfile
 // prefixes (~/.config, ~/.<x>) are handled separately because they are opt-in.

@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shiva2021/purge/internal/run"
+	"github.com/shiva2021/rootout/internal/run"
 )
 
 // DefaultURL is where Ollama listens unless configured otherwise.
@@ -237,10 +237,10 @@ func (c *Client) hasApp() bool {
 // InstallRoute is one official way to install Ollama.
 type InstallRoute struct {
 	Label, Command string
-	Runnable       bool // purge may run Command after the user confirms
+	Runnable       bool // rootout may run Command after the user confirms
 }
 
-// InstallGuide lists the official install routes. purge never installs
+// InstallGuide lists the official install routes. rootout never installs
 // anything without confirmation.
 func InstallGuide(hasBrew bool) []InstallRoute {
 	return []InstallRoute{

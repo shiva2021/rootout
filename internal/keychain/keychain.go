@@ -12,7 +12,7 @@ import (
 )
 
 // service is the Keychain service name; the account is the provider name.
-const service = "purge"
+const service = "rootout"
 
 // ErrNotFound is returned when no key is stored for a provider.
 var ErrNotFound = errors.New("keychain: no key stored")
