@@ -39,6 +39,7 @@ make build && make test && make lint && scripts/toolchain_check.sh
 ```
 
 ## Gotchas
+- The tool was renamed from `purge` to `rootout` (D-018) because macOS ships `/usr/sbin/purge`. `make install` puts it in `~/.local/bin`.
 - A failing `go test` piped into `tail` hides the exit code; one bad commit slipped through that way (fixed in the next commit). Check `${PIPESTATUS[0]}` or grep for FAIL.
 - Charm v2: `charm.land/...` imports, alt screen via `view.AltScreen`, lipgloss sizes include borders.
 - `/usr/bin/trash` rejects `--`; Homebrew's `trash` is a different tool.
