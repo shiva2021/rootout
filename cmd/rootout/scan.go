@@ -43,8 +43,28 @@ func newScanCmd(g *globalFlags) *cobra.Command {
 		Use:   "scan",
 		Short: "Scan editor extensions for malicious behaviour",
 		Long: `Statically scan the extensions installed in VS Code, VS Code Insiders, Cursor,
-VSCodium and Windsurf. Nothing is executed. Each extension gets a 0-100 risk
-score with the reasons; --online adds publisher trust data from the registry.`,
+VSCodium and Windsurf. Extension code is never executed.
+
+Each extension gets a 0-100 risk score with the reasons. The score separates
+what an extension can do (spawn processes, eval) from evidence of intent
+(hidden payloads, credential reads, exfiltration hosts). Only extensions at
+or above --min-score (default 30) are shown; --all shows every one.
+
+On a terminal the results open in a review screen where you can tick
+extensions to uninstall; nothing is uninstalled until you confirm. --no-tui
+prints the table instead. --online adds publisher verification and install
+counts from the registry. --llm asks the configured AI model (Claude, OpenAI
+or a local Ollama model) for a second opinion; it sees only the findings and
+short snippets, never the whole extension.
+
+--json prints one object per extension: the findings, the score and, with
+--llm, the model's verdict. It never opens the review screen.`,
+		Example: `  rootout scan                          # score extensions, review on screen
+  rootout scan --all --no-tui           # print every extension and its score
+  rootout scan --editor cursor          # only Cursor's extensions
+  rootout scan --online                 # add publisher trust data
+  rootout scan --llm                    # also ask the configured AI model
+  rootout scan --provider ollama --model llama3.2 --json   # one-off model, JSON out`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runScan(cmd.Context(), g, f)

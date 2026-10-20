@@ -37,17 +37,41 @@ func newConfigCmd(g *globalFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
 		Short: "Manage AI providers, models, API keys and defaults",
-		Long: `Settings live in ~/.config/rootout/config.toml (override with ROOTOUT_CONFIG).
-API keys are stored in the macOS Keychain, never in the file; the
-ANTHROPIC_API_KEY and OPENAI_API_KEY environment variables override them.`,
+		Long: `Show and change rootout's settings: the AI provider used by "scan --llm",
+its model, the Ollama address and the default scan threshold.
+
+Settings live in ~/.config/rootout/config.toml (override the path with
+ROOTOUT_CONFIG). API keys are stored in the macOS Keychain, never in the
+file; the ANTHROPIC_API_KEY and OPENAI_API_KEY environment variables take
+precedence over the Keychain. No setting is needed to remove apps or to scan
+with heuristics only.
+
+Valid keys: ` + strings.Join(config.Keys(), ", ") + `
+
+--json applies to "config show" and "config models".`,
+		Example: `  rootout config show                          # settings and which keys are set
+  rootout config set llm.provider anthropic    # use Claude for scan --llm
+  rootout config set-key anthropic             # paste the key into the Keychain
+  rootout config models --pick                 # choose a local model that fits this Mac
+  rootout config pull llama3.2                 # download a local model`,
 	}
 	cmd.AddCommand(
 		&cobra.Command{
 			Use: "show", Short: "Show settings and which API keys are configured", Args: cobra.NoArgs,
+			Long: `Print the config file path, every setting and, for each hosted provider,
+whether an API key is set and where it comes from (Keychain or environment).
+Keys are shown masked; the full key is never printed.
+
+--json prints {path, config, keys}.`,
+			Example: `  rootout config show
+  rootout config show --json`,
 			RunE: func(*cobra.Command, []string) error { return configShow(g) },
 		},
 		&cobra.Command{
 			Use: "get <key>", Short: "Print one setting", Args: cobra.ExactArgs(1),
+			Long: `Print the value of one setting. Keys: ` + strings.Join(config.Keys(), ", ") + `.`,
+			Example: `  rootout config get llm.provider
+  rootout config get llm.ollama.model`,
 			RunE: func(_ *cobra.Command, a []string) error {
 				c, _, err := loadConfig()
 				if err != nil {
@@ -63,6 +87,13 @@ ANTHROPIC_API_KEY and OPENAI_API_KEY environment variables override them.`,
 		},
 		&cobra.Command{
 			Use: "set <key> <value>", Short: "Change one setting (keys: " + strings.Join(config.Keys(), ", ") + ")", Args: cobra.ExactArgs(2),
+			Long: `Change one setting and save the config file. Unknown keys and invalid
+values are rejected; nothing else in the file is touched.
+
+Keys: ` + strings.Join(config.Keys(), ", ") + `.`,
+			Example: `  rootout config set llm.provider ollama
+  rootout config set llm.ollama.model llama3.2
+  rootout config set scan.min_score 50`,
 			RunE: func(_ *cobra.Command, a []string) error {
 				c, path, err := loadConfig()
 				if err != nil {
@@ -76,10 +107,18 @@ ANTHROPIC_API_KEY and OPENAI_API_KEY environment variables override them.`,
 		},
 		&cobra.Command{
 			Use: "set-key <anthropic|openai>", Short: "Store an API key in the macOS Keychain", Args: cobra.ExactArgs(1),
+			Long: `Read an API key and store it in the macOS Keychain. On a terminal the key is
+typed hidden; otherwise it is read from stdin. The key never goes into the
+config file and is never printed in full. Ollama needs no key.`,
+			Example: `  rootout config set-key anthropic              # prompts, input hidden
+  rootout config set-key openai < key.txt       # from a file or pipe`,
 			RunE: func(_ *cobra.Command, a []string) error { return configSetKey(a[0]) },
 		},
 		&cobra.Command{
 			Use: "delete-key <anthropic|openai>", Short: "Remove a stored API key", Args: cobra.ExactArgs(1),
+			Long: `Remove the provider's API key from the macOS Keychain. A key set through the
+ANTHROPIC_API_KEY or OPENAI_API_KEY environment variable is not affected.`,
+			Example: `  rootout config delete-key anthropic`,
 			RunE: func(_ *cobra.Command, a []string) error {
 				if err := checkHosted(a[0]); err != nil {
 					return err
@@ -90,6 +129,11 @@ ANTHROPIC_API_KEY and OPENAI_API_KEY environment variables override them.`,
 		newModelsCmd(g),
 		&cobra.Command{
 			Use: "pull <model>", Short: "Download a local Ollama model and make it the default", Args: cobra.ExactArgs(1),
+			Long: `Download a model through the running Ollama server, with progress on stderr,
+then set Ollama as the provider and this model as its default. Ollama must be
+installed and running; "rootout config models --pick" can do both.`,
+			Example: `  rootout config pull llama3.2
+  rootout config pull qwen2.5-coder:7b`,
 			RunE: func(cmd *cobra.Command, a []string) error { return configPull(cmd.Context(), a[0]) },
 		},
 	)
@@ -184,8 +228,17 @@ func newModelsCmd(g *globalFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "models",
 		Short: "List installed Ollama models and the ones recommended for this Mac",
-		Long:  "Without --pick, prints installed and recommended models. With --pick (or on a terminal with no model configured), opens the picker, which can install Ollama and download a model.",
-		Args:  cobra.NoArgs,
+		Long: `Without --pick, print this Mac's chip and RAM, the Ollama models already
+installed, and the models recommended for this hardware with their download
+size. With --pick, open the interactive picker, which can install Ollama,
+start it, download a model and make it the default. Nothing is installed or
+downloaded without your confirmation.
+
+--json prints {ollama, version, hardware, current, installed, recommended}.`,
+		Example: `  rootout config models             # what is installed and what would fit
+  rootout config models --pick      # choose, download and set the default
+  rootout config models --json`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if pick {
 				_, err := pickAndSaveModel(cmd.Context())

@@ -26,11 +26,27 @@ func newRemoveCmd(g *globalFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "remove <app>",
 		Short: "Remove an application and its leftover files",
-		Long: `Remove an application bundle and every file it left behind (preferences,
-caches, containers, launch agents, receipts...). Files go to the Trash unless
---permanent is given. The full list is shown for confirmation first.
+		Long: `Remove an application bundle and every file it left behind: preferences,
+caches, containers, launch agents, login items, receipts and more.
 
-<app> is a name, bundle id or path; fuzzy matches are accepted when unambiguous.`,
+The full list is shown for confirmation before anything happens; --dry-run
+stops there. Files go to the Trash unless --permanent is given, so a mistake
+can be undone from the Finder. Nothing runs as root: files that need admin
+rights are removed in one step after a single macOS password prompt.
+System applications are never removed. Homebrew casks are also uninstalled
+with "brew uninstall --zap" unless --no-brew is given.
+
+<app> is a name, bundle id or path; fuzzy matches are accepted when they
+are unambiguous. "rootout list --search" helps find the right one.
+
+--json prints the plan (with --dry-run) or the result as JSON and uses a
+plain confirmation instead of the review screen.`,
+		Example: `  rootout remove Spotify --dry-run         # show what would be removed
+  rootout remove Spotify                   # review the list, then move it to the Trash
+  rootout remove com.spotify.client        # exact bundle id
+  rootout remove "Google Chrome" --dotfiles  # also look in ~/.config and ~/.<name>
+  rootout remove Spotify --permanent       # delete outright; no Trash
+  rootout remove Spotify --yes --json      # no questions; result as JSON`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRemove(cmd.Context(), g, f, args[0])

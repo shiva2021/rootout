@@ -30,7 +30,17 @@ func newDoctorCmd(g *globalFlags) *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
 		Short: "Check the environment rootout depends on",
-		Args:  cobra.NoArgs,
+		Long: `Check what rootout can use on this Mac: the macOS version, how files reach
+the Trash, Homebrew, the VS Code-family editors and their command-line tools,
+the config file, stored API keys and Ollama with this Mac's chip and RAM.
+
+Each line is a check mark or a "!" with a fix. Doctor only reads; it changes
+nothing and installs nothing.
+
+--json prints [{name, ok, detail, fix}].`,
+		Example: `  rootout doctor
+  rootout doctor --json`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			checks := runChecks(cmd.Context())
 			w := output.New(os.Stdout, g.json)

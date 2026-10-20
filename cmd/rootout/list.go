@@ -19,8 +19,18 @@ func newListCmd(g *globalFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List installed applications",
-		Long:  "List application bundles in /Applications and ~/Applications. System applications are hidden unless --system is given; they are never removable.",
-		Args:  cobra.NoArgs,
+		Long: `List the application bundles in /Applications and ~/Applications, with
+bundle id, version, size on disk and whether Homebrew installed them.
+
+System applications are hidden unless --system is given; they are shown for
+reference only and can never be removed. Listing only reads; nothing changes.
+
+--json prints the same rows as a JSON array.`,
+		Example: `  rootout list                      # installed apps
+  rootout list --search chrome      # fuzzy filter by name or bundle id
+  rootout list --system             # include Apple's system apps
+  rootout list --json               # as JSON, for scripts`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			env, err := fsx.Real()
 			if err != nil {
