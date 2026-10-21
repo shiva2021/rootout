@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -234,9 +235,11 @@ size. With --pick, open the interactive picker, which can install Ollama,
 start it, download a model and make it the default. Nothing is installed or
 downloaded without your confirmation.
 
---json prints {ollama, version, hardware, current, installed, recommended}.`,
+--json prints {ollama, version, hardware, current, installed, recommended}.
+"config models rm <model>" uninstalls a model.`,
 		Example: `  rootout config models             # what is installed and what would fit
   rootout config models --pick      # choose, download and set the default
+  rootout config models rm llama3.2 # uninstall a model
   rootout config models --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -248,7 +251,71 @@ downloaded without your confirmation.
 		},
 	}
 	cmd.Flags().BoolVar(&pick, "pick", false, "open the interactive picker")
+	cmd.AddCommand(newModelsRmCmd())
 	return cmd
+}
+
+func newModelsRmCmd() *cobra.Command {
+	var yes bool
+	cmd := &cobra.Command{
+		Use: "rm <model>", Short: "Uninstall a local Ollama model", Args: cobra.ExactArgs(1),
+		Long: `Delete a model from the running Ollama server after a y/n confirmation. If it
+was the default model for assessments, the default is cleared; choose another
+with "rootout config models --pick". The picker's d key does the same.`,
+		Example: `  rootout config models rm llama3.2
+  rootout config models rm qwen3.5:9b --yes`,
+		RunE: func(cmd *cobra.Command, a []string) error {
+			c, path, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			return removeModel(cmd.Context(), ollamaClient(c), c, path, a[0], yes, os.Stdin, os.Stderr)
+		},
+	}
+	cmd.Flags().BoolVar(&yes, "yes", false, "skip the confirmation")
+	return cmd
+}
+
+// removeModel deletes model from Ollama and, when it was the configured
+// default, forgets it so scans do not ask for a model that is gone.
+func removeModel(ctx context.Context, cl *ollama.Client, c config.Config, path, model string, yes bool, in io.Reader, out io.Writer) error {
+	if _, err := cl.Detect(ctx); err != nil {
+		return fmt.Errorf("%w (run `rootout config models --pick` to install or start it)", err)
+	}
+	if !yes {
+		_, _ = fmt.Fprintf(out, "Uninstall %s from Ollama? [y/N] ", model)
+		line, _ := bufio.NewReader(in).ReadString('\n')
+		if l := strings.ToLower(strings.TrimSpace(line)); l != "y" && l != "yes" {
+			return &exitErr{code: exitDeclined, msg: "cancelled"}
+		}
+	}
+	if err := cl.Delete(ctx, model); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(out, "uninstalled %s\n", model)
+	if sameModel(c.LLM.Ollama.Model, model) {
+		c.LLM.Ollama.Model = ""
+		if err := config.Save(path, c); err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(out, "it was the default model; choose another with `rootout config models --pick`")
+	}
+	return nil
+}
+
+// sameModel compares model names ignoring an explicit ":latest" tag.
+func sameModel(a, b string) bool {
+	return a != "" && strings.TrimSuffix(a, ":latest") == strings.TrimSuffix(b, ":latest")
+}
+
+// clearDefaultModel forgets the configured Ollama model.
+func clearDefaultModel() error {
+	c, path, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	c.LLM.Ollama.Model = ""
+	return config.Save(path, c)
 }
 
 func ollamaClient(c config.Config) *ollama.Client {
@@ -343,7 +410,7 @@ func modelDeps(ctx context.Context, c config.Config) (tui.ModelDeps, error) {
 		return tui.ModelDeps{}, err
 	}
 	brew := hasBrew()
-	deps := tui.ModelDeps{Client: ollamaClient(c), Hardware: hw, HasBrew: brew}
+	deps := tui.ModelDeps{Client: ollamaClient(c), Hardware: hw, HasBrew: brew, ClearDefault: clearDefaultModel}
 	if brew {
 		deps.RunInstall = func(ctx context.Context) error {
 			if out, err := run.Default(ctx, "brew", "install", "ollama"); err != nil {

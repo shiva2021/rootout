@@ -2,6 +2,7 @@ package ollama
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -340,4 +341,52 @@ func TestPullRetriesStalledDownloads(t *testing.T) {
 	if err == nil || calls != PullRetries || !strings.Contains(err.Error(), "gave up after") {
 		t.Fatalf("persistent stall: err=%v calls=%d", err, calls)
 	}
+}
+
+func TestDelete(t *testing.T) {
+	var deleted []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("DELETE /api/delete", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Model == "" {
+			http.Error(w, `{"error":"bad request body"}`, http.StatusBadRequest)
+			return
+		}
+		if body.Model == "ghost:1b" {
+			http.Error(w, `{"error":"model 'ghost:1b' not found"}`, http.StatusNotFound)
+			return
+		}
+		deleted = append(deleted, body.Model)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c := testClient(srv.URL)
+
+	t.Run("success", func(t *testing.T) {
+		if err := c.Delete(context.Background(), "qwen2.5-coder:3b"); err != nil {
+			t.Fatal(err)
+		}
+		if len(deleted) != 1 || deleted[0] != "qwen2.5-coder:3b" {
+			t.Fatalf("server deleted %v", deleted)
+		}
+	})
+	t.Run("not found", func(t *testing.T) {
+		err := c.Delete(context.Background(), "ghost:1b")
+		if !errors.Is(err, ErrModelNotFound) {
+			t.Fatalf("err = %v, want ErrModelNotFound", err)
+		}
+	})
+	t.Run("bad name", func(t *testing.T) {
+		before := len(deleted)
+		for _, name := range []string{"", "a b", "x;y", "m\n"} {
+			if err := c.Delete(context.Background(), name); err == nil {
+				t.Errorf("Delete(%q) succeeded", name)
+			}
+		}
+		if len(deleted) != before {
+			t.Fatalf("server saw deletes for bad names: %v", deleted)
+		}
+	})
 }

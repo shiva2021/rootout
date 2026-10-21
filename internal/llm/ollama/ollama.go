@@ -27,8 +27,9 @@ const DefaultURL = "http://localhost:11434"
 const appPath = "/Applications/Ollama.app"
 
 var (
-	ErrNotRunning   = errors.New("ollama: installed but not running")
-	ErrNotInstalled = errors.New("ollama: not installed")
+	ErrNotRunning    = errors.New("ollama: installed but not running")
+	ErrNotInstalled  = errors.New("ollama: not installed")
+	ErrModelNotFound = errors.New("ollama: model not found")
 )
 
 var validName = regexp.MustCompile(`^[a-zA-Z0-9._:/-]+$`)
@@ -345,6 +346,35 @@ func (c *Client) getJSON(ctx context.Context, path string, v any) error {
 	}
 	if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
 		return fmt.Errorf("ollama: GET %s: decode: %w", path, err)
+	}
+	return nil
+}
+
+// Delete removes model from the local store (DELETE /api/delete). A model
+// the server does not have yields ErrModelNotFound.
+func (c *Client) Delete(ctx context.Context, model string) error {
+	if !validName.MatchString(model) {
+		return fmt.Errorf("ollama: delete: invalid model name %q", model)
+	}
+	body, err := json.Marshal(map[string]string{"model": model})
+	if err != nil {
+		return fmt.Errorf("ollama: delete %s: %w", model, err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.BaseURL+"/api/delete", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("ollama: delete %s: %w", model, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return fmt.Errorf("ollama: delete %s: %w", model, &unreachableError{err})
+	}
+	defer func() { _ = resp.Body.Close() }()
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return fmt.Errorf("%w: %s", ErrModelNotFound, model)
+	case resp.StatusCode < 200 || resp.StatusCode > 299:
+		return fmt.Errorf("ollama: delete %s: %w", model, statusError(resp))
 	}
 	return nil
 }

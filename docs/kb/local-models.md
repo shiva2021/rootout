@@ -32,10 +32,17 @@ Considered and left out: `llama3.1:8b` (older, superseded by qwen3/qwen3.5 for J
 - `GET /api/version` → `{"version": "..."}`.
 - `GET /api/tags` → `models[].name, size, details.{family, parameter_size, quantization_level}`.
 - `POST /api/pull {"model", "stream": true}` → NDJSON lines `{status, digest, total, completed}` (`completed` absent until bytes arrive), ending `{"status":"success"}`. A mid-stream failure is a line `{"error": "..."}` with HTTP 200 already sent, so every line is checked for `error`.
-- Model names must match `^[a-zA-Z0-9._:/-]+$` before a pull.
+- `DELETE /api/delete {"model"}` → 200 with no body; a missing model is 404 `{"error": "model '…' not found"}`, mapped to `ErrModelNotFound`.
+- Model names must match `^[a-zA-Z0-9._:/-]+$` before a pull or delete.
+
+## Uninstalling a model
+- Picker: `d` on an installed row (either section) asks `Uninstall <name> (<size>)? y/n`, deletes with a spinner, re-lists, and flashes the result. Recommended rows show `installed` / `not installed`.
+- CLI: `rootout config models rm <model> [--yes]`.
+- If the model was the configured default, the setting is cleared (`ModelDeps.ClearDefault` in the picker, `removeModel` in the CLI) so scans do not ask for a model that is gone. Decision D-025.
 
 ## Sources (checked 2026-10-20)
 - https://ollama.com/library
 - https://ollama.com/library/qwen3.5/tags, /qwen2.5-coder/tags, /qwen3/tags, /qwen3-coder/tags, /llama3.2/tags, /gemma4/tags
 - https://github.com/ollama/ollama/blob/main/docs/api.md (moving to https://docs.ollama.com/api)
 - https://docs.ollama.com/api/errors (mid-stream error shape)
+- https://docs.ollama.com/api/delete (checked 2026-10-21)

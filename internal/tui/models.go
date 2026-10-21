@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	modelsHelp        = "↑/↓ move · enter choose · esc quit · ? help"
+	modelsHelp        = "↑/↓ move · enter choose · d uninstall · esc quit · ? help"
 	modelsPullHelp    = "esc cancel download · ? help"
 	modelsInstallHelp = "↑/↓ move · enter run · esc quit · ? help"
 	modelsStartHelp   = "enter start Ollama · esc quit · ? help"
@@ -29,6 +29,9 @@ type ModelDeps struct {
 	Hardware   ollama.Hardware
 	HasBrew    bool
 	RunInstall func(ctx context.Context) error // runs the brew install route; nil hides it
+	// ClearDefault forgets the configured default model. The picker calls it
+	// after uninstalling that model; nil means nothing to clear.
+	ClearDefault func() error
 }
 
 // PickModel returns the chosen (and, if needed, pulled) model name.
@@ -56,11 +59,12 @@ const (
 	stateListing                        // spinner while ListInstalled runs
 	stateReady                          // installed + recommended list
 	statePulling                        // progress bar
+	stateDeleting                       // spinner while Client.Delete runs
 )
 
 func (s modelState) busy() bool {
 	switch s {
-	case stateDetecting, stateInstalling, stateStarting, stateListing:
+	case stateDetecting, stateInstalling, stateStarting, stateListing, stateDeleting:
 		return true
 	}
 	return false
@@ -84,6 +88,10 @@ type (
 		id  int
 		err error
 	}
+	deletedMsg struct {
+		name string
+		err  error
+	}
 )
 
 // modelRowKind says what a list row shows.
@@ -105,24 +113,26 @@ type modelRow struct {
 // modelStyles extends the shared styles with this screen's badges.
 type modelStyles struct {
 	styles
-	heading     lipgloss.Style
-	comfortable lipgloss.Style
-	tight       lipgloss.Style
-	tooLarge    lipgloss.Style
-	installed   lipgloss.Style
-	errLine     lipgloss.Style
+	heading      lipgloss.Style
+	comfortable  lipgloss.Style
+	tight        lipgloss.Style
+	tooLarge     lipgloss.Style
+	installed    lipgloss.Style
+	notInstalled lipgloss.Style
+	errLine      lipgloss.Style
 }
 
 func defaultModelStyles() modelStyles {
 	s := defaultStyles()
 	return modelStyles{
-		styles:      s,
-		heading:     lipgloss.NewStyle().Bold(true),
-		comfortable: lipgloss.NewStyle().Foreground(lipgloss.Green),
-		tight:       lipgloss.NewStyle().Foreground(lipgloss.Yellow),
-		tooLarge:    s.dim,
-		installed:   lipgloss.NewStyle().Foreground(lipgloss.Cyan),
-		errLine:     lipgloss.NewStyle().Foreground(lipgloss.Red),
+		styles:       s,
+		heading:      lipgloss.NewStyle().Bold(true),
+		comfortable:  lipgloss.NewStyle().Foreground(lipgloss.Green),
+		tight:        lipgloss.NewStyle().Foreground(lipgloss.Yellow),
+		tooLarge:     s.dim,
+		installed:    lipgloss.NewStyle().Foreground(lipgloss.Cyan),
+		notInstalled: s.dim,
+		errLine:      lipgloss.NewStyle().Foreground(lipgloss.Red),
 	}
 }
 
@@ -157,6 +167,7 @@ type ModelPicker struct {
 	pullWait   tea.Cmd // reads the next pull message
 	chosen     string
 	ok         bool
+	deleting   string // model being uninstalled
 
 	help     bool // ? overlay open
 	embedded bool // hosted by another screen: finish instead of quitting
@@ -287,6 +298,29 @@ func (m *ModelPicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.chosen, m.ok = m.pullName, true
 		return m, m.quit()
 
+	case deletedMsg:
+		if m.state != stateDeleting {
+			return m, nil
+		}
+		m.deleting = ""
+		if msg.err != nil {
+			m.errText = msg.err.Error()
+			m.setState(stateReady)
+			return m, nil
+		}
+		m.flash = msg.name + " uninstalled"
+		if m.isCurrent(msg.name) {
+			m.current = ""
+			m.flash += "; it was the default, choose another"
+			if m.deps.ClearDefault != nil {
+				if err := m.deps.ClearDefault(); err != nil {
+					m.errText = err.Error()
+				}
+			}
+		}
+		m.state = stateListing
+		return m, tea.Batch(m.list(), m.spin.Tick)
+
 	case tea.KeyPressMsg:
 		return m.key(msg)
 	}
@@ -341,8 +375,52 @@ func (m *ModelPicker) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.move(m.listRows())
 	case "enter":
 		return m, m.choose()
+	case "d":
+		m.askUninstall()
 	}
 	return m, nil
+}
+
+// askUninstall asks to uninstall the model on the cursor row when it is in
+// the local store; other rows just flash.
+func (m *ModelPicker) askUninstall() {
+	if m.state != stateReady || m.cursor < 0 {
+		return
+	}
+	r := m.rows[m.cursor]
+	var name string
+	switch r.kind {
+	case mrInstalled:
+		name = m.installed[r.idx].Name
+	case mrRecommended:
+		name = m.installedName(m.recs[r.idx].Name)
+	}
+	in, ok := m.installedEntry(name)
+	if !ok {
+		m.flash = "not installed"
+		return
+	}
+	m.ask = fmt.Sprintf("Uninstall %s (%s)? y/n", in.Name, output.Bytes(in.SizeBytes))
+	m.onYes = func() tea.Cmd { return m.startDelete(in.Name) }
+}
+
+// installedEntry finds name in the local store.
+func (m *ModelPicker) installedEntry(name string) (ollama.Installed, bool) {
+	for _, in := range m.installed {
+		if in.Name == name {
+			return in, true
+		}
+	}
+	return ollama.Installed{}, false
+}
+
+// startDelete runs Client.Delete with a spinner; deletedMsg re-lists.
+func (m *ModelPicker) startDelete(name string) tea.Cmd {
+	m.errText = ""
+	m.deleting = name
+	m.state = stateDeleting
+	c, ctx := m.deps.Client, m.ctx
+	return tea.Batch(func() tea.Msg { return deletedMsg{name: name, err: c.Delete(ctx, name)} }, m.spin.Tick)
 }
 
 // View renders the whole screen in the alternate buffer.
@@ -601,6 +679,8 @@ func (m *ModelPicker) render() string {
 		body = []string{m.spin.View() + " installing Ollama with Homebrew…"}
 	case stateStarting:
 		body = []string{m.spin.View() + " starting Ollama…"}
+	case stateDeleting:
+		body = []string{m.spin.View() + " uninstalling " + m.deleting + "…"}
 	case stateNotRunning:
 		help = modelsStartHelp
 		body = []string{
@@ -663,9 +743,10 @@ func (m *ModelPicker) helpKeys() []keyHelp {
 		keys = append(keys, keyHelp{"esc", "cancel the download"})
 	default:
 		keys = append(keys, keyHelp{"enter", "choose the model (downloads it if needed)"})
+		keys = append(keys, keyHelp{"d", "uninstall the selected model from Ollama"})
 	}
 	if m.ask != "" || m.state == stateNotInstalled || m.state == stateNotRunning || m.state == stateReady {
-		keys = append(keys, keyHelp{"y / n", "answer a run or download question"})
+		keys = append(keys, keyHelp{"y / n", "answer a run, download or uninstall question"})
 	}
 	if m.state != statePulling {
 		keys = append(keys, keyHelp{"esc", "quit without choosing"})
@@ -733,7 +814,9 @@ func (m *ModelPicker) renderRow(i int) string {
 		b.WriteString(dim.Render(fmt.Sprintf("%*s ", sizeWidth, output.Bytes(rec.DownloadBytes))))
 		b.WriteString(m.fitStyle(rec.Fit).Inherit(base).Render(fmt.Sprintf("%-11s", rec.Fit)))
 		if rec.Installed {
-			b.WriteString(base.Render(" ") + s.installed.Inherit(base).Render("installed"))
+			b.WriteString(base.Render(" ") + s.installed.Inherit(base).Render(fmt.Sprintf("%-13s", "installed")))
+		} else {
+			b.WriteString(base.Render(" ") + s.notInstalled.Inherit(base).Render("not installed"))
 		}
 		used := lipgloss.Width(b.String())
 		if room := m.width - used - 1; room > 8 {

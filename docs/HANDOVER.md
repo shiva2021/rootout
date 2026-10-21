@@ -1,11 +1,17 @@
 # Handover
 
-_Updated: 2026-10-21 · Session: v0.2 (progress, typed delete, help, in-scan model pick, orphans)_
+_Updated: 2026-10-21 · Session: model uninstall (picker `d`, `config models rm`)_
 
 ## Status
-v0.2 complete and pushed to https://github.com/shiva2021/rootout (`main`): progress bars, typed `delete`, help (examples, `rootout guide`, `?` overlays), in-scan local-model picking, `rootout orphans`. Decisions D-019…D-023. `make test`/`make lint` green. Remaining: M2 manual QA on a throwaway account, M5 release pipeline, M6 licensing (own plan).
+v0.2 complete and pushed to https://github.com/shiva2021/rootout (`main`). Since then: Ollama pull retries, scan progress bar, Ollama format fallback, and model uninstall (D-025). Decisions D-019…D-025. `make test`/`make lint` green. Remaining: M2 manual QA on a throwaway account, M5 release pipeline, M6 licensing (own plan).
 
-## Done this session (v0.2)
+## Done this session (model uninstall)
+- `ollama.Client.Delete` (`DELETE /api/delete`, `ErrModelNotFound`), verified against docs.ollama.com.
+- Picker: `d` on an installed row → `Uninstall X (size)? y/n` → spinner → re-list → flash; recommended rows show `installed` / `not installed`; `?` overlay and footer updated. `ModelDeps.ClearDefault` clears the saved default when that model goes.
+- `rootout config models rm <model> [--yes]`; first tests in `cmd/rootout` (`config_test.go`, exercises `removeModel` with an httptest Ollama and a temp config).
+- Verified on this Mac: `rm ghost:1b --yes` → not-found error, exit 1; `echo n | rm qwen3.5:4b` → cancelled, exit 3, config untouched. Did not run a real delete (only one model installed).
+
+## Done earlier (v0.2)
 - Progress: `internal/progress`; hooks in app discovery (4 size workers), leftover search, extension scan, removal; picker loads inside the program.
 - Typed `delete` in the confirm and scan screens and the plain prompt; `--yes` is the only bypass; `scan --uninstall <id> [--yes]`.
 - Help: `Long`/`Example` everywhere, `rootout guide`, first-run hint, `?` overlays.
@@ -26,7 +32,7 @@ v0.2 complete and pushed to https://github.com/shiva2021/rootout (`main`): progr
 - Review screen and app picker verified under a pseudo-terminal (render + quit). Live removal and live LLM calls have not been run.
 
 ## Next steps
-1. Try v0.2 interactively: `rootout` (bar, orphans row, `?`), `rootout scan` (`m`), `rootout orphans` (tick one group, type delete) — removal paths have only run in unit tests plus Esc-at-the-box pty checks.
+1. Try v0.2 interactively: `rootout` (bar, orphans row, `?`), `rootout scan` (`m`, then `d` on a model), `rootout orphans` (tick one group, type delete) — removal paths have only run in unit tests plus Esc-at-the-box pty checks. A real model uninstall has not been run yet.
 2. M2 task 7: follow `docs/kb/qa.md` on a throwaway macOS user account (cask, App Store and pkg app). Live removal has only run in unit tests.
 3. Try `rootout scan --llm` with a real key or `rootout config models --pick` with Ollama; only recorded-HTTP tests exist so far.
 4. M5: GoReleaser config, Homebrew tap; notarization optional (D-024). It is a CLI release, not a macOS app release.

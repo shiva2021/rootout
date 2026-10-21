@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -292,5 +294,159 @@ func TestModelPickerHelpOverlay(t *testing.T) {
 	pressM(m, tea.KeyPressMsg{Code: '?', Text: "?"})
 	if out := viewM(m); !strings.Contains(out, "install route") || !strings.Contains(out, "y / n") {
 		t.Fatalf("install-state help:\n%s", out)
+	}
+}
+
+var keyD = tea.KeyPressMsg{Code: 'd', Text: "d"}
+
+// runBatch executes cmd (possibly a tea.Batch) and returns the message whose
+// type matches want.
+func runBatch(t *testing.T, cmd tea.Cmd, want tea.Msg) tea.Msg {
+	t.Helper()
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		batch = tea.BatchMsg{func() tea.Msg { return msg }}
+	}
+	for _, c := range batch {
+		if got := c(); fmt.Sprintf("%T", got) == fmt.Sprintf("%T", want) {
+			return got
+		}
+	}
+	t.Fatalf("no %T in batch", want)
+	return nil
+}
+
+// deletingPicker is a ready picker whose Ollama stand-in accepts deletes
+// and lists what is left.
+func deletingPicker(t *testing.T, current string) (*ModelPicker, *[]string) {
+	t.Helper()
+	var deleted []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("DELETE /api/delete", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		deleted = append(deleted, string(b))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	m := NewModelPicker(context.Background(), ModelDeps{Client: ollama.New(srv.URL), Hardware: testHW}, current)
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m.Update(detectedMsg{})
+	m.Update(listedMsg{installed: testInstalled()})
+	return m, &deleted
+}
+
+func TestModelPickerStatusColumn(t *testing.T) {
+	m := newReadyPicker(t, "")
+	out := viewM(m)
+	if !strings.Contains(out, "not installed") {
+		t.Fatalf("recommended rows lack a 'not installed' status:\n%s", out)
+	}
+	// qwen2.5-coder:7b is installed and recommended for 16 GB.
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "qwen2.5-coder:7b") && strings.Contains(line, "4.7 GB") && strings.Contains(line, "comfortable") {
+			if !strings.Contains(line, "installed") || strings.Contains(line, "not installed") {
+				t.Fatalf("installed recommended row has wrong status: %q", line)
+			}
+			return
+		}
+	}
+	t.Fatalf("no recommended row for qwen2.5-coder:7b:\n%s", out)
+}
+
+func TestModelPickerUninstall(t *testing.T) {
+	m, deleted := deletingPicker(t, "")
+	cursorTo(t, m, "llama3.2:3b")
+	pressM(m, keyD)
+	if !strings.Contains(viewM(m), "Uninstall llama3.2:3b (2.0 GB)? y/n") {
+		t.Fatalf("no uninstall confirm:\n%s", viewM(m))
+	}
+	pressM(m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	if m.ask != "" || m.state != stateReady {
+		t.Fatal("n should cancel the question")
+	}
+
+	pressM(m, keyD)
+	cmd := pressM(m, tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if cmd == nil || m.state != stateDeleting {
+		t.Fatalf("y should start the delete; state %d", m.state)
+	}
+	if !strings.Contains(viewM(m), "uninstalling llama3.2:3b") {
+		t.Fatalf("no spinner text:\n%s", viewM(m))
+	}
+	msg := runBatch(t, cmd, deletedMsg{})
+	if _, cmd := m.Update(msg); cmd == nil || m.state != stateListing {
+		t.Fatalf("delete should re-list; state %d", m.state)
+	}
+	if len(*deleted) != 1 || !strings.Contains((*deleted)[0], `"model":"llama3.2:3b"`) {
+		t.Fatalf("server saw %v", *deleted)
+	}
+	m.Update(listedMsg{installed: testInstalled()[1:]})
+	out := viewM(m)
+	if !strings.Contains(out, "llama3.2:3b uninstalled") || strings.Contains(out, "default") {
+		t.Fatalf("flash wrong:\n%s", out)
+	}
+	if _, ok := m.Chosen(); ok {
+		t.Fatal("uninstall chose a model")
+	}
+}
+
+func TestModelPickerUninstallCurrentClearsDefault(t *testing.T) {
+	m, _ := deletingPicker(t, "qwen2.5-coder:7b")
+	cleared := 0
+	m.deps.ClearDefault = func() error { cleared++; return nil }
+	if !strings.Contains(viewM(m), "(current)") {
+		t.Fatal("current marker missing before uninstall")
+	}
+	cursorTo(t, m, "qwen2.5-coder:7b")
+	cmd := pressM(m, keyD, tea.KeyPressMsg{Code: 'y', Text: "y"})
+	m.Update(runBatch(t, cmd, deletedMsg{}))
+	m.Update(listedMsg{installed: testInstalled()[:1]})
+	out := viewM(m)
+	if cleared != 1 {
+		t.Fatalf("ClearDefault called %d times", cleared)
+	}
+	if !strings.Contains(out, "it was the default") || strings.Contains(out, "(current)") {
+		t.Fatalf("default not cleared in view:\n%s", out)
+	}
+}
+
+func TestModelPickerUninstallViaRecommendedRow(t *testing.T) {
+	m, deleted := deletingPicker(t, "")
+	cursorTo(t, m, "qwen3.5:9b") // recommended, not installed
+	pressM(m, keyD)
+	if m.ask != "" || !strings.Contains(viewM(m), "not installed") {
+		t.Fatalf("d on a not-installed row should flash:\n%s", viewM(m))
+	}
+	cursorTo(t, m, "qwen2.5-coder:7b")
+	for m.rows[m.cursor].kind != mrRecommended { // skip the Installed section's copy
+		pressM(m, keyDown)
+		cursorTo(t, m, "qwen2.5-coder:7b")
+	}
+	cmd := pressM(m, keyD, tea.KeyPressMsg{Code: 'y', Text: "y"})
+	m.Update(runBatch(t, cmd, deletedMsg{}))
+	if len(*deleted) != 1 || !strings.Contains((*deleted)[0], `"model":"qwen2.5-coder:7b"`) {
+		t.Fatalf("server saw %v", *deleted)
+	}
+}
+
+func TestModelPickerUninstallError(t *testing.T) {
+	m := newReadyPicker(t, "")
+	cursorTo(t, m, "llama3.2:3b")
+	pressM(m, keyD, tea.KeyPressMsg{Code: 'y', Text: "y"})
+	m.Update(deletedMsg{name: "llama3.2:3b", err: errors.New("ollama: delete llama3.2:3b: 500 boom")})
+	if m.state != stateReady || !strings.Contains(viewM(m), "boom") {
+		t.Fatalf("error not shown:\n%s", viewM(m))
+	}
+}
+
+func TestModelPickerHelpMentionsUninstall(t *testing.T) {
+	m := newReadyPicker(t, "")
+	if !strings.Contains(viewM(m), "d uninstall") {
+		t.Fatalf("footer lacks d uninstall:\n%s", viewM(m))
+	}
+	pressM(m, tea.KeyPressMsg{Code: '?', Text: "?"})
+	if !strings.Contains(viewM(m), "uninstall") {
+		t.Fatalf("? overlay lacks uninstall:\n%s", viewM(m))
 	}
 }

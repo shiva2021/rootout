@@ -193,3 +193,12 @@ Append-only. Newest at the bottom. Never edit an old entry; add a new one that s
 **Alternatives.** Mac App Store / in-app purchase (rejected: not a standard app rollout, and a CLI does not fit the store); Lemon Squeezy/Paddle license sales (the earlier M6 recommendation; superseded by Patreon membership, to be confirmed at M6); gating from day one (rejected: it would shape early development).
 **Consequences.** `license.Check` keeps its single call site at the Cobra root (D-008) so M6 needs no restructuring. `docs/PLAN.md` M5/M6 updated. A Patreon integration adds a network dependency to the paid path; the admin path must never depend on the network.
 **Status.** Accepted (supersedes the Lemon Squeezy/Paddle recommendation in D-008's M6 note)
+
+## D-025 · 2026-10-21 · Uninstalling local models: y/n confirmation, default cleared
+
+**Context.** The model picker could install models but not remove them, and recommended rows only flagged the installed ones. Shivang asked for an install status on every row and an easy way to uninstall.
+**Decision.** `d` in the picker and `rootout config models rm <model>` delete through `DELETE /api/delete`. Confirmation is a y/n prompt, not the typed `delete` word used for app removal: a model is re-downloadable, and the picker's other prompts (install, download) are already y/n. `--yes` skips the prompt without the red banner for the same reason. If the uninstalled model is the configured default, the Ollama model setting is cleared and the user is told to pick another; the provider setting is left alone. Recommended rows always show `installed` or `not installed`.
+**Alternatives.** Typed `delete` (rejected: heavier than the risk); leaving the default pointing at a missing model (rejected: scans would fail later with a less helpful error); picker-only without a CLI command (rejected: `config pull` has a CLI form, so should its inverse).
+**Consequences.** `ModelDeps` gains `ClearDefault`, injected from `cmd/`, so the embedded scan-screen picker needs no changes. Deleting is the only y/n-confirmed destructive action in the tool; everything that touches user files stays on the typed word.
+**Status.** Accepted
+
