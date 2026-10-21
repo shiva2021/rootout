@@ -166,6 +166,7 @@ func hygStartsOnActivation(events []string) bool {
 
 type hygBypassFlag struct {
 	re   *regexp.Regexp
+	lit  string         // lower-case literal every match of re contains
 	near *regexp.Regexp // when set, the flag only counts within hygBypassNear bytes of a match
 	span int
 }
@@ -173,14 +174,18 @@ type hygBypassFlag struct {
 const hygBypassNear = 300
 
 var hygBypassFlags = []hygBypassFlag{
-	{re: regexp.MustCompile(`--permission-mode[ =]bypassPermissions`)},
-	{re: regexp.MustCompile(`--dangerously-skip-permissions`)},
-	{re: regexp.MustCompile(`--yolo\b`)},
-	{re: regexp.MustCompile(`--trust-all-tools`)},
-	{re: regexp.MustCompile(`--allow-all\b`)},
-	{re: regexp.MustCompile(`--no-sandbox`), near: regexp.MustCompile(`\b(spawn|exec|sendText|createTerminal)\b`), span: hygBypassNear},
-	{re: regexp.MustCompile(`\bnpx\s+(-y|--yes)\s`), near: regexp.MustCompile(`\b(sendText|exec|execSync)\(`), span: 200},
+	{re: regexp.MustCompile(`--permission-mode[ =]bypassPermissions`), lit: "--permission-mode"},
+	{re: regexp.MustCompile(`--dangerously-skip-permissions`), lit: "--dangerously-skip-permissions"},
+	{re: regexp.MustCompile(`--yolo\b`), lit: "--yolo"},
+	{re: regexp.MustCompile(`--trust-all-tools`), lit: "--trust-all-tools"},
+	{re: regexp.MustCompile(`--allow-all\b`), lit: "--allow-all"},
+	{re: regexp.MustCompile(`--no-sandbox`), lit: "--no-sandbox", near: regexp.MustCompile(`\b(spawn|exec|sendText|createTerminal)\b`), span: hygBypassNear},
+	{re: regexp.MustCompile(`\bnpx\s+(-y|--yes)\s`), lit: "npx", near: regexp.MustCompile(`\b(sendText|exec|execSync)\(`), span: 200},
 }
+
+// hygLitWindow is the FindAround window for the hygiene patterns, whose
+// matches are a file name, a flag or a call head: never more than half of it.
+const hygLitWindow = 128
 
 func hygPermissionBypassLaunch(c *FileCtx) []Finding {
 	if !hygIsCode(c.Rel) {
@@ -192,7 +197,7 @@ func hygPermissionBypassLaunch(c *FileCtx) []Finding {
 	}
 	var out []Finding
 	for _, f := range hygBypassFlags {
-		for _, loc := range f.re.FindAllIndex(c.Data, -1) {
+		for _, loc := range c.FindAround(f.re, hygLitWindow, litHits, f.lit) {
 			if f.near != nil && !f.near.Match(hygWindow(c.Data, loc[0], f.span, f.span)) {
 				continue
 			}
@@ -253,7 +258,7 @@ func hygPlaintextTokenWrite(c *FileCtx) []Finding {
 		return nil
 	}
 	var out []Finding
-	for _, loc := range hygWriteCallRe.FindAllIndex(c.Data, -1) {
+	for _, loc := range c.FindAround(hygWriteCallRe, hygLitWindow, litHits, "writefile", "outputfile", "open(") {
 		paren := loc[1] - 1
 		start, end := hygArgs(c.Data, paren, 400)
 		args := c.Data[start:end]
@@ -337,7 +342,7 @@ func hygSettingsTamper(c *FileCtx) []Finding {
 		})
 	}
 
-	for _, loc := range hygEditorConfigRe.FindAllIndex(c.Data, -1) {
+	for _, loc := range c.FindAround(hygEditorConfigRe, hygLitWindow, litHits, "settings.json", "argv.json", "state.vscdb", "mcp.json") {
 		win := hygWindow(c.Data, loc[0], 300, 300)
 		if !hygWriteVerbRe.Match(win) {
 			continue
@@ -350,7 +355,7 @@ func hygSettingsTamper(c *FileCtx) []Finding {
 		add(loc[0], fmt.Sprintf("writes the editor's own config file %s", c.Data[loc[0]:loc[1]]))
 	}
 
-	for _, m := range hygUpdateCallRe.FindAllSubmatchIndex(c.Data, -1) {
+	for _, m := range c.FindAround(hygUpdateCallRe, hygPathWindow, litHits, ".update(") {
 		key := string(c.Data[m[2]:m[3]])
 		before := hygWindow(c.Data, m[0], 160, 0)
 		if g := hygGetConfigRe.FindSubmatch(before); g != nil {
@@ -368,6 +373,13 @@ func hygSettingsTamper(c *FileCtx) []Finding {
 
 // -- agent_config_write
 
+// hygPathWindow is the FindAround window for a pattern that spans a whole
+// quoted path or setting key (hygAgentDirRe, hygUpdateCallRe).
+const hygPathWindow = 1024
+
+// hygAgentDirLits: every match of hygAgentDirRe names one of these.
+var hygAgentDirLits = []string{".claude", ".cursor", ".codeium", ".continue", ".aider", ".gemini", ".copilot"}
+
 var (
 	hygAgentHighPathRe    = regexp.MustCompile(`(?:settings|mcp)\.json['"\x60]`)
 	hygAgentHighContentRe = regexp.MustCompile(`bypassPermissions|allowedTools|dangerously`)
@@ -379,7 +391,7 @@ func hygAgentConfigWrite(c *FileCtx) []Finding {
 	}
 	var out []Finding
 	seen := map[string]bool{}
-	for _, m := range hygAgentDirRe.FindAllSubmatchIndex(c.Data, -1) {
+	for _, m := range c.FindAround(hygAgentDirRe, hygPathWindow, litHits, hygAgentDirLits...) {
 		win := hygWindow(c.Data, m[0], 300, 300)
 		if !hygWriteVerbRe.Match(win) {
 			continue

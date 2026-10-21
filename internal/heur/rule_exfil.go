@@ -231,28 +231,31 @@ func (e *exfilEmitter) scan(pats []exfilPat, format string, accept func(off, end
 		if e.full() {
 			return
 		}
-		lit := ""
+		var alts []string
 		if lits != nil {
-			lit = lits[i]
+			alts = lits[i]
 		}
-		if lit == "" {
+		if len(alts) == 0 {
 			for _, m := range p.re.FindAllIndex(e.c.Data, exfilCap*8) {
 				e.hit(p, m[0], m[1], format, accept)
 			}
 			continue
 		}
-		low, needle := e.c.Lower(), []byte(lit)
-		for from, hits := 0, 0; hits < exfilLitHits; hits++ {
-			k := bytes.Index(low[from:], needle)
-			if k < 0 {
-				break
+		low := e.c.Lower()
+		for _, lit := range alts {
+			needle := []byte(lit)
+			for from, hits := 0, 0; hits < exfilLitHits; hits++ {
+				k := bytes.Index(low[from:], needle)
+				if k < 0 {
+					break
+				}
+				off := from + k
+				ws, we := max(0, off-exfilWindow), min(len(e.c.Data), off+len(needle)+exfilWindow)
+				for _, m := range p.re.FindAllIndex(e.c.Data[ws:we], -1) {
+					e.hit(p, ws+m[0], ws+m[1], format, accept)
+				}
+				from = off + len(needle)
 			}
-			off := from + k
-			ws, we := max(0, off-exfilWindow), min(len(e.c.Data), off+len(needle)+exfilWindow)
-			for _, m := range p.re.FindAllIndex(e.c.Data[ws:we], -1) {
-				e.hit(p, ws+m[0], ws+m[1], format, accept)
-			}
-			from = off + len(needle)
 		}
 	}
 }
@@ -264,6 +267,18 @@ const (
 	exfilLitHits = 64
 )
 
+// Literals every match of exfilHTTPClient and exfilSink must contain.
+var (
+	exfilClientLits = []string{"fetch", "axios", "http.request", "https.request", "xmlhttprequest", "requests.get", "requests.post", "urllib"}
+	exfilSinkLits   = []string{"fetch", "axios", "http.request", "https.request", "formdata", "xmlhttprequest", "requests.post", "urllib.request"}
+)
+
+// exfilFirst keeps the first exfilCap*8 matches, as FindAllIndex(data,
+// exfilCap*8) did before the rules moved to FindAround.
+func exfilFirst(ms [][]int) [][]int {
+	return ms[:min(len(ms), exfilCap*8)]
+}
+
 func (e *exfilEmitter) hit(p exfilPat, off, end int, format string, accept func(off, end int) bool) {
 	if accept != nil && !accept(off, end) {
 		return
@@ -273,24 +288,26 @@ func (e *exfilEmitter) hit(p exfilPat, off, end int, format string, accept func(
 
 var (
 	exfilLitsMu  sync.Mutex
-	exfilLitSets = map[*exfilPat][]string{}
+	exfilLitSets = map[*exfilPat][][]string{}
 )
 
-// exfilLits derives one lower-case literal per pattern (the leading literal
-// run of its source, e.g. "discord" from `discord(?:app)?\.com/…`), or ""
-// when a pattern has none; nil when no pattern in the list has one.
-func exfilLits(pats []exfilPat) []string {
+// exfilLits derives the lower-case literals that gate each pattern: one per
+// top-level alternative (e.g. "discord" from `discord(?:app)?\.com/…`; both
+// "ngrok.io" and "ngrok-free.app" from `ngrok\.io|ngrok-free\.app`). A
+// pattern with an alternative that has no literal gets none (full scan);
+// nil when no pattern in the list has any.
+func exfilLits(pats []exfilPat) [][]string {
 	key := &pats[0]
 	exfilLitsMu.Lock()
 	defer exfilLitsMu.Unlock()
 	if l, ok := exfilLitSets[key]; ok {
 		return l
 	}
-	lits := make([]string, len(pats))
+	lits := make([][]string, len(pats))
 	any := false
 	for i, p := range pats {
-		if lit := exfilLeadingLiteral(p.re.String()); len(lit) >= 3 {
-			lits[i] = strings.ToLower(lit)
+		if alts := exfilLiterals(p.re.String()); alts != nil {
+			lits[i] = alts
 			any = true
 		}
 	}
@@ -301,11 +318,24 @@ func exfilLits(pats []exfilPat) []string {
 	return lits
 }
 
-// exfilLeadingLiteral returns the literal prefix of a regex source after
-// stripping leading flags and word boundaries; escaped punctuation is unescaped.
-func exfilLeadingLiteral(src string) string {
-	// Leading flags, word boundaries and non-capturing group openers carry
-	// no literal; a group that opens an alternation does, so stop there.
+// exfilLiterals returns one lower-case literal per top-level alternative of
+// src, or nil when any alternative lacks a usable (3+ byte) literal.
+func exfilLiterals(src string) []string {
+	src = exfilStripPrefix(src)
+	var out []string
+	for _, branch := range exfilSplitTopLevel(src) {
+		lit := exfilLeadingLiteral(branch)
+		if len(lit) < 3 {
+			return nil
+		}
+		out = append(out, strings.ToLower(lit))
+	}
+	return out
+}
+
+// exfilStripPrefix removes leading flags, word boundaries and non-capturing
+// group openers, which carry no literal.
+func exfilStripPrefix(src string) string {
 	for changed := true; changed; {
 		changed = false
 		for _, pre := range []string{"(?i)", "(?m)", `\b`, "(?:"} {
@@ -315,6 +345,43 @@ func exfilLeadingLiteral(src string) string {
 			}
 		}
 	}
+	return src
+}
+
+// exfilSplitTopLevel splits src at '|' outside groups and classes.
+func exfilSplitTopLevel(src string) []string {
+	var parts []string
+	depth, class, start := 0, false, 0
+	for i := 0; i < len(src); i++ {
+		switch src[i] {
+		case '\\':
+			i++
+		case '[':
+			class = true
+		case ']':
+			class = false
+		case '(':
+			if !class {
+				depth++
+			}
+		case ')':
+			if !class && depth > 0 {
+				depth--
+			}
+		case '|':
+			if !class && depth == 0 {
+				parts = append(parts, src[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(parts, src[start:])
+}
+
+// exfilLeadingLiteral returns the literal prefix of a regex source after
+// stripping leading flags and word boundaries; escaped punctuation is unescaped.
+func exfilLeadingLiteral(src string) string {
+	src = exfilStripPrefix(src)
 	var b strings.Builder
 	for i := 0; i < len(src); i++ {
 		ch := src[i]
@@ -391,7 +458,7 @@ func exfilRawIPURL(c *FileCtx) []Finding {
 		return nil
 	}
 	e := exfilNew(c, "raw_ip_url")
-	for _, m := range exfilIPURL.FindAllSubmatchIndex(c.Data, exfilCap*8) {
+	for _, m := range exfilFirst(c.FindAround(exfilIPURL, 64, litHits, "://")) {
 		if m[1] < len(c.Data) && c.Data[m[1]] == '.' {
 			continue // longer dotted sequence, not an IPv4
 		}
@@ -421,11 +488,11 @@ func exfilRawIPURL(c *FileCtx) []Finding {
 
 // plain_http_beacon: unencrypted HTTP targets in a file that makes requests.
 func exfilPlainHTTPBeacon(c *FileCtx) []Finding {
-	if !exfilIsCodeOrJSON(c.Rel) || !exfilHTTPClient.Match(c.Data) {
+	if !exfilIsCodeOrJSON(c.Rel) || len(c.FindAround(exfilHTTPClient, 64, litHits, exfilClientLits...)) == 0 {
 		return nil
 	}
 	e := exfilNew(c, "plain_http_beacon")
-	for _, m := range exfilHTTPURL.FindAllSubmatchIndex(c.Data, exfilCap*8) {
+	for _, m := range exfilFirst(c.FindAround(exfilHTTPURL, 512, litHits, "http://")) {
 		host := strings.ToLower(string(c.Data[m[2]:m[3]]))
 		if !strings.Contains(host, ".") || exfilDottedIP.MatchString(host) || exfilCommentLine(c.Data, m[0]) {
 			continue // placeholder host, raw IP (raw_ip_url) or doc/licence link
@@ -470,7 +537,7 @@ func exfilEnvDumpRule(c *FileCtx) []Finding {
 	}
 	e := exfilNew(c, "env_dump")
 	for _, p := range exfilEnvDump {
-		for _, m := range p.re.FindAllIndex(c.Data, exfilCap*8) {
+		for _, m := range exfilFirst(c.FindAround(p.re, 400, litHits, "process.env", "os.environ", "printenv")) {
 			// Passing the environment to a child process is routine; sending
 			// it to the network is exfiltration (an intent rule, see D-017).
 			win := c.Data[max(0, m[0]-300):min(len(c.Data), m[1]+300)]
@@ -544,12 +611,12 @@ func exfilTelemetryFingerprint(c *FileCtx) []Finding {
 // name a credential path (or a *.pem/*.key/*.p12/*.json under the home dir)
 // and a sink must appear within exfilFlowKB bytes after it.
 func exfilPostOfFile(c *FileCtx) []Finding {
-	if !exfilIsCode(c.Rel) || !exfilSink.Match(c.Data) {
+	if !exfilIsCode(c.Rel) || len(c.FindAround(exfilSink, 64, litHits, exfilSinkLits...)) == 0 {
 		return nil
 	}
-	reads := exfilRead.FindAllIndex(c.Data, -1)
+	reads := c.FindAround(exfilRead, 64, litHits, "readfile")
 	if strings.EqualFold(path.Ext(c.Rel), ".py") {
-		reads = append(reads, exfilReadPy.FindAllIndex(c.Data, -1)...)
+		reads = append(reads, c.FindAround(exfilReadPy, 64, litHits, "open")...)
 	}
 	e := exfilNew(c, "exfil_post_of_file")
 	for _, r := range reads {

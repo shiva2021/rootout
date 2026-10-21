@@ -234,6 +234,10 @@ var (
 	reCodeExecCall    = regexp.MustCompile(`\b(execSync|exec|spawn|spawnSync|execFile|execFileSync)\s*\(`)
 )
 
+// codeCallWindow is the FindAround window for a call-site pattern: a name,
+// optional whitespace and an opening paren never span more than half of it.
+const codeCallWindow = 128
+
 func codeEvalDynamic(c *FileCtx) []codeHit {
 	if !c.HasAny("eval", "function", "settimeout", "setinterval", "runin", "exec", "spawn", "os.system", "subprocess", "atob", "fromcharcode", "base64") {
 		return nil
@@ -247,31 +251,34 @@ func codeEvalDynamic(c *FileCtx) []codeHit {
 		}
 		hits = append(hits, codeHit{off: off, sev: High, detail: "eval() of a computed value: runtime code execution that static review cannot see"})
 	}
-	for _, m := range reCodeEval.FindAllSubmatchIndex(d, -1) {
+	// Each regex runs only around the literal its matches must contain
+	// (FindAround); "Function" is looked up case-sensitively because the
+	// keyword is everywhere.
+	for _, m := range c.FindAround(reCodeEval, codeCallWindow, litHits, "eval") {
 		evalAt(m[3])
 	}
 	if strings.EqualFold(path.Ext(c.Rel), ".py") {
-		for _, m := range reCodePyExec.FindAllSubmatchIndex(d, -1) {
+		for _, m := range c.FindAround(reCodePyExec, codeCallWindow, litHits, "exec") {
 			hits = append(hits, codeHit{off: m[3], sev: High, detail: "exec() of a computed value: runtime code execution that static review cannot see"})
 		}
 	}
-	for _, m := range reCodeNewFunction.FindAllIndex(d, -1) {
+	for _, m := range c.FindAround(reCodeNewFunction, codeCallWindow, litHits, "Function") {
 		hits = append(hits, codeHit{off: m[0], sev: High, detail: "new Function() compiles a string into code at runtime"})
 	}
-	for _, m := range reCodeFunctionCal.FindAllSubmatchIndex(d, -1) {
+	for _, m := range c.FindAround(reCodeFunctionCal, codeCallWindow, litHits, "Function") {
 		off := m[3]
 		if raw, skel := codeCall(d, m[1]-1, 600); codeDynamicReason(skel, raw) != "" { // body is the last argument
 			hits = append(hits, codeHit{off: off, sev: High, detail: "Function() called with a string assembled at runtime"})
 		}
 	}
-	for _, m := range reCodeTimerString.FindAllIndex(d, -1) {
+	for _, m := range c.FindAround(reCodeTimerString, codeCallWindow, litHits, "setTimeout", "setInterval") {
 		hits = append(hits, codeHit{off: m[0], sev: High, detail: "setTimeout/setInterval with a string argument is an implicit eval()"})
 	}
-	for _, m := range reCodeVMRun.FindAllIndex(d, -1) {
+	for _, m := range c.FindAround(reCodeVMRun, codeCallWindow, litHits, "runIn") {
 		hits = append(hits, codeHit{off: m[0], sev: High, detail: "vm.runIn*Context() executes a string as code"})
 	}
 	if bytes.Contains(d, []byte("child_process")) {
-		for _, m := range reCodeExecCall.FindAllSubmatchIndex(d, -1) {
+		for _, m := range c.FindAround(reCodeExecCall, codeCallWindow, litHits, "exec", "spawn") {
 			raw, skel := codeCall(d, m[1]-1, 600)
 			if why := codeDynamicReason(codeFirstArg(skel), raw); why != "" {
 				fn := string(d[m[2]:m[3]])
@@ -309,10 +316,10 @@ func codeChildProcessShell(c *FileCtx) []codeHit {
 		}
 		return hits
 	}
-	for _, m := range reCodeCPImport.FindAllIndex(d, -1) {
+	for _, m := range c.FindAround(reCodeCPImport, codeCallWindow, litHits, "child_process") {
 		hits = append(hits, codeHit{off: m[0], sev: Medium, detail: "imports child_process: the extension can run arbitrary programs on this machine"})
 	}
-	for _, m := range reCodeExecCall.FindAllSubmatchIndex(d, -1) {
+	for _, m := range c.FindAround(reCodeExecCall, codeCallWindow, litHits, "exec", "spawn") {
 		raw, _ := codeCall(d, m[1]-1, 600)
 		if s := reCodeShellOpt.Find(raw); s != nil {
 			hits = append(hits, codeHit{off: m[0], sev: Medium, detail: fmt.Sprintf("%s() goes through a shell or scripting host (%s): commands are interpreted, not just executed", d[m[2]:m[3]], s)})
@@ -329,7 +336,7 @@ func codeHexIdentifiers(c *FileCtx) []codeHit {
 	if !c.HasAny("_0x") {
 		return nil
 	}
-	ms := reCodeHexIdent.FindAllIndex(c.Data, -1)
+	ms := c.FindAround(reCodeHexIdent, codeCallWindow, litHits, "_0x")
 	if len(ms) == 0 {
 		return nil
 	}
@@ -356,28 +363,92 @@ func codeHexIdentifiers(c *FileCtx) []codeHit {
 
 // --- obf_escaped_strings ----------------------------------------------------
 
-var (
-	reCodeEscape    = regexp.MustCompile(`\\(?:x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|u\{[0-9a-fA-F]{1,6}\})`)
-	reCodeEscapeRun = regexp.MustCompile(`(?:\\(?:x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4})){8,}`)
-)
+// codeEscapeRun is how many consecutive \xHH/\uHHHH escapes make a run.
+const codeEscapeRun = 8
 
 func codeEscapedStrings(c *FileCtx) []codeHit {
 	if !c.HasAny("\\x", "\\u") {
 		return nil
 	}
+	// One linear pass instead of the regexes `(?:\\(?:x..|u....)){8,}` and
+	// `\\(?:x..|u....|u\{.{1,6}\})`: runs first, then the file-wide count.
 	var hits []codeHit
-	for _, m := range reCodeEscapeRun.FindAllIndex(c.Data, -1) {
-		n := len(reCodeEscape.FindAllIndex(c.Data[m[0]:m[1]], -1))
-		hits = append(hits, codeHit{off: m[0], sev: Medium, detail: fmt.Sprintf("run of %d consecutive \\x/\\u escapes: text encoded so it cannot be read or grepped", n)})
+	d := c.Data
+	total, first := 0, -1
+	for i := 0; i < len(d); {
+		n := codeEscapeAt(d, i, true)
+		if n == 0 {
+			i++
+			continue
+		}
+		if first < 0 {
+			first = i
+		}
+		total++
+		if codeEscapeAt(d, i, false) == 0 {
+			i += n
+			continue
+		}
+		start, count := i, 0
+		for n = codeEscapeAt(d, i, false); n > 0; n = codeEscapeAt(d, i, false) {
+			count++
+			i += n
+		}
+		total += count - 1
+		if count >= codeEscapeRun {
+			hits = append(hits, codeHit{off: start, sev: Medium, detail: fmt.Sprintf("run of %d consecutive \\x/\\u escapes: text encoded so it cannot be read or grepped", count)})
+		}
 	}
 	if len(hits) > 0 {
 		return hits
 	}
-	ms := reCodeEscape.FindAllIndex(c.Data, -1)
-	if len(ms) >= 20 {
-		hits = append(hits, codeHit{off: ms[0][0], sev: Medium, detail: fmt.Sprintf("%d \\x/\\u escapes in one file: strings encoded so they cannot be read or grepped", len(ms))})
+	if total >= 20 {
+		hits = append(hits, codeHit{off: first, sev: Medium, detail: fmt.Sprintf("%d \\x/\\u escapes in one file: strings encoded so they cannot be read or grepped", total)})
 	}
 	return hits
+}
+
+// codeEscapeAt returns the length of the \xHH or \uHHHH escape at d[i], or
+// of a \u{H…} escape (one to six digits) when braced is set, or 0.
+func codeEscapeAt(d []byte, i int, braced bool) int {
+	if d[i] != '\\' || i+1 >= len(d) {
+		return 0
+	}
+	hex := func(from, n int) bool {
+		if from+n > len(d) {
+			return false
+		}
+		for _, b := range d[from : from+n] {
+			if !codeIsHex(b) {
+				return false
+			}
+		}
+		return true
+	}
+	switch d[i+1] {
+	case 'x':
+		if hex(i+2, 2) {
+			return 4
+		}
+	case 'u':
+		if hex(i+2, 4) {
+			return 6
+		}
+		if braced && i+2 < len(d) && d[i+2] == '{' {
+			j := i + 3
+			for j < len(d) && j-(i+3) < 6 && codeIsHex(d[j]) {
+				j++
+			}
+			if j > i+3 && j < len(d) && d[j] == '}' {
+				return j + 1 - i
+			}
+		}
+	}
+	return 0
+}
+
+func codeIsHex(b byte) bool {
+	return b >= '0' && b <= '9' || b >= 'a' && b <= 'f' || b >= 'A' && b <= 'F'
 }
 
 // --- obf_high_entropy_string ------------------------------------------------
@@ -581,6 +652,15 @@ var (
 // so "same file" is meaningless; "same few lines" is not.
 const codeChainWindow = 1500
 
+// Literals every match of reCodeDownload, reCodePipeShell and reCodeWrite
+// must contain. A pipe is followed by whitespace (Go's \s) or by the first
+// letter of sudo/sh/bash/zsh; `open\s*\(` is "open" then whitespace or "(".
+var (
+	codeDownloadLits = []string{"http.get", "https.get", "fetch", "axios", "curl", "wget", "invoke-webrequest", "urllib"}
+	codePipeLits     = []string{"|s", "|b", "|z", "| ", "|\t", "|\n", "|\r", "|\f"}
+	codeWriteLits    = []string{"writefile", "createwritestream", "open(", "open ", "open\t", "open\n", "open\r", "open\f"}
+)
+
 // reCodeCLIDownload: only a command-line downloader can be piped into sh.
 var reCodeCLIDownload = regexp.MustCompile(`\b(?:curl|wget)\s|Invoke-WebRequest|\biwr\s`)
 
@@ -596,21 +676,21 @@ func codeRemoteExecChain(c *FileCtx) []codeHit {
 		return nil
 	}
 	d := c.Data
-	if !reCodeDownload.Match(d) {
+	if len(c.FindAround(reCodeDownload, codeCallWindow, litHits, codeDownloadLits...)) == 0 {
 		return nil
 	}
 	var hits []codeHit
-	for _, m := range reCodeChmodX.FindAllIndex(d, -1) {
+	for _, m := range c.FindAround(reCodeChmodX, 512, litHits, "chmod") {
 		if codeNear(d, m[0], codeChainWindow, reCodeDownload) {
 			hits = append(hits, codeHit{off: m[0], sev: Critical, detail: "downloads content and marks a file executable: the classic fetch -> chmod +x -> run second-stage loader"})
 		}
 	}
-	for _, m := range reCodePSEnc.FindAllIndex(d, -1) {
+	for _, m := range c.FindAround(reCodePSEnc, 256, litHits, "-enc") {
 		if codeNear(d, m[0], codeChainWindow, reCodeDownload) {
 			hits = append(hits, codeHit{off: m[0], sev: Critical, detail: "downloads content and runs a base64-encoded PowerShell command"})
 		}
 	}
-	for _, m := range reCodePipeShell.FindAllIndex(d, -1) {
+	for _, m := range c.FindAround(reCodePipeShell, codeCallWindow, litHits, codePipeLits...) {
 		// The download tool must be on the same line, just before the pipe.
 		line := d[max(bytes.LastIndexByte(d[:m[0]], '\n')+1, m[0]-300):m[1]]
 		if !reCodeCLIDownload.Match(line) {
@@ -625,16 +705,19 @@ func codeRemoteExecChain(c *FileCtx) []codeHit {
 	if !bytes.Contains(d, []byte("child_process")) && !bytes.Contains(d, []byte("subprocess")) && !bytes.Contains(d, []byte("os.system")) {
 		return hits
 	}
-	writes := reCodeWrite.FindAllIndex(d, -1)
-	for _, e := range reCodeExecSite.FindAllIndex(d, -1) {
-		if !codeNear(d, e[0], codeChainWindow, reCodeDownload) {
-			continue
-		}
+	writes := c.FindAround(reCodeWrite, 2048, litHits, codeWriteLits...)
+	for _, e := range c.FindAround(reCodeExecSite, codeCallWindow, litHits, "exec", "spawn", "subprocess", "os.system") {
+		// The write check is a cheap loop, the download check a regex over
+		// 1.5 KB: order them so the regex runs only for the rare candidate.
+		near := false
 		for _, w := range writes {
 			if w[0] < e[0] && e[0]-w[0] <= codeChainWindow {
-				hits = append(hits, codeHit{off: e[0], sev: Critical, detail: "downloads content, writes a file and executes it within a few lines: remote second-stage loader"})
+				near = true
 				break
 			}
+		}
+		if near && codeNear(d, e[0], codeChainWindow, reCodeDownload) {
+			hits = append(hits, codeHit{off: e[0], sev: Critical, detail: "downloads content, writes a file and executes it within a few lines: remote second-stage loader"})
 		}
 	}
 	return hits
@@ -654,7 +737,7 @@ func codeDynamicRequireNet(c *FileCtx) []codeHit {
 	}
 	d := c.Data
 	var hits []codeHit
-	for _, m := range reCodeDynRequire.FindAllSubmatchIndex(d, -1) {
+	for _, m := range c.FindAround(reCodeDynRequire, 1024, litHits, "require") {
 		hits = append(hits, codeHit{off: m[3], sev: Low, detail: "require() with a computed module name: the loaded code cannot be identified statically"})
 	}
 	if c.Minified() {
@@ -670,7 +753,7 @@ func codeDynamicRequireNet(c *FileCtx) []codeHit {
 		mod string
 	}
 	var lazies []lazy
-	for _, m := range reCodeNetRequire.FindAllSubmatchIndex(d, -1) {
+	for _, m := range c.FindAround(reCodeNetRequire, codeCallWindow, litHits, "require", "import") {
 		mod := string(d[m[2]:m[3]])
 		ls := bytes.LastIndexByte(d[:m[0]], '\n') + 1
 		indented := d[ls] == ' ' || d[ls] == '\t'

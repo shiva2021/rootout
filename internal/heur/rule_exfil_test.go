@@ -142,18 +142,20 @@ func TestExfilEnvDumpBoundedSpan(t *testing.T) {
 	}
 }
 
-func TestExfilLeadingLiteral(t *testing.T) {
-	cases := map[string]string{
-		`(?i)\b(?:discord(?:app)?\.com/api/webhooks)\b`: "discord",
-		`(?i)\b(?:api\.telegram\.org/bot)`:              "api.telegram.org/bot",
-		`\.ssh\b`:                                       ".ssh",
-		`\.aws[/\\](?:credentials|config)\b`:            ".aws",
-		`(?:homedir\(\)|\$HOME)`:                        "homedir",
-		`[A-Z]+`:                                        "",
+func TestExfilLiterals(t *testing.T) {
+	cases := map[string][]string{
+		`(?i)\b(?:discord(?:app)?\.com/api/webhooks)\b`: {"discord"},
+		`(?i)\b(?:api\.telegram\.org/bot)`:              {"api.telegram.org/bot"},
+		`\.ssh\b`:                                       {".ssh"},
+		`\.aws[/\\](?:credentials|config)\b`:            {".aws"},
+		`(?:homedir\(\)|\$HOME)`:                        nil, // "$HOME" has no literal: full scan
+		`(?i)\b(?:ngrok\.io|ngrok-free\.app)\b`:         {"ngrok.io", "ngrok-free.app"},
+		`[A-Z]+`:                                        nil,
 	}
 	for src, want := range cases {
-		if got := exfilLeadingLiteral(src); got != want {
-			t.Errorf("exfilLeadingLiteral(%q) = %q, want %q", src, got, want)
+		got := exfilLiterals(src)
+		if strings.Join(got, "|") != strings.Join(want, "|") {
+			t.Errorf("exfilLiterals(%q) = %q, want %q", src, got, want)
 		}
 	}
 	for _, pats := range [][]exfilPat{exfilHosts, exfilCredTokens} {
@@ -163,12 +165,12 @@ func TestExfilLeadingLiteral(t *testing.T) {
 		}
 		gated := 0
 		for _, l := range lits {
-			if l != "" {
+			if len(l) > 0 {
 				gated++
 			}
 		}
 		if gated < len(pats)*3/4 {
-			t.Errorf("only %d of %d patterns have a literal; windowed scanning would fall back to full scans", gated, len(pats))
+			t.Errorf("only %d of %d patterns have literals; the rest fall back to full scans", gated, len(pats))
 		}
 	}
 }

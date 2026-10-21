@@ -6,6 +6,8 @@ package heur
 
 import (
 	"bytes"
+	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -97,10 +99,21 @@ type FileCtx struct {
 	low      []byte
 }
 
-// Lower returns the file lower-cased, computed once, for cheap literal gates
-// (bytes.Contains is far faster than a regexp pass over a large bundle).
+// Lower returns the file with ASCII letters lower-cased, computed once, for
+// cheap literal gates (bytes.Contains is far faster than a regexp pass over
+// a large bundle). Only ASCII is folded so that an offset in Lower() is the
+// same offset in Data: bytes.ToLower changes the byte length of some
+// non-ASCII runes (U+0130, U+212A) and would shift everything after them.
 func (c *FileCtx) Lower() []byte {
-	c.lowOnce.Do(func() { c.low = bytes.ToLower(c.Data) })
+	c.lowOnce.Do(func() {
+		c.low = make([]byte, len(c.Data))
+		for i, b := range c.Data {
+			if 'A' <= b && b <= 'Z' {
+				b += 'a' - 'A'
+			}
+			c.low[i] = b
+		}
+	})
 	return c.low
 }
 
@@ -114,6 +127,67 @@ func (c *FileCtx) HasAny(lits ...string) bool {
 	}
 	return false
 }
+
+// FindAround runs re only in windows of ±window bytes around each occurrence
+// of any of the literals, returning de-duplicated matches in ascending
+// order. Each match is laid out as FindAllSubmatchIndex lays it out, with
+// absolute offsets: [start, end) of the whole match first, then the groups.
+// Use it instead of re.FindAllIndex(c.Data, -1) whenever every match of re
+// must contain one of the literals: the result is then identical, provided
+// window is at least twice the longest possible match, which keeps a match
+// clear of the window edges where ^, $ and \b would see false boundaries.
+// A lower-case literal is looked up in Lower(); one with an upper-case byte
+// is looked up in Data as written, so "Function" is a usable literal
+// although "function" is not. At most maxHits occurrences per literal are
+// examined: past that, or when the windows would cover more bytes than the
+// file, re runs over the whole file instead, so the result never depends
+// on the cap.
+func (c *FileCtx) FindAround(re *regexp.Regexp, window, maxHits int, lits ...string) [][]int {
+	var out [][]int
+	for _, lit := range lits {
+		hay, needle := c.Data, []byte(lit)
+		if strings.ToLower(lit) == lit {
+			hay = c.Lower()
+		}
+		if n := bytes.Count(hay, needle); n > maxHits || n*(2*window+len(needle)) >= len(c.Data) {
+			return re.FindAllSubmatchIndex(c.Data, -1)
+		}
+		for from := 0; ; from++ {
+			k := bytes.Index(hay[from:], needle)
+			if k < 0 {
+				break
+			}
+			off := from + k
+			ws, we := max(0, off-window), min(len(c.Data), off+len(needle)+window)
+			for _, m := range re.FindAllSubmatchIndex(c.Data[ws:we], -1) {
+				// Only a match holding this occurrence is trusted: one that
+				// touches a window edge may be an artefact of the cut.
+				if ws+m[0] > off || ws+m[1] < off+len(needle) {
+					continue
+				}
+				for i := range m {
+					if m[i] >= 0 {
+						m[i] += ws
+					}
+				}
+				out = append(out, m)
+			}
+			from = off
+		}
+	}
+	slices.SortFunc(out, func(a, b []int) int {
+		if a[0] != b[0] {
+			return a[0] - b[0]
+		}
+		return a[1] - b[1]
+	})
+	return slices.CompactFunc(out, func(a, b []int) bool { return a[0] == b[0] && a[1] == b[1] })
+}
+
+// litHits is the maxHits every rule passes to FindAround: generous enough
+// that only a literal common in minified code (exec, require) falls back to
+// one whole-file pass.
+const litHits = 4096
 
 // Line returns the 1-based line number of byte offset off.
 func (c *FileCtx) Line(off int) int {
