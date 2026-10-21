@@ -70,6 +70,9 @@ func Normalize(a Assessment, provider, model string) Assessment {
 	default:
 		a.Verdict = Unknown
 	}
+	if a.Confidence > 1 && a.Confidence <= 100 {
+		a.Confidence /= 100 // models without a schema often answer in percent
+	}
 	a.Confidence = max(0, min(1, a.Confidence))
 	if a.IOCs == nil {
 		a.IOCs = []string{}

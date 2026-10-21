@@ -55,8 +55,8 @@ type chatRequest struct {
 	Model    string         `json:"model"`
 	Messages []message      `json:"messages"`
 	Stream   bool           `json:"stream"`
-	Think    bool           `json:"think"` // false: thinking models (qwen3) answer directly
-	Format   map[string]any `json:"format"`
+	Think    bool           `json:"think"`            // false: thinking models (qwen3) answer directly
+	Format   map[string]any `json:"format,omitempty"` // omitted on the no-schema fallback
 	Options  map[string]any `json:"options"`
 }
 
@@ -70,46 +70,71 @@ func (p *provider) Assess(ctx context.Context, r heur.Report) (llm.Assessment, e
 		return llm.Assessment{}, ErrNoModel
 	}
 	system, user := llm.BuildPrompt(r, 0)
-	body, err := json.Marshal(chatRequest{
-		Model:    p.model,
-		Messages: []message{{Role: "system", Content: system}, {Role: "user", Content: user}},
-		Stream:   false,
-		Think:    false,
-		Format:   llm.Schema(),
-		Options:  map[string]any{"temperature": 0},
-	})
+	msgs := []message{{Role: "system", Content: system}, {Role: "user", Content: user}}
+	content, err := p.chat(ctx, msgs, true)
+	if errors.Is(err, errNoStructured) {
+		// Some models on some Ollama versions cannot do grammar-constrained
+		// output ("structured output is unavailable"). The prompt already
+		// demands the JSON shape, so ask again without a format and let
+		// Decode pull the object out of the reply.
+		content, err = p.chat(ctx, msgs, false)
+	}
 	if err != nil {
-		return llm.Assessment{}, fmt.Errorf("ollama: encode request: %w", err)
+		return llm.Assessment{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/api/chat", bytes.NewReader(body))
-	if err != nil {
-		return llm.Assessment{}, fmt.Errorf("ollama: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := p.hc.Do(req)
-	if err != nil {
-		return llm.Assessment{}, fmt.Errorf("ollama: %s: %w", p.baseURL, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
-	if err != nil {
-		return llm.Assessment{}, fmt.Errorf("ollama: read reply: %w", err)
-	}
-	switch {
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		return llm.Assessment{}, fmt.Errorf("ollama: authentication failed (%s): %s", resp.Status, apiError(data))
-	case resp.StatusCode != http.StatusOK:
-		return llm.Assessment{}, fmt.Errorf("ollama: %s: %s", resp.Status, apiError(data))
-	}
-	var cr chatResponse
-	if err := json.Unmarshal(data, &cr); err != nil {
-		return llm.Assessment{}, fmt.Errorf("ollama: %w: %w", llm.ErrBadResponse, err)
-	}
-	a, err := llm.Decode(cr.Message.Content)
+	a, err := llm.Decode(content)
 	if err != nil {
 		return llm.Assessment{}, fmt.Errorf("ollama: %w", err)
 	}
 	return llm.Normalize(a, p.Name(), p.model), nil
+}
+
+// errNoStructured marks Ollama's refusal to apply a format for this model.
+var errNoStructured = errors.New("ollama: structured output is unavailable for this model")
+
+// chat sends one request; withFormat attaches the JSON schema.
+func (p *provider) chat(ctx context.Context, msgs []message, withFormat bool) (string, error) {
+	cr := chatRequest{
+		Model:    p.model,
+		Messages: msgs,
+		Stream:   false,
+		Think:    false,
+		Options:  map[string]any{"temperature": 0},
+	}
+	if withFormat {
+		cr.Format = llm.Schema()
+	}
+	body, err := json.Marshal(cr)
+	if err != nil {
+		return "", fmt.Errorf("ollama: encode request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/api/chat", bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("ollama: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := p.hc.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("ollama: %s: %w", p.baseURL, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	if err != nil {
+		return "", fmt.Errorf("ollama: read reply: %w", err)
+	}
+	switch {
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return "", fmt.Errorf("ollama: authentication failed (%s): %s", resp.Status, apiError(data))
+	case resp.StatusCode == http.StatusNotImplemented && strings.Contains(strings.ToLower(apiError(data)), "structured output"):
+		return "", errNoStructured
+	case resp.StatusCode != http.StatusOK:
+		return "", fmt.Errorf("ollama: %s: %s", resp.Status, apiError(data))
+	}
+	var out chatResponse
+	if err := json.Unmarshal(data, &out); err != nil {
+		return "", fmt.Errorf("ollama: %w: %w", llm.ErrBadResponse, err)
+	}
+	return out.Message.Content, nil
 }
 
 // apiError extracts Ollama's {"error": "..."} message, falling back to the

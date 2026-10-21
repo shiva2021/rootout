@@ -117,3 +117,33 @@ func TestNoModel(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// Ollama 0.40 answers 501 "structured output is unavailable" for models its
+// new engine cannot constrain; the adapter must retry without a format.
+func TestAssessFallsBackWithoutFormat(t *testing.T) {
+	var formats []bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		_, has := req["format"]
+		formats = append(formats, has)
+		if has {
+			w.WriteHeader(http.StatusNotImplemented)
+			_, _ = w.Write([]byte(`{"error":"structured output is unavailable"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"Here is my assessment:\n` + "```json\n" + `{\"verdict\":\"Malicious\",\"confidence\":100,\"reasoning\":\"exfiltrates keys\",\"iocs\":[\"discord.com/api/webhooks\"]}` + "\n```" + `"},"done":true}`))
+	}))
+	defer srv.Close()
+	p := New(srv.URL, "qwen3.5:4b", srv.Client())
+	a, err := p.Assess(context.Background(), report)
+	if err != nil {
+		t.Fatalf("Assess: %v", err)
+	}
+	if len(formats) != 2 || !formats[0] || formats[1] {
+		t.Fatalf("requests with format = %v, want [true false]", formats)
+	}
+	if a.Verdict != llm.Malicious || a.Confidence != 1 || len(a.IOCs) != 1 {
+		t.Fatalf("assessment = %+v", a)
+	}
+}
