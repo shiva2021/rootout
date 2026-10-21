@@ -132,7 +132,9 @@ func TestAssessFallsBackWithoutFormat(t *testing.T) {
 			_, _ = w.Write([]byte(`{"error":"structured output is unavailable"}`))
 			return
 		}
-		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"Here is my assessment:\n` + "```json\n" + `{\"verdict\":\"Malicious\",\"confidence\":100,\"reasoning\":\"exfiltrates keys\",\"iocs\":[\"discord.com/api/webhooks\"]}` + "\n```" + `"},"done":true}`))
+		content := "Here is my assessment:\n```json\n{\"verdict\":\"Malicious\",\"confidence\":100,\"reasoning\":\"exfiltrates keys\",\"iocs\":[\"discord.com/api/webhooks\"]}\n```"
+		reply, _ := json.Marshal(map[string]any{"message": map[string]any{"role": "assistant", "content": content}, "done": true})
+		_, _ = w.Write(reply)
 	}))
 	defer srv.Close()
 	p := New(srv.URL, "qwen3.5:4b", srv.Client())
