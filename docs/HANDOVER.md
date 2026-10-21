@@ -3,7 +3,7 @@
 _Updated: 2026-10-21 · Session: home screen and ctrl+x (D-027)_
 
 ## Status
-v0.2 complete and pushed to https://github.com/shiva2021/rootout (`main`). Since then: Ollama pull retries, scan progress bar, Ollama format fallback, model uninstall (D-025), Full Disk Access detection (D-026) and the home screen with ctrl+x quit (D-027). The home screen work is on branch `tui/home-screen`, not yet merged; the home loop has only been exercised by unit tests, never in a terminal. Decisions D-019…D-027. `make test`/`make lint` green. Remaining: M2 manual QA on a throwaway account, M5 release pipeline, M6 licensing (own plan).
+v0.2 complete and pushed to https://github.com/shiva2021/rootout (`main`). Since then: Ollama pull retries, scan progress bar, Ollama format fallback, model uninstall (D-025), Full Disk Access detection (D-026) and the home screen with ctrl+x quit (D-027). The home screen work is merged into `main` (local, not yet pushed); the home loop has been exercised by unit tests plus one pty smoke test (home renders, ctrl+x exits 0) — no action has been run through it in a real terminal yet. Decisions D-019…D-027. `make test`/`make lint` green. Remaining: M2 manual QA on a throwaway account, M5 release pipeline, M6 licensing (own plan).
 
 ## Done this session (home screen and ctrl+x, D-027)
 - Home screen `internal/tui/home.go` (`PickAction`, `Flash`): four action rows (uninstall, orphans, scan, model) plus a flash line with the last outcome.
