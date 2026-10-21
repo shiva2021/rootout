@@ -29,8 +29,8 @@ v0.2 complete and pushed to https://github.com/shiva2021/rootout (`main`): progr
 1. Try v0.2 interactively: `rootout` (bar, orphans row, `?`), `rootout scan` (`m`), `rootout orphans` (tick one group, type delete) — removal paths have only run in unit tests plus Esc-at-the-box pty checks.
 2. M2 task 7: follow `docs/kb/qa.md` on a throwaway macOS user account (cask, App Store and pkg app). Live removal has only run in unit tests.
 3. Try `rootout scan --llm` with a real key or `rootout config models --pick` with Ollama; only recorded-HTTP tests exist so far.
-4. M5: GoReleaser config, notarization (needs Apple Developer account), private Homebrew tap.
-5. M6 licensing: write a separate plan first.
+4. M5: GoReleaser config, Homebrew tap; notarization optional (D-024). It is a CLI release, not a macOS app release.
+5. M6 membership gate: write a separate plan first. Admin (Shivang) unrestricted via an admin credential; everyone else needs an active Patreon monthly membership (mechanics explored at M6). See D-024.
 
 ## Blockers and open questions
 - `docs/research/vscode-extension-audit/` names Shivang's LeetCode username; remove it before the repo ever goes public.

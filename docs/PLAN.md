@@ -40,7 +40,7 @@ Defaults I'm applying without asking (say so if you disagree):
 - LLM receives only heuristic findings + bounded code snippets (~24 KB), never whole extensions. Structured JSON verdict.
 - Marketplace metadata (verified publisher, install counts) is optional enrichment behind `--online`, off by default.
 - Login items are detected and reported, not removed (no public API).
-- Distribution: GitHub Releases via GoReleaser + private Homebrew tap; codesign/notarize in M5.
+- Distribution: GitHub Releases via GoReleaser + Homebrew tap. rootout is a command-line tool, not a standard macOS application: no App Store, no app bundle, no DMG, no installer. Signing/notarizing the bare binary is only there to avoid Gatekeeper warnings on download (decide at M5). See D-024.
 
 ## Architecture
 
@@ -194,14 +194,18 @@ Config keys: `llm.ollama.base_url` (default `http://localhost:11434`), `llm.olla
 7. Model picker: TUI screen (installed list → recommend → pull with progress bar) and `purge config models` / `purge config pull <model>`; install-Ollama guidance with confirm-before-run for `brew install ollama`.
 8. `--llm` / `--provider` / `--model` on `scan`; TUI "Assess with AI" action routes to the picker when provider is Ollama and no model is configured; graceful no-key path; `purge doctor` (includes Ollama status, models, hardware tier).
 
-**M5 Release pipeline**
+**M5 Release pipeline** (a CLI release, not a macOS app release; D-024)
 1. `[P]` GoReleaser 2.18 config (darwin arm64 + amd64, `CGO_ENABLED=0`), GitHub Actions on tag.
-2. `[P]` sign + notarize via `notarize.macos` (quill; Developer ID .p12 + App Store Connect API key); needs Shivang's paid Apple Developer account, raised as a blocker at M5 start.
+2. `[P]` optional: sign + notarize the bare binary via `notarize.macos` (quill) so downloads do not trip Gatekeeper; needs a paid Apple Developer account. Decide at M5 start; the tap works without it.
 3. `[P]` private Homebrew tap via `homebrew_casks`.
 4. README, `purge --version`, refresh `docs/HANDOVER.md` and KB.
 
-**M6 Licensing (last, separate plan when we get there)**
-Recommendation to decide then: offline-verifiable Ed25519-signed license key (stdlib `crypto/ed25519`), sold via Lemon Squeezy/Paddle, gating LLM assessment + unlimited removes; `list` and heuristic `scan` stay free. Offline grace period.
+**M6 Membership gate (last; gets its own plan; D-024)**
+Intent fixed now, mechanics decided then:
+- Shivang (admin and creator) uses every feature unrestricted, always: an admin credential (e.g. a signed admin token in the Keychain, or an admin build) makes `license.Check` return Allowed for everything, offline.
+- Everyone else uses the CLI only with an active monthly membership paid through Patreon (to be explored when we get there). Mechanics to evaluate at M6: Patreon's API/OAuth to verify an active pledge and tier, versus membership-linked license keys (Ed25519-signed, stdlib `crypto/ed25519`) issued to patrons; which commands are gated (everything vs keeping `list`/`doctor`/dry-runs free); an offline grace period so a lapsed network does not lock a paying user out; what a non-member sees (a clear message with the Patreon link, no dark patterns).
+- Not a standard macOS application distribution: no App Store, no in-app purchase; the gate lives in the CLI and the release pipeline (M5) stays a plain binary + Homebrew tap.
+- `license.Check` is already called once from the Cobra root (D-008), so M6 needs no restructuring.
 
 ## Libraries (verified against official docs on 2026-10-20)
 
@@ -225,7 +229,7 @@ Each is re-checked against its docs when the task that uses it starts; versions 
 - Finder-trash fallback asks for Automation permission on first use (macOS 14 only).
 - go-keyring reads may trigger a Keychain "allow" prompt because `security` is the caller; documented in setup.md.
 - Marketplace / Open VSX responses can change; enrichment is optional and isolated in `registry/`.
-- Notarization needs a paid Apple Developer account before M5.
+- Notarization (optional, M5) needs a paid Apple Developer account; without it, downloaded binaries need `xattr -d com.apple.quarantine` or a Homebrew install (brew strips quarantine for casks it fetches).
 - Ollama catalog model names are data to be verified in M4, not facts yet.
 
 ## Verification
@@ -235,5 +239,6 @@ Each is re-checked against its docs when the task that uses it starts; versions 
 - M3: `purge scan --json` on this machine reproduces today's audit: Microsoft/verified extensions score low; the golden corpus scores match expectations; `--online` on `esbenp.prettier-vscode` reports a verified publisher.
 - M4: `purge scan --llm --provider ollama` works with no API key against a local model; `--provider anthropic` with a Keychain key returns structured verdicts; with no key it prints the hint and still outputs heuristics.
 - M4 local models, on this M1 / 8 GB machine with Ollama absent: `purge config models` reports "Ollama not installed" with the two install routes and offers `brew install ollama`; after install, lists zero models and recommends the 8 GB tier with larger models greyed as "too large"; `purge config pull qwen2.5-coder:3b` shows progress and sets the default; `purge config models --json` shows it as installed with `FitsRAM: true`; a `scan --llm --provider ollama` then returns verdicts. Unit: `Recommend` table tests for all tiers pass without network.
-- M5: tagged release produces notarized binaries installable with `brew install <tap>/purge`.
+- M5: tagged release produces binaries installable with `brew install <tap>/rootout` (notarized if M5 decides so).
+- M6: with the admin credential every command works offline; without a membership the gated commands print the membership message and exit 4; with a verified membership they work; a lapsed network inside the grace period still works.
 - Playbook: `scripts/toolchain_check.sh` passes; `docs/DECISIONS.md`, `docs/kb/`, `docs/HANDOVER.md` exist and are current.

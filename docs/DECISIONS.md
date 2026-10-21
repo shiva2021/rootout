@@ -185,3 +185,11 @@ Append-only. Newest at the bottom. Never edit an old entry; add a new one that s
 **Alternatives.** Context-carried reporters (hidden coupling); per-package ad-hoc callbacks (already one for Ollama pulls, kept).
 **Consequences.** Every new long operation accepts a Reporter; tests use `progress.Recorder`.
 **Status.** Accepted
+
+## D-024 · 2026-10-21 · Not a standard macOS app; admin unrestricted; public use behind a Patreon membership (last phase)
+
+**Context.** Shivang clarified how rootout reaches people: it is not rolled out as a standard Apple/macOS application. He is the admin and creator and must be able to use every feature without restriction. Everyone else should be able to use the CLI once they pay for a monthly membership through Patreon (the mechanics will be explored when we get there). All of this is the last phase.
+**Decision.** Distribution stays a plain CLI binary: GitHub Releases plus a Homebrew tap, no App Store, no app bundle, no installer; signing/notarizing the bare binary is optional and decided at M5. M6 becomes a membership gate: an admin credential makes `license.Check` return Allowed for everything, offline; for other users, access requires an active Patreon membership, verified by a mechanism chosen at M6 (Patreon API/OAuth versus membership-linked signed license keys). Which commands are gated, the offline grace period and the non-member message are M6 decisions. Nothing is built before M5 is done.
+**Alternatives.** Mac App Store / in-app purchase (rejected: not a standard app rollout, and a CLI does not fit the store); Lemon Squeezy/Paddle license sales (the earlier M6 recommendation; superseded by Patreon membership, to be confirmed at M6); gating from day one (rejected: it would shape early development).
+**Consequences.** `license.Check` keeps its single call site at the Cobra root (D-008) so M6 needs no restructuring. `docs/PLAN.md` M5/M6 updated. A Patreon integration adds a network dependency to the paid path; the admin path must never depend on the network.
+**Status.** Accepted (supersedes the Lemon Squeezy/Paddle recommendation in D-008's M6 note)
