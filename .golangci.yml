@@ -12,7 +12,8 @@ linters:
       # every such path passes internal/safety first.
       - linters: [gosec]
         text: "G304"
-      # Test fixtures create world-readable temp files on purpose.
+      # Test fixtures create world-readable temp files on purpose, and
+      # restore directory modes they changed to simulate denied access.
       - linters: [gosec]
         path: (_test\.go|internal/testutil/)
-        text: "G30[16]"
+        text: "G30[126]"

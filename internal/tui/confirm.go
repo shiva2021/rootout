@@ -11,6 +11,7 @@ import (
 	"github.com/shiva2021/rootout/internal/leftover"
 	"github.com/shiva2021/rootout/internal/output"
 	"github.com/shiva2021/rootout/internal/plan"
+	"github.com/shiva2021/rootout/internal/tcc"
 )
 
 const (
@@ -19,6 +20,7 @@ const (
 	tickHint          = "space to tick what to remove"
 	recentTag         = "[recent]"
 	recentNote        = "recently used"
+	fdaTag            = "[needs Full Disk Access]"
 	confirmChromeRows = 5 // header row, blank row, flash row, totals row, help row
 	rowIndent         = "  "
 	checkboxWidth     = 4 // "[x] "
@@ -166,6 +168,12 @@ func buildRows(p *plan.Plan, byGroup bool) []row {
 // carry this in their Note).
 func isRecent(it plan.Item) bool {
 	return strings.Contains(strings.ToLower(it.Note), recentNote)
+}
+
+// needsFDA reports whether plan.MarkAccess flagged the item as needing Full
+// Disk Access.
+func needsFDA(it plan.Item) bool {
+	return strings.Contains(it.Note, tcc.Note)
 }
 
 // Init implements tea.Model.
@@ -409,8 +417,8 @@ func (c *Confirm) render() string {
 	return screen
 }
 
-// renderList draws the header, the scrolling rows, the flash or hint line,
-// the totals and the key help.
+// renderList draws the header, the scrolling rows, the flash, warning or
+// hint line, the totals and the key help.
 func (c *Confirm) renderList() string {
 	var b strings.Builder
 	b.WriteString(c.renderHeader())
@@ -430,6 +438,8 @@ func (c *Confirm) renderList() string {
 	switch {
 	case c.flash != "":
 		b.WriteString(c.styles.flash.Render(c.flash))
+	case c.plan.Warning != "":
+		b.WriteString(c.styles.admin.Render(output.Truncate(c.plan.Warning, max(c.width, 1))))
 	case c.plan.StartUnselected && c.selectedItems() == 0 && !c.plan.BrewZap:
 		b.WriteString(c.styles.dim.Render(tickHint))
 	}
@@ -526,6 +536,9 @@ func (c *Confirm) renderItem(it plan.Item, base lipgloss.Style, selected bool, w
 	}
 	if isRecent(it) {
 		addTag(recentTag, recent)
+	}
+	if needsFDA(it) {
+		addTag(fdaTag, admin)
 	}
 	if it.MatchedBy == leftover.ByName || it.MatchedBy == plan.ByManual {
 		addTag("["+it.MatchedBy+"]", tag)

@@ -18,6 +18,7 @@ import (
 	"github.com/shiva2021/rootout/internal/progress"
 	"github.com/shiva2021/rootout/internal/run"
 	"github.com/shiva2021/rootout/internal/safety"
+	"github.com/shiva2021/rootout/internal/tcc"
 )
 
 // Mode is what Execute does with the selected paths.
@@ -60,6 +61,9 @@ type Plan struct {
 	BrewZap bool    `json:"brew_zap"` // run `brew uninstall --zap` first; only meaningful when App.Cask != ""
 	// StartUnselected tells UIs that nothing is ticked by default; New sets it.
 	StartUnselected bool `json:"-"`
+	// Warning is one line the confirm views show above the totals, e.g. that
+	// some paths need Full Disk Access. MarkAccess sets it.
+	Warning string `json:"warning,omitempty"`
 }
 
 // Options for Build.
@@ -106,7 +110,44 @@ func Build(ctx context.Context, env fsx.Env, a app.App, opts Options) (*Plan, er
 			return nil, err
 		}
 	}
+	MarkAccess(env, p)
 	return p, nil
+}
+
+// MarkAccess notes the items this terminal cannot remove without Full Disk
+// Access (direct children of ~/Library/Containers) when the permission is
+// missing, and sets p.Warning so the confirm views can say so before the
+// user types the word. Build calls it; plans made with New call it
+// themselves. The run still proceeds: such paths fail one by one with a hint
+// (see trash.Move) while everything else is removed (D-026).
+func MarkAccess(env fsx.Env, p *Plan) {
+	markAccess(env, p, tcc.FullDiskAccess(env), tcc.TerminalApp(os.Getenv))
+}
+
+func markAccess(env fsx.Env, p *Plan, access tcc.Access, terminal string) {
+	if access != tcc.Denied {
+		return
+	}
+	n := 0
+	for i := range p.Items {
+		it := &p.Items[i]
+		if !tcc.NeedsFullDiskAccess(env, it.Path) {
+			continue
+		}
+		n++
+		if it.Note == "" {
+			it.Note = tcc.Note
+		} else {
+			it.Note += "; " + tcc.Note
+		}
+	}
+	switch n {
+	case 0:
+	case 1:
+		p.Warning = fmt.Sprintf("1 path needs Full Disk Access; grant it to %s in %s or it will fail", terminal, tcc.SettingsPath)
+	default:
+		p.Warning = fmt.Sprintf("%d paths need Full Disk Access; grant it to %s in %s or they will fail", n, terminal, tcc.SettingsPath)
+	}
 }
 
 // New wraps already-discovered items in a plan that is not about one app,

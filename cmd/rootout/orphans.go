@@ -98,6 +98,7 @@ func runOrphans(ctx context.Context, g *globalFlags, f orphanFlags) error {
 	}
 
 	p := orphanPlan(orphans, f)
+	plan.MarkAccess(env, p)
 	if len(p.Items) == 0 {
 		w.Printf("no orphaned leftovers found\n")
 		return nil

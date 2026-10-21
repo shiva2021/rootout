@@ -14,6 +14,7 @@ import (
 	"github.com/shiva2021/rootout/internal/leftover"
 	"github.com/shiva2021/rootout/internal/priv"
 	"github.com/shiva2021/rootout/internal/safety"
+	"github.com/shiva2021/rootout/internal/tcc"
 	"github.com/shiva2021/rootout/internal/testutil"
 	"github.com/shiva2021/rootout/internal/trash"
 )
@@ -419,5 +420,69 @@ func TestExecuteNewPlan(t *testing.T) {
 				t.Errorf("trash command missing %s", it.Path)
 			}
 		}
+	}
+}
+
+func TestMarkAccess(t *testing.T) {
+	env := fsx.Env{Home: "/Users/me", Root: "/"}
+	mk := func() *Plan {
+		return &Plan{Items: []Item{
+			{Leftover: leftover.Leftover{Path: "/Users/me/Library/Containers/com.foo.app", Kind: leftover.Container}, Selected: true},
+			{Leftover: leftover.Leftover{Path: "/Users/me/Library/Containers/com.foo.helper", Kind: leftover.Container, Note: "recently used (3 days)"}},
+			{Leftover: leftover.Leftover{Path: "/Users/me/Library/Caches/com.foo.app", Kind: leftover.Cache}, Selected: true},
+		}}
+	}
+
+	t.Run("denied tags container entries and sets the warning", func(t *testing.T) {
+		p := mk()
+		markAccess(env, p, tcc.Denied, "Warp")
+		if p.Items[0].Note != tcc.Note {
+			t.Errorf("item 0 note = %q", p.Items[0].Note)
+		}
+		if want := "recently used (3 days); " + tcc.Note; p.Items[1].Note != want {
+			t.Errorf("item 1 note = %q, want %q", p.Items[1].Note, want)
+		}
+		if p.Items[2].Note != "" {
+			t.Errorf("cache item must stay untagged, got %q", p.Items[2].Note)
+		}
+		for _, want := range []string{"2 paths need Full Disk Access", "Warp", tcc.SettingsPath} {
+			if !strings.Contains(p.Warning, want) {
+				t.Errorf("warning lacks %q: %q", want, p.Warning)
+			}
+		}
+	})
+	t.Run("granted and unknown leave the plan alone", func(t *testing.T) {
+		for _, a := range []tcc.Access{tcc.Granted, tcc.Unknown} {
+			p := mk()
+			markAccess(env, p, a, "Warp")
+			if p.Warning != "" || p.Items[0].Note != "" || p.Items[1].Note != "recently used (3 days)" {
+				t.Errorf("%v: plan was changed: %+v", a, p)
+			}
+		}
+	})
+	t.Run("denied without container entries sets no warning", func(t *testing.T) {
+		p := mk()
+		p.Items = p.Items[2:]
+		markAccess(env, p, tcc.Denied, "Warp")
+		if p.Warning != "" {
+			t.Errorf("unexpected warning %q", p.Warning)
+		}
+	})
+	t.Run("singular wording", func(t *testing.T) {
+		p := mk()
+		p.Items = p.Items[:1]
+		markAccess(env, p, tcc.Denied, "Terminal")
+		if !strings.HasPrefix(p.Warning, "1 path needs Full Disk Access") {
+			t.Errorf("warning = %q", p.Warning)
+		}
+	})
+}
+
+func TestDescribeShowsWarning(t *testing.T) {
+	p := &Plan{Label: "Orphaned leftovers", Warning: "1 path needs Full Disk Access; grant it to Warp"}
+	var out bytes.Buffer
+	Describe(&out, p)
+	if !strings.Contains(out.String(), "! "+p.Warning) {
+		t.Errorf("describe lacks warning:\n%s", out.String())
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/shiva2021/rootout/internal/llm/ollama"
 	"github.com/shiva2021/rootout/internal/output"
 	"github.com/shiva2021/rootout/internal/run"
+	"github.com/shiva2021/rootout/internal/tcc"
 	"github.com/shiva2021/rootout/internal/trash"
 )
 
@@ -31,7 +32,7 @@ func newDoctorCmd(g *globalFlags) *cobra.Command {
 		Use:   "doctor",
 		Short: "Check the environment rootout depends on",
 		Long: `Check what rootout can use on this Mac: the macOS version, how files reach
-the Trash, Homebrew, the VS Code-family editors and their command-line tools,
+the Trash, Full Disk Access for this terminal, Homebrew, the VS Code-family editors and their command-line tools,
 the config file, stored API keys and Ollama with this Mac's chip and RAM.
 
 Each line is a check mark or a "!" with a fix. Doctor only reads; it changes
@@ -82,9 +83,21 @@ func runChecks(ctx context.Context) []check {
 		trash.BackendFinder: "Finder (asks for Automation permission once)",
 	}[backend]})
 
+	env, err := fsx.Real()
+	if err == nil {
+		term := tcc.TerminalApp(os.Getenv)
+		switch tcc.FullDiskAccess(env) {
+		case tcc.Granted:
+			add(check{Name: "Full Disk Access", OK: true, Detail: "granted to " + term})
+		case tcc.Denied:
+			add(check{Name: "Full Disk Access", OK: false, Detail: "not granted to " + term + " (app containers under ~/Library/Containers cannot be removed)", Fix: tcc.SettingsPath + " → add " + term})
+		default:
+			add(check{Name: "Full Disk Access", OK: true, Detail: "could not tell (no protected folder to probe)"})
+		}
+	}
+
 	add(check{Name: "Homebrew", OK: hasBrew(), Detail: map[bool]string{true: "found (cask uninstalls use brew --zap)", false: "not found (cask apps are removed by rootout's own sweep)"}[hasBrew()]})
 
-	env, err := fsx.Real()
 	if err == nil {
 		eds := ext.Editors(env, ext.Options{})
 		if len(eds) == 0 {

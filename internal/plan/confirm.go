@@ -99,6 +99,9 @@ func Describe(w io.Writer, p *Plan) {
 			_, _ = fmt.Fprintf(w, "            %s\n", it.Note)
 		}
 	}
+	if p.Warning != "" {
+		_, _ = fmt.Fprintf(w, "\n! %s\n", p.Warning)
+	}
 	n, bytes, root := p.Totals()
 	_, _ = fmt.Fprintf(w, "\n%d paths, %s", n, output.Bytes(bytes))
 	if root > 0 {

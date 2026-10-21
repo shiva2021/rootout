@@ -1,11 +1,19 @@
 # Handover
 
-_Updated: 2026-10-21 · Session: model uninstall (picker `d`, `config models rm`)_
+_Updated: 2026-10-21 · Session: Full Disk Access detection (D-026)_
 
 ## Status
-v0.2 complete and pushed to https://github.com/shiva2021/rootout (`main`). Since then: Ollama pull retries, scan progress bar, Ollama format fallback, and model uninstall (D-025). Decisions D-019…D-025. `make test`/`make lint` green. Remaining: M2 manual QA on a throwaway account, M5 release pipeline, M6 licensing (own plan).
+v0.2 complete and pushed to https://github.com/shiva2021/rootout (`main`). Since then: Ollama pull retries, scan progress bar, Ollama format fallback, model uninstall (D-025) and Full Disk Access detection (D-026). Decisions D-019…D-026. `make test`/`make lint` green. Remaining: M2 manual QA on a throwaway account, M5 release pipeline, M6 licensing (own plan).
 
-## Done this session (model uninstall)
+## Done this session (Full Disk Access detection, D-026)
+- Shivang granted Warp Full Disk Access and the stray `~/Library/Containers/zz.rootout.probe` could then be removed: FDA for the terminal app is confirmed as the remedy for protected container entries.
+- New `internal/tcc`: `FullDiskAccess(env)` lists `~/Library/Safari` → `Mail` → `Application Support/com.apple.TCC` (permission error = denied, success = granted, none exist = unknown); `NeedsFullDiskAccess(env, path)` (direct child of `~/Library/Containers`); `TerminalApp(getenv)` from `TERM_PROGRAM`.
+- `doctor` (and `guide`) show a "Full Disk Access" line: `granted to Warp` here; denied gives a `!` with `System Settings › Privacy & Security › Full Disk Access → add <terminal>`.
+- `plan.MarkAccess(env, p)`: when denied, affected items get the note `needs Full Disk Access` and `Plan.Warning` (in `--json` too) says how many and which terminal to grant. `plan.Build` calls it; `rootout orphans` calls it after `orphanPlan`. Plain confirm prints `! <warning>` above the totals; the TUI review shows a yellow `[needs Full Disk Access]` tag per row and the warning on the flash line (a flash wins while showing). The run is never blocked.
+- `.golangci.yml`: gosec G302 excluded in tests (a test chmods a dir to 0 and restores it).
+- Verified on this Mac with FDA granted: `doctor` line, `make test` (24 packages), `make lint` clean, `orphans --dry-run` lists 15 `~/Library/Containers` entries that would be tagged. **The denied path has only run in unit tests** (see Next steps 1).
+
+## Done last session (model uninstall)
 - `ollama.Client.Delete` (`DELETE /api/delete`, `ErrModelNotFound`), verified against docs.ollama.com.
 - Picker: `d` on an installed row → `Uninstall X (size)? y/n` → spinner → re-list → flash; recommended rows show `installed` / `not installed`; `?` overlay and footer updated. `ModelDeps.ClearDefault` clears the saved default when that model goes.
 - `rootout config models rm <model> [--yes]`; first tests in `cmd/rootout` (`config_test.go`, exercises `removeModel` with an httptest Ollama and a temp config).
@@ -36,15 +44,15 @@ v0.2 complete and pushed to https://github.com/shiva2021/rootout (`main`). Since
 - Review screen and app picker verified under a pseudo-terminal (render + quit). Live removal and live LLM calls have not been run.
 
 ## Next steps
-1. Try v0.2 interactively: `rootout` (bar, orphans row, `?`), `rootout scan` (`m`, then `d` on a model), `rootout orphans` (tick one group, type delete) — removal paths have only run in unit tests plus Esc-at-the-box pty checks. A real model uninstall has not been run yet.
-2. M2 task 7: follow `docs/kb/qa.md` on a throwaway macOS user account (cask, App Store and pkg app). Live removal has only run in unit tests.
-3. Try `rootout scan --llm` with a real key or `rootout config models --pick` with Ollama; only recorded-HTTP tests exist so far.
-4. M5: GoReleaser config, Homebrew tap; notarization optional (D-024). It is a CLI release, not a macOS app release.
-5. M6 membership gate: write a separate plan first. Admin (Shivang) unrestricted via an admin credential; everyone else needs an active Patreon monthly membership (mechanics explored at M6). See D-024.
+1. Verify the denied path for real: System Settings › Privacy & Security › Full Disk Access, switch Warp off, then `./bin/rootout doctor` (expect `!` and the fix line) and `./bin/rootout orphans --dry-run` / `rootout orphans` (expect `! 15 paths need Full Disk Access…` and the `[needs Full Disk Access]` tags). Switch Warp back on afterwards.
+2. Try v0.2 interactively: `rootout` (bar, orphans row, `?`), `rootout scan` (`m`, then `d` on a model), `rootout orphans` (tick one group, type delete) — removal paths have only run in unit tests plus Esc-at-the-box pty checks. A real model uninstall has not been run yet.
+3. M2 task 7: follow `docs/kb/qa.md` on a throwaway macOS user account (cask, App Store and pkg app). Live removal has only run in unit tests.
+4. Try `rootout scan --llm` with a real key or `rootout config models --pick` with Ollama; only recorded-HTTP tests exist so far.
+5. M5: GoReleaser config, Homebrew tap; notarization optional (D-024). It is a CLI release, not a macOS app release.
+6. M6 membership gate: write a separate plan first. Admin (Shivang) unrestricted via an admin credential; everyone else needs an active Patreon monthly membership (mechanics explored at M6). See D-024.
 
 ## Blockers and open questions
-- **Stray directory left by this session's probe:** `~/Library/Containers/zz.rootout.probe` (empty). `rmdir`, `mv`, Finder-via-osascript AND `osascript … with administrator privileges` (root) all fail with "Operation not permitted". Remove it in the Finder GUI (Go › Go to Folder › `~/Library/Containers`, drag it to the Trash), or grant the terminal (Warp) Full Disk Access and `rmdir` it.
-- **Admin password prompt for failed paths: answered, not worth building for this case.** Shivang ran the elevated rmdir and root was refused too, so the protection on `~/Library/Containers` entries is TCC (per responsible app), not ownership. An admin prompt would not help; the only remedies are Full Disk Access for the terminal or the Finder GUI, and the per-path error now says so. Worth doing instead: detect missing Full Disk Access up front (e.g. `os.ReadDir(~/Library/Safari)` returning EPERM) and warn in `doctor` and before an orphan/remove run that touches `~/Library/Containers`. Needs a plan + approval.
+- `Group Containers` is not probed or tagged by D-026; nobody has checked whether its entries carry the same TCC protection as `~/Library/Containers`. Test only with a throwaway entry and the Finder GUI as fallback.
 - `docs/research/vscode-extension-audit/` names Shivang's LeetCode username; remove it before the repo ever goes public.
 - Binary is 26 MB stripped (was 9 MB before the AI wiring). The official SDKs (D-013) are a few MB of that; replacing them with plain HTTP would shrink it but reverses D-013. Shivang to decide.
 - `sfltool dumpbtm` blocks without Full Disk Access; login items probe has a 3 s timeout and is otherwise skipped.

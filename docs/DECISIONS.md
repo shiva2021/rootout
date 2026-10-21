@@ -202,3 +202,11 @@ Append-only. Newest at the bottom. Never edit an old entry; add a new one that s
 **Consequences.** `ModelDeps` gains `ClearDefault`, injected from `cmd/`, so the embedded scan-screen picker needs no changes. Deleting is the only y/n-confirmed destructive action in the tool; everything that touches user files stays on the typed word.
 **Status.** Accepted
 
+
+## D-026 · 2026-10-21 · Detect missing Full Disk Access up front; warn, do not block
+
+**Context.** Entries directly under `~/Library/Containers` are protected by macOS privacy controls (TCC): the user, Finder, `/usr/bin/trash` and even root cannot move or delete them unless the calling terminal has Full Disk Access. Last session's fix made such a path fail alone with a hint, but the user only learned about it after the run. Shivang verified that granting Warp Full Disk Access makes the removal work.
+**Decision.** A new `internal/tcc` package probes Full Disk Access by listing a folder macOS only exposes to apps with that permission (`~/Library/Safari`, then `~/Library/Mail`, then `~/Library/Application Support/com.apple.TCC`); a permission error means denied, success means granted, no such folder means unknown. `doctor` (and therefore `guide`) gets a "Full Disk Access" line naming the terminal app from `TERM_PROGRAM` and the settings path to fix it. After a plan is built, items that are direct children of `~/Library/Containers` are noted "needs Full Disk Access" when the probe says denied; both confirm views tag those rows and show one warning line with the count and the terminal to grant. The run still proceeds: those paths fail individually with the existing hint, everything else is removed.
+**Alternatives.** Blocking the run until access is granted (rejected: unrelated paths would be held hostage by a settings change); an admin password prompt (rejected: root is refused too, see the 2026-10-21 handover); probing by attempting the delete (rejected: destructive); putting the probe in `fsx` (rejected: it is a privacy mechanism, not a path helper).
+**Consequences.** `Plan` gains a `Warning` string carried into `--json`. `Group Containers` is not probed and not tagged until someone confirms the same protection applies there. The `writable()` check still classifies such paths as user paths; that is unchanged.
+**Status.** Accepted

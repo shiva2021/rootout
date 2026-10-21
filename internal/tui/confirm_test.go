@@ -10,6 +10,7 @@ import (
 	"github.com/shiva2021/rootout/internal/leftover"
 	"github.com/shiva2021/rootout/internal/output"
 	"github.com/shiva2021/rootout/internal/plan"
+	"github.com/shiva2021/rootout/internal/tcc"
 )
 
 // Item indexes in confirmFixture.
@@ -488,5 +489,28 @@ func TestConfirmHelpOverlay(t *testing.T) {
 	}
 	if strings.Contains(viewC(c), helpClose) {
 		t.Fatal("overlay still open")
+	}
+}
+
+func TestConfirmShowsFullDiskAccessWarning(t *testing.T) {
+	p := confirmFixture()
+	p.Items = append(p.Items, plan.Item{Leftover: leftover.Leftover{
+		Path: "/Users/me/Library/Containers/com.mitchellh.ghostty", Kind: leftover.Container,
+		MatchedBy: leftover.ByBundleID, SizeBytes: 1_000_000, Note: tcc.Note,
+	}, Selected: true})
+	p.Warning = "1 path needs Full Disk Access; grant it to Warp in " + tcc.SettingsPath + " or it will fail"
+	c := NewConfirm(p)
+	c.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
+	v := viewC(c)
+	for _, want := range []string{fdaTag, p.Warning} {
+		if !strings.Contains(v, want) {
+			t.Errorf("view missing %q:\n%s", want, v)
+		}
+	}
+	// A flash takes the same line and wins while it is showing.
+	p.BrewZap = false
+	pressC(c, keyN, keyEnter)
+	if v := viewC(c); !strings.Contains(v, nothingFlash) || strings.Contains(v, p.Warning) {
+		t.Errorf("flash must replace the warning:\n%s", v)
 	}
 }

@@ -12,6 +12,7 @@ internal/
   brew/      CaskFor(app), Zap(cask)
   trash/     Move(paths): /usr/bin/trash when present, else Finder via osascript
   priv/      Run(paths) once with admin rights; argv list, re-validated, no shell interpolation
+  tcc/       FullDiskAccess(env) probe (lists ~/Library/Safari etc.), NeedsFullDiskAccess(path), TerminalApp (D-026)
   plan/      RemovalPlan, Build(), Execute(), Confirmer interface (tui | prompt | --yes)
   ext/       Enumerate() extensions for 5 editors, parse package.json + extensions.json + .obsolete, Uninstall()
   registry/  optional --online enrichment: Marketplace extensionquery + Open VSX
