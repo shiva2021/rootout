@@ -288,18 +288,18 @@ func isQuit(cmd tea.Cmd) bool {
 	return ok
 }
 
-// --- loading, orphans row and help ---
+// --- loading and help ---
 
-func newLoadingPicker(t *testing.T, opts PickOptions) *Picker {
+func newLoadingPicker(t *testing.T) *Picker {
 	t.Helper()
-	p := NewPickerLoading(func(progress.Reporter) ([]app.App, error) { return fixture(), nil }, opts)
+	p := NewPickerLoading(func(progress.Reporter) ([]app.App, error) { return fixture(), nil })
 	p.loadID = 1 // what startLoad would assign; tests inject messages directly
 	p.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	return p
 }
 
 func TestLoadingStateRendersProgress(t *testing.T) {
-	p := newLoadingPicker(t, PickOptions{})
+	p := newLoadingPicker(t)
 	v := view(p)
 	if !strings.Contains(v, loadLabel) || !strings.Contains(v, "0/0") {
 		t.Fatalf("loading view missing label or count:\n%s", v)
@@ -320,7 +320,7 @@ func TestLoadingStateRendersProgress(t *testing.T) {
 }
 
 func TestLoadedMsgPopulatesList(t *testing.T) {
-	p := newLoadingPicker(t, PickOptions{})
+	p := newLoadingPicker(t)
 	p.Update(loadedMsg{id: 1, apps: fixture()})
 	if p.loading || len(p.Matches()) != 6 {
 		t.Fatalf("loading=%v matches=%d after loadedMsg", p.loading, len(p.Matches()))
@@ -332,7 +332,7 @@ func TestLoadedMsgPopulatesList(t *testing.T) {
 }
 
 func TestTypingDuringLoadIsApplied(t *testing.T) {
-	p := newLoadingPicker(t, PickOptions{})
+	p := newLoadingPicker(t)
 	typeText(p, "spo")
 	if len(p.Matches()) != 0 {
 		t.Fatalf("matches before load = %d, want 0", len(p.Matches()))
@@ -345,14 +345,11 @@ func TestTypingDuringLoadIsApplied(t *testing.T) {
 }
 
 func TestLoadErrorShowsAndEscQuits(t *testing.T) {
-	p := newLoadingPicker(t, PickOptions{OrphansRow: true})
+	p := newLoadingPicker(t)
 	p.Update(loadedMsg{id: 1, err: errors.New("mdfind exploded")})
 	v := view(p)
 	if !strings.Contains(v, "could not load apps: mdfind exploded") {
 		t.Fatalf("error missing:\n%s", v)
-	}
-	if strings.Contains(v, orphansTitle) {
-		t.Errorf("orphans row must stay hidden on error:\n%s", v)
 	}
 	if _, cmd := p.Update(tea.KeyPressMsg{Code: tea.KeyEnter}); cmd != nil {
 		t.Error("enter after a load error must do nothing")
@@ -362,7 +359,7 @@ func TestLoadErrorShowsAndEscQuits(t *testing.T) {
 		t.Error("esc on the load-error screen must not set quitAll")
 	}
 
-	q := newLoadingPicker(t, PickOptions{OrphansRow: true})
+	q := newLoadingPicker(t)
 	q.Update(loadedMsg{id: 1, err: errors.New("mdfind exploded")})
 	assertQuit(t, press(q, tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl}))
 	if !q.quitAll {
@@ -381,7 +378,7 @@ func TestLoadBridge(t *testing.T) {
 		r.Done()
 		return apps, nil
 	}
-	p := NewPickerLoading(load, PickOptions{})
+	p := NewPickerLoading(load)
 	cmd := p.startLoad()
 	var progressSeen int
 	for i := 0; cmd != nil && i < 100; i++ {
@@ -399,60 +396,6 @@ func TestLoadBridge(t *testing.T) {
 	}
 	if len(p.Matches()) != 6 {
 		t.Errorf("matches = %d, want 6", len(p.Matches()))
-	}
-}
-
-func TestOrphansRow(t *testing.T) {
-	p := NewPicker(nil)
-	p.opts.OrphansRow = true
-	p.setApps(fixture())
-	p.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-
-	v := view(p)
-	if !strings.Contains(v, "› "+orphansTitle) || !strings.Contains(v, "find files left by apps") {
-		t.Fatalf("orphans row missing or not first:\n%s", v)
-	}
-	if !strings.Contains(v, "1 of 7") {
-		t.Errorf("footer should count the orphans row:\n%s", v)
-	}
-	if p.Cursor() != -1 {
-		t.Errorf("Cursor() on the orphans row = %d, want -1", p.Cursor())
-	}
-	press(p, tea.KeyPressMsg{Code: tea.KeyDown})
-	if p.Cursor() != 0 {
-		t.Errorf("Cursor() after down = %d, want 0 (Safari)", p.Cursor())
-	}
-
-	typeText(p, "sl")
-	if v := view(p); strings.Contains(v, orphansTitle) {
-		t.Fatalf("orphans row should hide while a query is typed:\n%s", v)
-	}
-	if _, ok := p.Picked(); ok {
-		t.Fatal("nothing picked yet")
-	}
-	press(p, tea.KeyPressMsg{Code: tea.KeyBackspace}, tea.KeyPressMsg{Code: tea.KeyBackspace})
-	if v := view(p); !strings.Contains(v, orphansTitle) {
-		t.Fatalf("orphans row should return when the query is cleared:\n%s", v)
-	}
-
-	cmd := press(p, tea.KeyPressMsg{Code: tea.KeyEnter})
-	assertQuit(t, cmd)
-	pick, ok := p.Picked()
-	if !ok || !pick.Orphans || pick.App.Name != "" {
-		t.Fatalf("Picked() = %+v, %v; want Orphans", pick, ok)
-	}
-	if _, ok := p.Selected(); ok {
-		t.Error("Selected() must report ok=false for the orphans row")
-	}
-}
-
-func TestOrphansRowAbsentByDefault(t *testing.T) {
-	p := newTestPicker(t)
-	if v := view(p); strings.Contains(v, orphansTitle) {
-		t.Fatalf("orphans row shown without the option:\n%s", v)
-	}
-	if !strings.Contains(view(p), "6 of 6") && !strings.Contains(view(p), "1 of 6") {
-		t.Errorf("footer count wrong:\n%s", view(p))
 	}
 }
 

@@ -25,8 +25,6 @@ const (
 	protectedFlash = "system apps cannot be removed"
 	systemSuffix   = " (system)"
 	loadLabel      = "Scanning applications"
-	orphansTitle   = "Orphaned leftovers…"
-	orphansBlurb   = "find files left by apps that are already gone"
 	sizeWidth      = 8 // "123.4 GB"
 	defaultWidth   = 80
 	defaultHeight  = 24
@@ -43,17 +41,6 @@ var pickerKeys = []keyHelp{
 	{"esc", "back to the home screen"},
 	{"ctrl+x", "quit rootout"},
 	{"?", "this help (when the search is empty)"},
-}
-
-// Pick is what the picker returns.
-type Pick struct {
-	App     app.App
-	Orphans bool // the user chose the "Orphaned leftovers…" row
-}
-
-// PickOptions configures the picker.
-type PickOptions struct {
-	OrphansRow bool // pin an "Orphaned leftovers…" row above the apps
 }
 
 // LoadFunc discovers the apps while the picker is already on screen. It
@@ -94,20 +81,20 @@ func PickApp(ctx context.Context, apps []app.App) (chosen app.App, ok bool, err 
 // showing a progress bar until the apps arrive. ok=false means the user
 // cancelled; a load failure is shown on screen and returned once the user
 // leaves.
-func PickAppLoad(ctx context.Context, load LoadFunc, opts PickOptions) (Pick, bool, error) {
-	p := NewPickerLoading(load, opts)
+func PickAppLoad(ctx context.Context, load LoadFunc) (app.App, bool, error) {
+	p := NewPickerLoading(load)
 	p.ctx = ctx
 	if _, err := tea.NewProgram(p, tea.WithContext(ctx)).Run(); err != nil {
-		return Pick{}, false, fmt.Errorf("tui: pick app: %w", err)
+		return app.App{}, false, fmt.Errorf("tui: pick app: %w", err)
 	}
 	if p.quitAll {
-		return Pick{}, false, ErrQuit
+		return app.App{}, false, ErrQuit
 	}
 	if p.loadErr != nil {
-		return Pick{}, false, fmt.Errorf("tui: pick app: %w", p.loadErr)
+		return app.App{}, false, fmt.Errorf("tui: pick app: %w", p.loadErr)
 	}
-	pick, ok := p.Picked()
-	return pick, ok, nil
+	chosen, ok := p.Selected()
+	return chosen, ok, nil
 }
 
 // Picker is the app picker model. It implements tea.Model and is exported so
@@ -117,7 +104,6 @@ type Picker struct {
 	matches []app.Match
 	input   textinput.Model
 	styles  styles
-	opts    PickOptions
 
 	// Loading state; load is nil when the apps were given up front.
 	ctx        context.Context
@@ -133,30 +119,30 @@ type Picker struct {
 	loadErr    error
 
 	width, height int
-	cursor, top   int // cursor indexes list rows (orphans row first, then matches); top is the first visible row
+	cursor, top   int // cursor indexes matches; top is the first visible row
 	flash         string
 	showHelp      bool
 	quitAll       bool // ctrl+x / ctrl+c: leave rootout, not just this screen
-	picked        Pick
+	picked        app.App
 	ok            bool
 }
 
 // NewPicker builds the model with the search box focused and every app listed.
 func NewPicker(apps []app.App) *Picker {
-	p := newPicker(PickOptions{})
+	p := newPicker()
 	p.setApps(apps)
 	return p
 }
 
 // NewPickerLoading builds the model in its loading state; Init starts load.
-func NewPickerLoading(load LoadFunc, opts PickOptions) *Picker {
-	p := newPicker(opts)
+func NewPickerLoading(load LoadFunc) *Picker {
+	p := newPicker()
 	p.load = load
 	p.loading = true
 	return p
 }
 
-func newPicker(opts PickOptions) *Picker {
+func newPicker() *Picker {
 	s := defaultStyles()
 	in := textinput.New()
 	in.Prompt = searchPrompt
@@ -171,7 +157,6 @@ func newPicker(opts PickOptions) *Picker {
 	p := &Picker{
 		input:     in,
 		styles:    s,
-		opts:      opts,
 		ctx:       context.Background(),
 		loadLabel: loadLabel,
 		width:     defaultWidth,
@@ -190,19 +175,14 @@ func (p *Picker) setApps(apps []app.App) {
 }
 
 // Selected returns the chosen app once the program has quit; ok is false when
-// the user cancelled or chose the orphans row (see Picked).
-func (p *Picker) Selected() (app.App, bool) { return p.picked.App, p.ok && !p.picked.Orphans }
-
-// Picked returns the full result once the program has quit; ok is false when
 // the user cancelled.
-func (p *Picker) Picked() (Pick, bool) { return p.picked, p.ok }
+func (p *Picker) Selected() (app.App, bool) { return p.picked, p.ok }
 
 // Matches returns the current filtered list, best first.
 func (p *Picker) Matches() []app.Match { return p.matches }
 
-// Cursor returns the index into Matches of the highlighted row, or -1 when
-// the orphans row is highlighted.
-func (p *Picker) Cursor() int { return p.cursor - p.orphanRows() }
+// Cursor returns the index into Matches of the highlighted row.
+func (p *Picker) Cursor() int { return p.cursor }
 
 // Init starts the search cursor blinking and, when loading, the load.
 func (p *Picker) Init() tea.Cmd {
@@ -393,34 +373,20 @@ func (r *loadReporter) send(msg tea.Msg) {
 	}
 }
 
-// orphanRows is 1 when the pinned orphans row is showing (option on, no
-// query, apps loaded), else 0.
-func (p *Picker) orphanRows() int {
-	if p.opts.OrphansRow && p.input.Value() == "" && !p.loading && p.loadErr == nil {
-		return 1
-	}
-	return 0
-}
-
-// rowCount is the number of list rows: the orphans row plus the matches.
-func (p *Picker) rowCount() int { return p.orphanRows() + len(p.matches) }
+// rowCount is the number of list rows: the matches.
+func (p *Picker) rowCount() int { return len(p.matches) }
 
 // choose selects the cursor row, or flashes a message when it is protected.
 func (p *Picker) choose() (tea.Model, tea.Cmd) {
 	if p.loading || p.loadErr != nil || p.rowCount() == 0 {
 		return p, nil
 	}
-	off := p.orphanRows()
-	if p.cursor < off {
-		p.picked, p.ok = Pick{Orphans: true}, true
-		return p, tea.Quit
-	}
-	a := p.matches[p.cursor-off].App
+	a := p.matches[p.cursor].App
 	if a.Protected {
 		p.flash = protectedFlash
 		return p, nil
 	}
-	p.picked, p.ok = Pick{App: a}, true
+	p.picked, p.ok = a, true
 	return p, tea.Quit
 }
 
@@ -539,16 +505,12 @@ func (p *Picker) renderLoadError(width, rows int) string {
 // renderList draws rows list lines, each exactly width cells wide.
 func (p *Picker) renderList(width, rows int) string {
 	lines := make([]string, 0, rows)
-	off, n := p.orphanRows(), p.rowCount()
+	n := p.rowCount()
 	if n == 0 {
 		lines = append(lines, padTo(p.styles.noMatch.Render("no matching apps"), width))
 	}
 	for i := p.top; i < n && len(lines) < rows; i++ {
-		if i < off {
-			lines = append(lines, p.renderOrphansRow(i == p.cursor, width))
-			continue
-		}
-		lines = append(lines, p.renderRow(p.matches[i-off], i == p.cursor, width))
+		lines = append(lines, p.renderRow(p.matches[i], i == p.cursor, width))
 	}
 	return fillRows(lines, width, rows)
 }
@@ -559,30 +521,6 @@ func fillRows(lines []string, width, rows int) string {
 		lines = append(lines, strings.Repeat(" ", width))
 	}
 	return strings.Join(lines, "\n")
-}
-
-// renderOrphansRow draws the pinned "Orphaned leftovers…" row: accent title,
-// dim blurb truncated to fit.
-func (p *Picker) renderOrphansRow(selected bool, width int) string {
-	base, accent, dim := lipgloss.NewStyle(), p.styles.match, p.styles.dim
-	marker := "  "
-	if selected {
-		base = p.styles.cursor
-		accent = base.Bold(true).Foreground(lipgloss.Cyan)
-		dim = base.Faint(true)
-		marker = "› "
-	}
-	avail := max(width-lipgloss.Width(marker), 4)
-	title := output.Truncate(orphansTitle, avail)
-
-	var b strings.Builder
-	b.WriteString(base.Render(marker))
-	b.WriteString(accent.Render(title))
-	if room := avail - lipgloss.Width(title) - 2; room >= 4 {
-		b.WriteString(base.Render("  "))
-		b.WriteString(dim.Render(output.Truncate(orphansBlurb, room)))
-	}
-	return padWith(b.String(), width, base)
 }
 
 // renderRow draws one app: marker, name with highlighted runes, dim bundle id
@@ -682,16 +620,7 @@ func (p *Picker) renderPreview(width, rows int) string {
 	if p.loading || p.loadErr != nil || p.rowCount() == 0 {
 		return pane.Render(p.styles.noMatch.Render("Nothing to show"))
 	}
-	if p.cursor < p.orphanRows() {
-		lines := []string{
-			p.styles.title.Render(strings.TrimSuffix(orphansTitle, "…")),
-			"",
-			"Files under ~/Library whose owner app is no longer installed.",
-			"Nothing is ticked until you choose.",
-		}
-		return pane.Render(strings.Join(lines, "\n"))
-	}
-	a := p.matches[p.cursor-p.orphanRows()].App
+	a := p.matches[p.cursor].App
 	label := func(k, v string) string {
 		return p.styles.dim.Render(fmt.Sprintf("%-10s", k)) + v
 	}

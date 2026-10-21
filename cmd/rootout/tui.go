@@ -69,14 +69,13 @@ func homeUninstall(ctx context.Context, env fsx.Env) (tui.Flash, error) {
 		return app.DiscoverWith(env, app.Options{Progress: r})
 	}
 	for {
-		pick, ok, err := tui.PickAppLoad(ctx, load, tui.PickOptions{})
+		a, ok, err := tui.PickAppLoad(ctx, load)
 		if err != nil {
 			return tui.Flash{}, err
 		}
 		if !ok {
 			return tui.Flash{}, nil
 		}
-		a := pick.App
 		p, err := plan.Build(ctx, env, a, plan.Options{Mode: plan.Trash, CrashReports: true, Run: run.Default, Progress: rep})
 		if err != nil {
 			return tui.Flash{Text: "could not plan " + a.Name + ": " + err.Error(), Err: true}, nil
