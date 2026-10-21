@@ -45,6 +45,11 @@ golangci-lint run     # config in .golangci.yml
 - Every command has `Long` and `Example`.
 - ctrl+x and ctrl+c quit rootout from every screen: the model sets `quitAll`, quits, and the entry point returns `tui.ErrQuit`. esc and q only end the current screen with ok=false; the caller decides what back means. Subcommands wrap TUI errors with `declinedOnQuit` so ctrl+x and esc give the same exit code.
 
+## Releases and versions
+- Every merge to `main` gets an annotated semver tag: minor for a feature (`v0.4.0`), patch for fixes or docs (`v0.3.1`). Cut it at wrap-up: `git tag -a vX.Y.Z -m "vX.Y.Z: <one line>"` then `git push origin main vX.Y.Z`.
+- The binary learns its version from `git describe --tags --always --dirty` (Makefile → `main.version`), so a clean checkout of a tag prints `vX.Y.Z`; anything else prints `vX.Y.Z-N-g<hash>[-dirty]`, which says how far past the tag the build is. `rootout --version`, `rootout doctor` (first line) and the home-screen title all show it; `make install` echoes what it installed.
+- `CHANGELOG.md` (Keep a Changelog format) gets an entry per tag; add to its "Unreleased" section as features land.
+
 ## Safety rules that are also conventions
 - Any path destined for deletion is validated by `safety.Validate` at plan time and again immediately before the delete.
 - Name-based leftover matches require `safety.NameOK` and are never the sole basis for anything under `/Library` or `Group Containers`.

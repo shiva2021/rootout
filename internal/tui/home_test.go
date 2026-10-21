@@ -9,9 +9,20 @@ import (
 
 func newTestHome(t *testing.T, flash Flash) *Home {
 	t.Helper()
-	h := NewHome(flash)
+	h := NewHome("", flash)
 	h.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	return h
+}
+
+func TestHomeTitleVersion(t *testing.T) {
+	h := NewHome("v0.3.0", Flash{})
+	h.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	if first := strings.SplitN(viewH(h), "\n", 2)[0]; strings.TrimSpace(first) != "rootout v0.3.0" {
+		t.Errorf("title = %q, want %q", first, "rootout v0.3.0")
+	}
+	if first := strings.SplitN(viewH(newTestHome(t, Flash{})), "\n", 2)[0]; strings.TrimSpace(first) != "rootout" {
+		t.Errorf("title without version = %q, want %q", first, "rootout")
+	}
 }
 
 func pressH(h *Home, keys ...tea.KeyPressMsg) tea.Cmd {

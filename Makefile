@@ -25,3 +25,4 @@ clean:
 install: build
 	mkdir -p $(HOME)/.local/bin
 	install -m 0755 $(BIN) $(HOME)/.local/bin/rootout
+	@echo "installed $$($(HOME)/.local/bin/rootout --version) to $(HOME)/.local/bin"

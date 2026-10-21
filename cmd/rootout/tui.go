@@ -29,7 +29,7 @@ func runTUI(ctx context.Context, g *globalFlags) error {
 	}
 	var flash tui.Flash
 	for {
-		a, err := tui.PickAction(ctx, flash)
+		a, err := tui.PickAction(ctx, version, flash)
 		if errors.Is(err, tui.ErrQuit) {
 			return nil
 		}

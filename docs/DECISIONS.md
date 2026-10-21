@@ -218,3 +218,11 @@ Append-only. Newest at the bottom. Never edit an old entry; add a new one that s
 **Alternatives.** More pinned rows in the picker (does not scale); one mega-model or nested programs (harder to test than one program per screen).
 **Consequences.** `OrphansRow`/`Pick.Orphans` are gone. `runOrphans`/`runScan` lose their discovery halves to `findOrphans`/`scanReports`. ctrl+x during a model download cancels it and quits. `rootout scan --uninstall <id>` no longer scores the extensions or does `--online` lookups first: it only needs the extension list (that work was never used on that path), so its stderr progress lines are gone.
 **Status.** Accepted
+
+## D-028 · 2026-10-21 · Semver tags on every merge; version shown in --version, doctor and the home title
+
+**Context.** The Makefile already injected `git describe` into `main.version`, but with no tags the binary printed a bare commit hash, so there was no way to tell whether the installed `rootout` was the latest.
+**Decision.** Start at `v0.3.0` (the home-screen milestone; v0.1/v0.2 were informal). Every merge to `main` gets an annotated tag: minor for features, patch for fixes/docs, cut at session wrap-up and pushed with `main`. The version is visible in `rootout --version`, as the first `doctor` line, in the home-screen title and in `make install`'s last line. `CHANGELOG.md` records each tag.
+**Alternatives.** Tag only at milestones (M2/M5/M6) — `--version` would show `v0.3.0-N-g<hash>` between them, which still measures distance but reads worse. A version baked into source — drifts from git and needs a bump commit per release.
+**Consequences.** `tui.PickAction`/`NewHome` take the version string. Wrap-up gains a tagging step. A build from an untagged or dirty tree says so in its version string.
+**Status.** Accepted

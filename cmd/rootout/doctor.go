@@ -31,7 +31,7 @@ func newDoctorCmd(g *globalFlags) *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
 		Short: "Check the environment rootout depends on",
-		Long: `Check what rootout can use on this Mac: the macOS version, how files reach
+		Long: `Check what rootout can use on this Mac: the installed rootout version, the macOS version, how files reach
 the Trash, Full Disk Access for this terminal, Homebrew, the VS Code-family editors and their command-line tools,
 the config file, stored API keys and Ollama with this Mac's chip and RAM.
 
@@ -70,6 +70,9 @@ nothing and installs nothing.
 func runChecks(ctx context.Context) []check {
 	var out []check
 	add := func(c check) { out = append(out, c) }
+
+	// Installed version first, so "is this the latest?" is answered at a glance.
+	add(check{Name: "rootout", OK: true, Detail: version})
 
 	if v, err := run.Default(ctx, "sw_vers", "-productVersion"); err == nil {
 		ver := strings.TrimSpace(string(v))

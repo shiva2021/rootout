@@ -5,6 +5,11 @@ _Updated: 2026-10-21 · Session: home screen and ctrl+x (D-027)_
 ## Status
 v0.2 complete and pushed to https://github.com/shiva2021/rootout (`main`). Since then: Ollama pull retries, scan progress bar, Ollama format fallback, model uninstall (D-025), Full Disk Access detection (D-026) and the home screen with ctrl+x quit (D-027). The home screen work is merged into `main` (local, not yet pushed); the home loop has been exercised by unit tests plus one pty smoke test (home renders, ctrl+x exits 0) — no action has been run through it in a real terminal yet. Decisions D-019…D-027. `make test`/`make lint` green. Remaining: M2 manual QA on a throwaway account, M5 release pipeline, M6 licensing (own plan).
 
+## Done this session (versioning, D-028)
+- First release tag `v0.3.0` on `main` (annotated), pushed with `main`. Convention: tag every merge (minor = feature, patch = fix/docs) at wrap-up — see `docs/kb/conventions.md` "Releases and versions".
+- Version visible in `rootout --version`, the first `doctor` line (`rootout v0.3.0`, also in `--json`), the home-screen title (`rootout v0.3.0`) and `make install`'s last line. `CHANGELOG.md` added (Keep a Changelog); add to "Unreleased" as features land.
+- Checking you have the latest: `rootout --version` should equal `git describe --tags` on `main`; a `-N-g<hash>` suffix means N commits past the tag, `-dirty` means uncommitted changes.
+
 ## Done this session (home screen and ctrl+x, D-027)
 - Home screen `internal/tui/home.go` (`PickAction`, `Flash`): four action rows (uninstall, orphans, scan, model) plus a flash line with the last outcome.
 - `tui.ErrQuit`: ctrl+x and ctrl+c quit from every screen via `quitAll`; esc/q only end the current screen (ok=false) and the caller decides what back means.

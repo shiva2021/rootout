@@ -55,10 +55,11 @@ var homeRows = []homeRow{
 	{ActionQuit, "Quit", "leave rootout (ctrl+x works on every screen)"},
 }
 
-// PickAction shows the home screen and returns the chosen action. It
-// returns ErrQuit when the user quits (ctrl+x, ctrl+c or the Quit row).
-func PickAction(ctx context.Context, flash Flash) (Action, error) {
-	h := NewHome(flash)
+// PickAction shows the home screen (titled with version, e.g. "v0.3.0")
+// and returns the chosen action. It returns ErrQuit when the user quits
+// (ctrl+x, ctrl+c or the Quit row).
+func PickAction(ctx context.Context, version string, flash Flash) (Action, error) {
+	h := NewHome(version, flash)
 	if _, err := tea.NewProgram(h, tea.WithContext(ctx)).Run(); err != nil {
 		return ActionNone, runErr(err, "home")
 	}
@@ -73,6 +74,7 @@ func PickAction(ctx context.Context, flash Flash) (Action, error) {
 type Home struct {
 	rows          []homeRow
 	styles        styles
+	version       string
 	width, height int
 	cursor        int
 	flash         Flash
@@ -82,14 +84,16 @@ type Home struct {
 	quitAll       bool
 }
 
-// NewHome builds the home screen showing flash under the list.
-func NewHome(flash Flash) *Home {
+// NewHome builds the home screen showing flash under the list. version is
+// appended to the title when not empty.
+func NewHome(version string, flash Flash) *Home {
 	return &Home{
-		rows:   homeRows,
-		styles: defaultStyles(),
-		width:  defaultWidth,
-		height: defaultHeight,
-		flash:  flash,
+		rows:    homeRows,
+		styles:  defaultStyles(),
+		version: version,
+		width:   defaultWidth,
+		height:  defaultHeight,
+		flash:   flash,
 	}
 }
 
@@ -165,7 +169,11 @@ func (h *Home) render() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(h.styles.title.Render("rootout"))
+	title := "rootout"
+	if h.version != "" {
+		title += " " + h.version
+	}
+	b.WriteString(h.styles.title.Render(title))
 	b.WriteString("\n\n")
 	b.WriteString(fillRows(lines, width, max(h.height-homeChromeRows, 1)))
 	b.WriteString("\n")
