@@ -108,6 +108,7 @@ func runScan(ctx context.Context, g *globalFlags, f scanFlags) error {
 		w.Printf("no extensions found\n")
 		return nil
 	}
+	// --uninstall only needs the extension list, so scoring and --online lookups are skipped.
 	if len(f.uninstall) > 0 {
 		exts, err := enumerateExts(env, f)
 		if err != nil {
@@ -158,7 +159,7 @@ func runScan(ctx context.Context, g *globalFlags, f scanFlags) error {
 		if wantsAI || c.LLM.Provider != "" || interactive {
 			assessor, err = buildAssessor(ctx, c, f.provider, f.model, interactive)
 			if err != nil {
-				return err
+				return declinedOnQuit(err, "no model chosen")
 			}
 		}
 	}

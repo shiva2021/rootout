@@ -72,3 +72,14 @@ func TestScanReportsEmptyHome(t *testing.T) {
 
 // findOrphans has no smoke test: it hard-wires run.Default, which would exec
 // launchctl and ps against the real machine.
+
+func TestUninstallErr(t *testing.T) {
+	if err := uninstallErr(0); err != nil {
+		t.Fatalf("uninstallErr(0) = %v, want nil", err)
+	}
+	err := uninstallErr(2)
+	var ee *exitErr
+	if !errors.As(err, &ee) || ee.code != exitError || ee.msg != "2 extension(s) could not be uninstalled" {
+		t.Fatalf("uninstallErr(2) = %#v", err)
+	}
+}
