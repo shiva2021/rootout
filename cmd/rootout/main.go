@@ -53,8 +53,10 @@ func runMain(args []string) int {
 		Long: `rootout uninstalls macOS apps completely and scans editor extensions for
 malicious behaviour.
 
-Bare "rootout" opens the app picker: choose an app, review every file it
-left behind, and remove it. The subcommands do the same work from scripts.
+Bare "rootout" opens the home screen: uninstall an app, remove orphaned
+leftovers, scan editor extensions or choose a local AI model. Every action
+returns to the home screen; esc goes back one screen, ctrl+x quits. The
+subcommands do the same work from scripts.
 
 Nothing runs as root; files that need admin rights are removed in one step
 after a single macOS password prompt. Removal moves files to the Trash
@@ -66,11 +68,11 @@ Every subcommand takes --json and then prints only JSON on stdout.
 
 Getting started
   rootout doctor                 check what rootout can use on this Mac
-  rootout                        pick an app, review its leftovers, remove it
+  rootout                        open the home screen
   rootout scan                   score your editor extensions
   rootout config models --pick   choose a local AI model that fits this Mac
   rootout guide                  a step-by-step tour`,
-		Example: `  rootout                               # open the app picker
+		Example: `  rootout                               # open the home screen
   rootout remove Spotify --dry-run      # list what removing Spotify would touch
   rootout remove Spotify                # review the list, then move it to the Trash
   rootout scan --no-tui                 # print extension scores

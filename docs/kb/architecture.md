@@ -3,7 +3,7 @@
 ## Shape
 
 ```
-cmd/rootout/main.go            cobra root; bare command -> tui
+cmd/rootout/main.go            cobra root; bare command -> tui home screen
 internal/
   safety/    protected prefixes, generic-name denylist, Validate(path)  <- every deletion passes here, twice
   fsx/       Env{Home, Root}, size walk, lstat helpers (tests point Env at temp dirs)
@@ -24,8 +24,9 @@ internal/
   license/   Check(ctx) Status — always Allowed until M6
   progress/  Reporter (Start/Step/Done), Term renderer for stderr, Recorder for tests
   output/    human table + JSON renderers shared by subcommands
-  tui/       Bubble Tea models: app picker (loads inside the program), removal confirm (typed delete, groups),
-             scan results (Assessor header, embedded model picker), model picker; shared typedConfirm, ? overlay, bar
+  tui/       Bubble Tea models: home screen (action rows + flash of the last outcome), app picker (loads inside the
+             program), removal confirm (typed delete, groups), scan results (Assessor header, embedded model picker),
+             model picker; shared typedConfirm, ? overlay, bar; ErrQuit (ctrl+x/ctrl+c) ends everything
   testutil/  FakeHome(t, spec), RequireSandbox(t, env)
 ```
 
@@ -33,6 +34,10 @@ Invariant: `tui/` and subcommands do no work themselves. Both call the same core
 pipelines; only how confirmation is collected and how output is rendered differ.
 
 ## Main flows
+
+**home**: `tui.PickAction` → one of the flows (uninstall = picker → review → `plan.Execute`; orphans =
+`findOrphans` → review → execute; scan = `scanReports` → review → uninstall; model = `pickAndSaveModel`) → flash
+back on the home screen. `tui.ErrQuit` (ctrl+x/ctrl+c) ends the loop; subcommands map it to the same exit as esc.
 
 **remove**: `app.Discover` → match arg (exact bundle id > exact name > fuzzy) →
 `plan.Build` (`safety.CheckApp` → `leftover.Find` → `safety.Validate` each path →

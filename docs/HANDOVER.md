@@ -1,11 +1,19 @@
 # Handover
 
-_Updated: 2026-10-21 · Session: Full Disk Access detection (D-026)_
+_Updated: 2026-10-21 · Session: home screen and ctrl+x (D-027)_
 
 ## Status
-v0.2 complete and pushed to https://github.com/shiva2021/rootout (`main`). Since then: Ollama pull retries, scan progress bar, Ollama format fallback, model uninstall (D-025) and Full Disk Access detection (D-026). Decisions D-019…D-026. `make test`/`make lint` green. Remaining: M2 manual QA on a throwaway account, M5 release pipeline, M6 licensing (own plan).
+v0.2 complete and pushed to https://github.com/shiva2021/rootout (`main`). Since then: Ollama pull retries, scan progress bar, Ollama format fallback, model uninstall (D-025), Full Disk Access detection (D-026) and the home screen with ctrl+x quit (D-027). The home screen work is on branch `tui/home-screen`, not yet merged; the home loop has only been exercised by unit tests, never in a terminal. Decisions D-019…D-027. `make test`/`make lint` green. Remaining: M2 manual QA on a throwaway account, M5 release pipeline, M6 licensing (own plan).
 
-## Done this session (Full Disk Access detection, D-026)
+## Done this session (home screen and ctrl+x, D-027)
+- Home screen `internal/tui/home.go` (`PickAction`, `Flash`): four action rows (uninstall, orphans, scan, model) plus a flash line with the last outcome.
+- `tui.ErrQuit`: ctrl+x and ctrl+c quit from every screen via `quitAll`; esc/q only end the current screen (ok=false) and the caller decides what back means.
+- `runTUI` home loop in `cmd/rootout/tui.go`: bare `rootout` opens home, each action returns to it with a flash summary.
+- Extracted `findOrphans` and `scanReports` from `runOrphans`/`runScan`; added `declinedOnQuit` so ctrl+x and esc give the same exit code (3 for remove/orphans/config, 0 for scan). The scan assessor maps `ErrQuit` too.
+- Removed the picker's orphans row (`OrphansRow`/`Pick.Orphans`). `scan --uninstall <id>` no longer scores or does `--online` lookups first.
+- Help text, README and kb (architecture, conventions) updated. `guide.go` needed no change.
+
+## Done last session (Full Disk Access detection, D-026)
 - Shivang granted Warp Full Disk Access and the stray `~/Library/Containers/zz.rootout.probe` could then be removed: FDA for the terminal app is confirmed as the remedy for protected container entries.
 - New `internal/tcc`: `FullDiskAccess(env)` lists `~/Library/Safari` → `Mail` → `Application Support/com.apple.TCC` (permission error = denied, success = granted, none exist = unknown); `NeedsFullDiskAccess(env, path)` (direct child of `~/Library/Containers`); `TerminalApp(getenv)` from `TERM_PROGRAM`.
 - `doctor` (and `guide`) show a "Full Disk Access" line: `granted to Warp` here; denied gives a `!` with `System Settings › Privacy & Security › Full Disk Access → add <terminal>`.
@@ -13,7 +21,7 @@ v0.2 complete and pushed to https://github.com/shiva2021/rootout (`main`). Since
 - `.golangci.yml`: gosec G302 excluded in tests (a test chmods a dir to 0 and restores it).
 - Verified on this Mac with FDA granted: `doctor` line, `make test` (24 packages), `make lint` clean, `orphans --dry-run` lists 15 `~/Library/Containers` entries that would be tagged. **The denied path has only run in unit tests** (see Next steps 1).
 
-## Done last session (model uninstall)
+## Done before that (model uninstall)
 - `ollama.Client.Delete` (`DELETE /api/delete`, `ErrModelNotFound`), verified against docs.ollama.com.
 - Picker: `d` on an installed row → `Uninstall X (size)? y/n` → spinner → re-list → flash; recommended rows show `installed` / `not installed`; `?` overlay and footer updated. `ModelDeps.ClearDefault` clears the saved default when that model goes.
 - `rootout config models rm <model> [--yes]`; first tests in `cmd/rootout` (`config_test.go`, exercises `removeModel` with an httptest Ollama and a temp config).
@@ -44,12 +52,13 @@ v0.2 complete and pushed to https://github.com/shiva2021/rootout (`main`). Since
 - Review screen and app picker verified under a pseudo-terminal (render + quit). Live removal and live LLM calls have not been run.
 
 ## Next steps
-1. Verify the denied path for real: System Settings › Privacy & Security › Full Disk Access, switch Warp off, then `./bin/rootout doctor` (expect `!` and the fix line) and `./bin/rootout orphans --dry-run` / `rootout orphans` (expect `! 15 paths need Full Disk Access…` and the `[needs Full Disk Access]` tags). Switch Warp back on afterwards.
-2. Try v0.2 interactively: `rootout` (bar, orphans row, `?`), `rootout scan` (`m`, then `d` on a model), `rootout orphans` (tick one group, type delete) — removal paths have only run in unit tests plus Esc-at-the-box pty checks. A real model uninstall has not been run yet.
-3. M2 task 7: follow `docs/kb/qa.md` on a throwaway macOS user account (cask, App Store and pkg app). Live removal has only run in unit tests.
-4. Try `rootout scan --llm` with a real key or `rootout config models --pick` with Ollama; only recorded-HTTP tests exist so far.
-5. M5: GoReleaser config, Homebrew tap; notarization optional (D-024). It is a CLI release, not a macOS app release.
-6. M6 membership gate: write a separate plan first. Admin (Shivang) unrestricted via an admin credential; everyone else needs an active Patreon monthly membership (mechanics explored at M6). See D-024.
+1. Try the home loop in a real terminal: `rootout` → Uninstall → esc back to the picker → esc back to home (empty flash) → Scan → esc → `?` on home → ctrl+x. Check a real removal's flash and that the `report()` lines are visible after quitting. Not run yet — only unit tests.
+2. Verify the denied path for real: System Settings › Privacy & Security › Full Disk Access, switch Warp off, then `./bin/rootout doctor` (expect `!` and the fix line) and `./bin/rootout orphans --dry-run` / `rootout orphans` (expect `! 15 paths need Full Disk Access…` and the `[needs Full Disk Access]` tags). Switch Warp back on afterwards.
+3. Try v0.2 interactively: `rootout` (bar, `?`), `rootout scan` (`m`, then `d` on a model), `rootout orphans` (tick one group, type delete) — removal paths have only run in unit tests plus Esc-at-the-box pty checks. A real model uninstall has not been run yet.
+4. M2 task 7: follow `docs/kb/qa.md` on a throwaway macOS user account (cask, App Store and pkg app). Live removal has only run in unit tests.
+5. Try `rootout scan --llm` with a real key or `rootout config models --pick` with Ollama; only recorded-HTTP tests exist so far.
+6. M5: GoReleaser config, Homebrew tap; notarization optional (D-024). It is a CLI release, not a macOS app release.
+7. M6 membership gate: write a separate plan first. Admin (Shivang) unrestricted via an admin credential; everyone else needs an active Patreon monthly membership (mechanics explored at M6). See D-024.
 
 ## Blockers and open questions
 - `Group Containers` is not probed or tagged by D-026; nobody has checked whether its entries carry the same TCC protection as `~/Library/Containers`. Test only with a throwaway entry and the Finder GUI as fallback.
@@ -68,6 +77,7 @@ make build && make test && make lint && scripts/toolchain_check.sh
 
 ## Gotchas
 - Scan speed: never run a regex over a whole bundle; use `FileCtx.FindAround` with the pattern's mandatory literals and avoid `{200,}`-style repetitions (docs/kb/heuristics.md, Performance). Profile with the throwaway timing test described there.
+- ctrl+x/ctrl+c must be checked before the `?` overlay close and before delegating to the typed box / embedded picker, or the quit key gets eaten.
 - pty testing: keys sent before the alternate screen opens are buffered and `ESC ESC q` then parses as Alt-combinations; wait for the screen before sending keys.
 - The tool was renamed from `purge` to `rootout` (D-018) because macOS ships `/usr/sbin/purge`. `make install` puts it in `~/.local/bin`.
 - A failing `go test` piped into `tail` hides the exit code; one bad commit slipped through that way (fixed in the next commit). Check `${PIPESTATUS[0]}` or grep for FAIL.

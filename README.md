@@ -4,7 +4,7 @@ Uninstall macOS apps completely, and find risky extensions in VS Code, Cursor,
 VSCodium, Windsurf and VS Code Insiders.
 
 ```bash
-rootout                       # pick an app, review everything it left behind, remove it
+rootout                       # home screen: uninstall an app, remove orphans, scan extensions, pick a model
 rootout list [--search q]     # installed apps
 rootout remove <app> -n       # dry run: show the bundle and every leftover file
 rootout remove <app>          # move them to the Trash after you confirm
@@ -18,6 +18,7 @@ rootout guide                 # a step-by-step tour adapted to this Mac
 
 Nothing is uninstalled until you type `delete`. In every screen `?` lists the
 keys; in the scan screen `m` picks a local model without leaving the scan.
+esc goes back one screen; ctrl+x quits from anywhere.
 
 Every command takes `--json`. Removal goes to the Trash unless `--permanent`.
 System apps are listed but never removable. Nothing runs as root; files that

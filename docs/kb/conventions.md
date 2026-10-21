@@ -43,6 +43,7 @@ golangci-lint run     # config in .golangci.yml
 - Every destructive confirmation goes through `tui.typedConfirm` (screens) or `plan.Prompt`/`confirmTyped` (plain terminal); the word is `plan.ConfirmWord`. `--yes` is the only bypass and calls `yesBanner`.
 - Every screen registers its keys with the `?` overlay (`renderHelp`) and ends its footer with `· ? help`.
 - Every command has `Long` and `Example`.
+- ctrl+x and ctrl+c quit rootout from every screen: the model sets `quitAll`, quits, and the entry point returns `tui.ErrQuit`. esc and q only end the current screen with ok=false; the caller decides what back means. Subcommands wrap TUI errors with `declinedOnQuit` so ctrl+x and esc give the same exit code.
 
 ## Safety rules that are also conventions
 - Any path destined for deletion is validated by `safety.Validate` at plan time and again immediately before the delete.
