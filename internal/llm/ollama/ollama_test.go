@@ -121,6 +121,10 @@ func TestListInstalled(t *testing.T) {
 }
 
 func TestPull(t *testing.T) {
+	// A truncated stream is retried (Ollama resumes partial blobs); skip the
+	// backoff and count only real progress lines.
+	pullSleep = func(context.Context, time.Duration) error { return nil }
+	t.Cleanup(func() { pullSleep = pullSleepDefault })
 	const ok = `{"status":"pulling manifest"}
 {"status":"pulling 5ee4f07cdb9b","digest":"sha256:5ee4f07cdb9b","total":1929912432}
 {"status":"pulling 5ee4f07cdb9b","digest":"sha256:5ee4f07cdb9b","total":1929912432,"completed":964956216}
@@ -141,14 +145,17 @@ func TestPull(t *testing.T) {
 	}{
 		{"success", ok, "", 7},
 		{"error line", failing, "no space left on device", 2},
-		{"no success", truncated, "stream ended before success", 1},
+		{"no success", truncated, "stream ended before success", PullRetries},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			srv, _ := newServer(t, tt.stream)
 			var calls int
 			var lastDone, lastTotal int64
-			err := testClient(srv.URL).Pull(context.Background(), "qwen2.5-coder:3b", func(_ string, c, tot int64) {
+			err := testClient(srv.URL).Pull(context.Background(), "qwen2.5-coder:3b", func(st string, c, tot int64) {
+				if strings.HasPrefix(st, "retrying") {
+					return
+				}
 				calls++
 				if tot > 0 {
 					lastDone, lastTotal = c, tot
@@ -282,5 +289,55 @@ func TestProbe(t *testing.T) {
 				t.Errorf("Probe = %+v, want %+v", got, tt.want)
 			}
 		})
+	}
+}
+
+// Ollama aborts stalled downloads but keeps partial blobs; Pull must retry
+// those and resume, and must not retry a missing model.
+func TestPullRetriesStalledDownloads(t *testing.T) {
+	pullSleep = func(context.Context, time.Duration) error { return nil }
+	t.Cleanup(func() { pullSleep = pullSleepDefault })
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls < 3 {
+			_, _ = w.Write([]byte(`{"status":"pulling abc","total":100,"completed":10}` + "\n" + `{"error":"max retries exceeded: download too slow"}` + "\n"))
+			return
+		}
+		_, _ = w.Write([]byte(`{"status":"pulling abc","total":100,"completed":100}` + "\n" + `{"status":"success"}` + "\n"))
+	}))
+	defer srv.Close()
+	var statuses []string
+	err := testClient(srv.URL).Pull(context.Background(), "qwen3.5:4b", func(s string, _, _ int64) { statuses = append(statuses, s) })
+	if err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if calls != 3 {
+		t.Fatalf("calls = %d, want 3 (two stalls, then success)", calls)
+	}
+	joined := strings.Join(statuses, "|")
+	if !strings.Contains(joined, "retrying (1/") || !strings.Contains(joined, "download too slow") || !strings.Contains(joined, "success") {
+		t.Fatalf("statuses = %q", joined)
+	}
+
+	calls = 0
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(`{"error":"pull model manifest: file does not exist"}` + "\n"))
+	}))
+	defer srv2.Close()
+	if err := testClient(srv2.URL).Pull(context.Background(), "nope:1b", nil); err == nil || calls != 1 {
+		t.Fatalf("missing model: err=%v calls=%d, want one attempt", err, calls)
+	}
+
+	calls = 0
+	srv3 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(`{"error":"max retries exceeded: download too slow"}` + "\n"))
+	}))
+	defer srv3.Close()
+	err = testClient(srv3.URL).Pull(context.Background(), "qwen3.5:4b", nil)
+	if err == nil || calls != PullRetries || !strings.Contains(err.Error(), "gave up after") {
+		t.Fatalf("persistent stall: err=%v calls=%d", err, calls)
 	}
 }

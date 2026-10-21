@@ -126,10 +126,85 @@ func (c *Client) ListInstalled(ctx context.Context, hw Hardware) ([]Installed, e
 
 // Pull downloads model, calling progress for each streamed status line.
 // completed and total are zero for lines without byte counts.
+// Pull retry policy. Ollama aborts a download when the transfer stalls
+// ("max retries exceeded: download too slow") but keeps the partial blobs,
+// so a new request resumes where it stopped. Pull therefore retries
+// transient failures with a short backoff; a bad model name or a registry
+// 404 is not retried.
+const (
+	PullRetries    = 6
+	pullBackoffMax = 15 * time.Second
+)
+
+var pullTransient = []string{
+	"download too slow", "max retries exceeded", "stream ended before success", "read stream",
+	"connection reset", "unexpected eof", "eof", "timeout", "tls handshake", "no such host",
+	"temporarily unavailable", "i/o timeout", "502", "503", "504",
+}
+
+// pullSleep is a test seam.
+var pullSleep = pullSleepDefault
+
+func pullSleepDefault(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+func pullIsTransient(err error) bool {
+	msg := strings.ToLower(err.Error())
+	for _, t := range pullTransient {
+		if strings.Contains(msg, t) {
+			return true
+		}
+	}
+	return false
+}
+
+// Pull downloads model, reporting progress, and retries stalled downloads
+// (see PullRetries). The progress callback sees a status line
+// "retrying (n/N): <reason>" before each new attempt.
 func (c *Client) Pull(ctx context.Context, model string, progress func(status string, completed, total int64)) error {
 	if !validName.MatchString(model) {
 		return fmt.Errorf("ollama: invalid model name %q", model)
 	}
+	var err error
+	for attempt := 1; attempt <= PullRetries; attempt++ {
+		err = c.pullOnce(ctx, model, progress)
+		if err == nil || ctx.Err() != nil || !pullIsTransient(err) {
+			return err
+		}
+		if attempt == PullRetries {
+			break
+		}
+		wait := min(pullBackoffMax, time.Duration(1<<attempt)*time.Second)
+		if progress != nil {
+			progress(fmt.Sprintf("retrying (%d/%d) in %s: %s", attempt, PullRetries-1, wait, pullReason(err)), 0, 0)
+		}
+		if serr := pullSleep(ctx, wait); serr != nil {
+			return err
+		}
+	}
+	return fmt.Errorf("%w (gave up after %d attempts: the connection to the Ollama registry keeps stalling; try again later, check the network, or pick a smaller model)", err, PullRetries)
+}
+
+// pullReason strips the "ollama: pull <model>: " prefix for status lines.
+func pullReason(err error) string {
+	msg := err.Error()
+	if i := strings.LastIndex(msg, ": "); i >= 0 && strings.HasPrefix(msg, "ollama: pull ") {
+		if j := strings.Index(msg[len("ollama: pull "):], ": "); j >= 0 {
+			return msg[len("ollama: pull ")+j+2:]
+		}
+	}
+	return msg
+}
+
+func (c *Client) pullOnce(ctx context.Context, model string, progress func(status string, completed, total int64)) error {
 	body, err := json.Marshal(map[string]any{"model": model, "stream": true})
 	if err != nil {
 		return fmt.Errorf("ollama: pull %s: %w", model, err)
