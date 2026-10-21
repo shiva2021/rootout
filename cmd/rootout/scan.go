@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -14,6 +15,7 @@ import (
 	"github.com/shiva2021/rootout/internal/heur"
 	"github.com/shiva2021/rootout/internal/llm"
 	"github.com/shiva2021/rootout/internal/output"
+	"github.com/shiva2021/rootout/internal/progress"
 	"github.com/shiva2021/rootout/internal/registry"
 	"github.com/shiva2021/rootout/internal/tui"
 )
@@ -99,21 +101,117 @@ func runScan(ctx context.Context, g *globalFlags, f scanFlags) error {
 	if err != nil {
 		return err
 	}
-	exts, err := ext.Enumerate(env, ext.Options{})
-	if err != nil {
-		return err
-	}
-	if f.editor != "" {
-		exts = filterEditor(exts, f.editor)
-	}
-	if len(exts) == 0 {
+	noExts := func() error {
 		if g.json {
 			return w.Emit([]scanItem{})
 		}
 		w.Printf("no extensions found\n")
 		return nil
 	}
+	if len(f.uninstall) > 0 {
+		exts, err := enumerateExts(env, f)
+		if err != nil {
+			return err
+		}
+		if len(exts) == 0 {
+			return noExts()
+		}
+		return uninstallByID(ctx, env, exts, f)
+	}
 	rep := stderrProgress(g)
+	shown, total, err := scanReports(ctx, env, f, rep)
+	if err != nil {
+		return err
+	}
+	if total == 0 {
+		return noExts()
+	}
+	min := f.minScore
+	if f.all {
+		min = 0
+	}
+
+	interactive := !g.json && !f.noTUI && isTerminal(os.Stdin) && isTerminal(os.Stdout)
+	if f.yes {
+		return &exitErr{code: exitBadInput, msg: "--yes only applies with --uninstall <id>"}
+	}
+	wantsAI := f.llm || f.provider != "" || f.model != "" || f.pickModel
+	var assessor tui.Assessor
+	if wantsAI || interactive {
+		c, _, err := loadConfig()
+		if err != nil {
+			return err
+		}
+		if f.pickModel {
+			if !interactive {
+				return &exitErr{code: exitBadInput, msg: "--pick-model needs a terminal; use `rootout config models` and `--model <name>` in scripts"}
+			}
+			m, err := pickAndSaveModel(ctx)
+			if err != nil {
+				return declinedOnQuit(err, "no model chosen")
+			}
+			f.provider, f.model = "ollama", m
+			c.LLM.Provider, c.LLM.Ollama.Model = "ollama", m
+		}
+		// In the review screen the model is asked on demand; only build it
+		// eagerly when --llm was requested or a provider is configured.
+		if wantsAI || c.LLM.Provider != "" || interactive {
+			assessor, err = buildAssessor(ctx, c, f.provider, f.model, interactive)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	if interactive {
+		_, failed, _, err := reviewAndUninstall(ctx, env, shown, assessor)
+		if err != nil {
+			if errors.Is(err, tui.ErrQuit) {
+				return nil
+			}
+			return err
+		}
+		return uninstallErr(failed)
+	}
+
+	items := make([]scanItem, len(shown))
+	for i, r := range shown {
+		items[i].Report = r
+		if assessor.Assess != nil && wantsAI {
+			fmt.Fprintf(os.Stderr, "rootout: asking the model about %s...\n", r.Ext.ID)
+			a, err := assessor.Assess(ctx, r)
+			if err != nil {
+				items[i].AssessErr = err.Error()
+			} else {
+				items[i].Assessment = &a
+			}
+		}
+	}
+	return printReports(w, items, total, min)
+}
+
+// enumerateExts lists installed extensions, limited to --editor when set.
+func enumerateExts(env fsx.Env, f scanFlags) ([]ext.Extension, error) {
+	exts, err := ext.Enumerate(env, ext.Options{})
+	if err != nil {
+		return nil, err
+	}
+	if f.editor != "" {
+		exts = filterEditor(exts, f.editor)
+	}
+	return exts, nil
+}
+
+// scanReports enumerates and scores the extensions; total is how many exist,
+// shown those at or above the threshold.
+func scanReports(ctx context.Context, env fsx.Env, f scanFlags, rep progress.Reporter) (shown []heur.Report, total int, err error) {
+	exts, err := enumerateExts(env, f)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(exts) == 0 {
+		return nil, 0, nil
+	}
 	reports := heur.ScanAllWith(ctx, exts, heur.Limits{}, rep)
 	if f.online {
 		rep.Start("Checking registries", 0)
@@ -132,79 +230,29 @@ func runScan(ctx context.Context, g *globalFlags, f scanFlags) error {
 	if f.all {
 		min = 0
 	}
-	shown := reports[:0:0]
+	shown = reports[:0:0]
 	for _, r := range reports {
 		if r.Score >= min {
 			shown = append(shown, r)
 		}
 	}
-
-	interactive := !g.json && !f.noTUI && isTerminal(os.Stdin) && isTerminal(os.Stdout)
-	if len(f.uninstall) > 0 {
-		return uninstallByID(ctx, env, exts, f)
-	}
-	if f.yes {
-		return &exitErr{code: exitBadInput, msg: "--yes only applies with --uninstall <id>"}
-	}
-	wantsAI := f.llm || f.provider != "" || f.model != "" || f.pickModel
-	var assessor tui.Assessor
-	if wantsAI || interactive {
-		c, _, err := loadConfig()
-		if err != nil {
-			return err
-		}
-		if f.pickModel {
-			if !interactive {
-				return &exitErr{code: exitBadInput, msg: "--pick-model needs a terminal; use `rootout config models` and `--model <name>` in scripts"}
-			}
-			m, err := pickAndSaveModel(ctx)
-			if err != nil {
-				return err
-			}
-			f.provider, f.model = "ollama", m
-			c.LLM.Provider, c.LLM.Ollama.Model = "ollama", m
-		}
-		// In the review screen the model is asked on demand; only build it
-		// eagerly when --llm was requested or a provider is configured.
-		if wantsAI || c.LLM.Provider != "" || interactive {
-			assessor, err = buildAssessor(ctx, c, f.provider, f.model, interactive)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	if interactive {
-		return reviewAndUninstall(ctx, env, shown, assessor)
-	}
-
-	items := make([]scanItem, len(shown))
-	for i, r := range shown {
-		items[i].Report = r
-		if assessor.Assess != nil && wantsAI {
-			fmt.Fprintf(os.Stderr, "rootout: asking the model about %s...\n", r.Ext.ID)
-			a, err := assessor.Assess(ctx, r)
-			if err != nil {
-				items[i].AssessErr = err.Error()
-			} else {
-				items[i].Assessment = &a
-			}
-		}
-	}
-	return printReports(w, items, len(reports), min)
+	return shown, len(reports), nil
 }
 
-// reviewAndUninstall opens the results screen and uninstalls what the user ticked.
-func reviewAndUninstall(ctx context.Context, env fsx.Env, shown []heur.Report, a tui.Assessor) error {
-	res, ok, err := tui.ReviewScan(ctx, shown, a)
+// reviewAndUninstall opens the results screen and uninstalls what the user
+// ticked. ok is false when the user backed out or ticked nothing.
+func reviewAndUninstall(ctx context.Context, env fsx.Env, shown []heur.Report, a tui.Assessor) (done, failed int, ok bool, err error) {
+	var res tui.ScanResult
+	res, ok, err = tui.ReviewScan(ctx, shown, a)
 	if err != nil || !ok || len(res.Uninstall) == 0 {
-		return err
+		return 0, 0, false, err
 	}
 	var targets []ext.Extension
 	for _, r := range res.Uninstall {
 		targets = append(targets, r.Ext)
 	}
-	return uninstallExtensions(ctx, env, targets)
+	done, failed = uninstallExtensions(ctx, env, targets)
+	return done, failed, true, nil
 }
 
 // uninstallByID is the scripted path: --uninstall <id>... with the typed
@@ -234,12 +282,13 @@ func uninstallByID(ctx context.Context, env fsx.Env, exts []ext.Extension, f sca
 			return &exitErr{code: exitDeclined, msg: "nothing uninstalled"}
 		}
 	}
-	return uninstallExtensions(ctx, env, targets)
+	_, failed := uninstallExtensions(ctx, env, targets)
+	return uninstallErr(failed)
 }
 
-func uninstallExtensions(ctx context.Context, env fsx.Env, targets []ext.Extension) error {
+// uninstallExtensions removes each target, printing one line per result.
+func uninstallExtensions(ctx context.Context, env fsx.Env, targets []ext.Extension) (done, failed int) {
 	editors := ext.Editors(env, ext.Options{})
-	failed := 0
 	for _, r := range targets {
 		if err := ext.Uninstall(ctx, env, r, editors, ext.Options{}); err != nil {
 			failed++
@@ -247,7 +296,13 @@ func uninstallExtensions(ctx context.Context, env fsx.Env, targets []ext.Extensi
 			continue
 		}
 		fmt.Printf("uninstalled %s (%s)\n", r.ID, r.Editor)
+		done++
 	}
+	return done, failed
+}
+
+// uninstallErr is the exit error for failed uninstalls, nil when none failed.
+func uninstallErr(failed int) error {
 	if failed > 0 {
 		return &exitErr{code: exitError, msg: fmt.Sprintf("%d extension(s) could not be uninstalled", failed)}
 	}

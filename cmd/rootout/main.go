@@ -164,3 +164,9 @@ type exitErr struct {
 }
 
 func (e *exitErr) Error() string { return e.msg }
+
+// isExit reports whether err is an exitErr with the given code.
+func isExit(err error, code int) bool {
+	var ee *exitErr
+	return errors.As(err, &ee) && ee.code == code
+}

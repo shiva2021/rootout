@@ -123,7 +123,7 @@ func runRemove(ctx context.Context, g *globalFlags, f removeFlags, arg string) e
 	}
 	ok, err := chooseConfirmer(g, f).Confirm(ctx, p)
 	if err != nil {
-		return err
+		return declinedOnQuit(err, "nothing removed")
 	}
 	if !ok {
 		return &exitErr{code: exitDeclined, msg: "nothing removed"}

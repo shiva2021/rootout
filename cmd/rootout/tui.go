@@ -39,8 +39,7 @@ func runTUI(ctx context.Context, g *globalFlags) error {
 		}
 		if pick.Orphans {
 			if err := runOrphans(ctx, g, orphanFlags{}); err != nil {
-				var ee *exitErr
-				if errors.As(err, &ee) && ee.code == exitDeclined {
+				if isExit(err, exitDeclined) {
 					continue
 				}
 				return err

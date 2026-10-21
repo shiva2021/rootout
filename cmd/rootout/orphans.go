@@ -16,6 +16,7 @@ import (
 	"github.com/shiva2021/rootout/internal/output"
 	"github.com/shiva2021/rootout/internal/plan"
 	"github.com/shiva2021/rootout/internal/priv"
+	"github.com/shiva2021/rootout/internal/progress"
 	"github.com/shiva2021/rootout/internal/run"
 )
 
@@ -73,21 +74,8 @@ func runOrphans(ctx context.Context, g *globalFlags, f orphanFlags) error {
 		return &exitErr{code: exitBadInput, msg: "--yes needs --remove <owner-id>; nothing is removed without an explicit choice"}
 	}
 	interactive := !g.json && isTerminal(os.Stdin) && isTerminal(os.Stdout)
-	if f.minAge == 0 {
-		f.minAge = 30 * 24 * time.Hour
-	}
 	rep := stderrProgress(g)
-
-	installed, err := app.DiscoverWith(env, app.Options{Progress: rep, SkipSizes: true})
-	if err != nil {
-		return err
-	}
-	orphans, err := leftover.FindOrphans(ctx, env, leftover.OrphanOptions{
-		Installed:    installed,
-		RecentWindow: f.minAge,
-		Run:          run.Default,
-		Progress:     rep,
-	})
+	orphans, err := findOrphans(ctx, env, f, rep)
 	if err != nil {
 		return err
 	}
@@ -120,7 +108,7 @@ func runOrphans(ctx context.Context, g *globalFlags, f orphanFlags) error {
 		ok, err = tuiConfirmer().Confirm(ctx, p)
 	}
 	if err != nil {
-		return err
+		return declinedOnQuit(err, "nothing removed")
 	}
 	if !ok || len(p.Selected()) == 0 {
 		return &exitErr{code: exitDeclined, msg: "nothing removed"}
@@ -147,6 +135,23 @@ func runOrphans(ctx context.Context, g *globalFlags, f orphanFlags) error {
 		return &exitErr{code: exitError, msg: "some paths could not be removed"}
 	}
 	return nil
+}
+
+// findOrphans discovers the installed apps and the leftovers none of them own.
+func findOrphans(ctx context.Context, env fsx.Env, f orphanFlags, rep progress.Reporter) ([]leftover.Orphan, error) {
+	if f.minAge == 0 {
+		f.minAge = 30 * 24 * time.Hour
+	}
+	installed, err := app.DiscoverWith(env, app.Options{Progress: rep, SkipSizes: true})
+	if err != nil {
+		return nil, err
+	}
+	return leftover.FindOrphans(ctx, env, leftover.OrphanOptions{
+		Installed:    installed,
+		RecentWindow: f.minAge,
+		Run:          run.Default,
+		Progress:     rep,
+	})
 }
 
 // orphanPlan turns the candidates into an unselected plan grouped by owner.

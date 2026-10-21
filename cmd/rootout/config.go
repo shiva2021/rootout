@@ -245,7 +245,7 @@ downloaded without your confirmation.
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if pick {
 				_, err := pickAndSaveModel(cmd.Context())
-				return err
+				return declinedOnQuit(err, "no model chosen")
 			}
 			return listModels(cmd.Context(), g)
 		},
