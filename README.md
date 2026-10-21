@@ -16,6 +16,23 @@ rootout doctor                # check what rootout depends on
 rootout guide                 # a step-by-step tour adapted to this Mac
 ```
 
+## Install
+
+```bash
+# Homebrew (private tap: needs git access to shiva2021/homebrew-rootout and a GitHub token)
+export HOMEBREW_GITHUB_API_TOKEN=<token with read access to shiva2021/rootout>
+brew tap shiva2021/rootout git@github.com:shiva2021/homebrew-rootout.git
+brew install --cask rootout
+
+# Direct download: grab rootout_<version>_darwin_<arch>.tar.gz from the Releases page, then
+tar xzf rootout_*_darwin_*.tar.gz && xattr -d com.apple.quarantine rootout && mv rootout ~/.local/bin/
+
+# From source
+make install
+```
+
+The binary is not code-signed yet; Homebrew clears the quarantine flag for you.
+
 Nothing is uninstalled until you type `delete`. In every screen `?` lists the
 keys; in the scan screen `m` picks a local model without leaving the scan.
 esc goes back one screen; ctrl+x quits from anywhere.

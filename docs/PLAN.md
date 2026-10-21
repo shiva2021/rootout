@@ -195,10 +195,7 @@ Config keys: `llm.ollama.base_url` (default `http://localhost:11434`), `llm.olla
 8. `--llm` / `--provider` / `--model` on `scan`; TUI "Assess with AI" action routes to the picker when provider is Ollama and no model is configured; graceful no-key path; `purge doctor` (includes Ollama status, models, hardware tier).
 
 **M5 Release pipeline** (a CLI release, not a macOS app release; D-024)
-1. `[P]` GoReleaser 2.18 config (darwin arm64 + amd64, `CGO_ENABLED=0`), GitHub Actions on tag.
-2. `[P]` optional: sign + notarize the bare binary via `notarize.macos` (quill) so downloads do not trip Gatekeeper; needs a paid Apple Developer account. Decide at M5 start; the tap works without it.
-3. `[P]` private Homebrew tap via `homebrew_casks`.
-4. README, `purge --version`, refresh `docs/HANDOVER.md` and KB.
+Spec and task plan: `docs/plans/m5-release.md` (D-030…D-032).
 
 **M6 Membership gate (last; gets its own plan; D-024)**
 Intent fixed now, mechanics decided then:

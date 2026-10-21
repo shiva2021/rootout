@@ -11,3 +11,4 @@ Read only what today's task needs.
 | `heuristics.md` | Adding or tuning an extension-scan rule |
 | `local-models.md` | Touching the Ollama picker or model catalogue |
 | `qa.md` | Manual QA procedure for real-app removal (created in M2) |
+| `release.md` | Cutting, verifying or repairing a release; tap and token setup |

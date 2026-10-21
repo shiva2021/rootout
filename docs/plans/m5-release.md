@@ -1,6 +1,6 @@
 # M5 · Release pipeline
 
-_Spec written 2026-10-22. Status: awaiting review. Decisions D-030…D-032 are logged once this is approved._
+_Spec written 2026-10-22. Status: approved; implementation in progress. Decisions D-030…D-032 are logged once this is approved._
 
 ## Goal
 
@@ -61,7 +61,7 @@ Windows builds.
     `HOMEBREW_GITHUB_API_TOKEN` at download time (Homebrew ≥ 5.1.14 scrubs it
     during cask evaluation), resolves the asset id through the releases API
     and downloads `releases/assets/<id>` with `Accept: application/octet-stream`.
-  - `hooks.post.install_steps`: `on_macos do run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/rootout"] end`.
+  - `hooks.post.install`: `if OS.mac? system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/rootout"] end`. (Implementation note: the live docs show `install_steps` and `{{ .StagedPath }}`, which GoReleaser 2.18.3 rejects; this is the form in the docs at the v2.18.3 tag.)
   - `caveats`: export `HOMEBREW_GITHUB_API_TOKEN` before `brew install`; the binary is unsigned.
 
 ### Workflows
@@ -101,10 +101,9 @@ add the entry and cut a patch tag. Tags are never moved or deleted.
   wrong build tags, macOS costs 10x), and tag and `main` are pushed together,
   so tagging goes through `release-check` first. The runbook says so.
 - `snapshot`: `goreleaser release --snapshot --clean --skip=publish`; builds
-  both archives and the cask into `dist/` without touching GitHub. The target
-  sets `TAP_GITHUB_TOKEN ?= snapshot` so the cask's `{{ .Env.TAP_GITHUB_TOKEN }}`
-  template renders offline; drop the guard if step 1 of Verification shows
-  GoReleaser does not need it.
+  both archives and the cask into `dist/` without touching GitHub. (Implementation
+  note: the cask renders without `TAP_GITHUB_TOKEN` in snapshot mode, so no
+  placeholder guard was needed.)
 
 ### Tap and secrets (manual, Shivang)
 
