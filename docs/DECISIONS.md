@@ -210,3 +210,11 @@ Append-only. Newest at the bottom. Never edit an old entry; add a new one that s
 **Alternatives.** Blocking the run until access is granted (rejected: unrelated paths would be held hostage by a settings change); an admin password prompt (rejected: root is refused too, see the 2026-10-21 handover); probing by attempting the delete (rejected: destructive); putting the probe in `fsx` (rejected: it is a privacy mechanism, not a path helper).
 **Consequences.** `Plan` gains a `Warning` string carried into `--json`. `Group Containers` is not probed and not tagged until someone confirms the same protection applies there. The `writable()` check still classifies such paths as user paths; that is unchanged.
 **Status.** Accepted
+
+## D-027 · 2026-10-21 · Home screen; ctrl+x quits, esc goes back
+
+**Context.** Bare `rootout` jumped into the app picker with orphans as a pinned row; finishing or cancelling an action ended the session, and esc quit everywhere, which was too easy to hit.
+**Decision.** A home screen lists the four actions (uninstall, orphans, scan, model) plus a flash line with the last outcome; every action returns to it. ctrl+x (and ctrl+c) quit from any screen via `tui.ErrQuit`; esc/q end only the current screen and the caller decides what back means (review to picker, picker/scan/model to home). Subcommands map `ErrQuit` to the same outcome as esc: exit 3 for remove/orphans/config, 0 for scan.
+**Alternatives.** More pinned rows in the picker (does not scale); one mega-model or nested programs (harder to test than one program per screen).
+**Consequences.** `OrphansRow`/`Pick.Orphans` go (next task). `runOrphans`/`runScan` lose their discovery halves to `findOrphans`/`scanReports`. ctrl+x during a model download cancels it and quits. `rootout scan --uninstall <id>` no longer scores the extensions or does `--online` lookups first: it only needs the extension list (that work was never used on that path), so its stderr progress lines are gone.
+**Status.** Accepted
