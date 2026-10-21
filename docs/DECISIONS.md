@@ -234,3 +234,27 @@ Append-only. Newest at the bottom. Never edit an old entry; add a new one that s
 **Alternatives.** Description inline only when the terminal is wide (rejected: it vanishes at 80 columns, where it is most needed); both inline and on the detail line (rejected: same text twice); hiding too-large models behind a count (rejected: you can no longer see what more memory would get you); leaving the list as is.
 **Consequences.** The picker has one more chrome row (`modelsChromeRows` = 5). Row kinds gain `mrSubheading` and `mrColumns` with a `selectable()` method instead of the "text starting with a space is dim" convention. The three widths are duplicated in `cmd/rootout/config.go` because `cmd/` stays wiring-only. On Intel Macs `Recommend` marks every tier above 8 GB as too large regardless of RAM, so the sub-heading's wording is inaccurate there (pre-existing, noted in the handover).
 **Status.** Accepted
+
+## D-030 · 2026-10-22 · Signing and notarization deferred; unsigned binary, cask clears quarantine
+
+**Context.** D-015 planned quill notarization and noted it needs a paid Apple Developer account before M5; D-024 made signing optional and deferred the call to M5 start. Shivang has no Developer ID yet and the only install path in M5 is a private Homebrew tap.
+**Decision.** Ship the bare binary unsigned. The Homebrew cask runs a post-install step, `/usr/bin/xattr -dr com.apple.quarantine` on the staged binary (the GoReleaser-documented hook). Direct downloads document `xattr -d com.apple.quarantine rootout`.
+**Alternatives.** Sign and notarize now via quill (rejected for now: needs a paid account and Apple secrets in CI, blocks the first release); ship without the hook (rejected: Gatekeeper would refuse the binary).
+**Consequences.** Apple may disable quarantine removal in a future macOS; signing via the D-015 quill flow is the fix and becomes its own task. Supersedes the "needs a paid Apple Developer account before M5" consequence of D-015.
+**Status.** Accepted (supersedes the "needs a paid Apple Developer account before M5" consequence in D-015; the quill flow stays the way to sign later)
+
+## D-031 · 2026-10-22 · Private repo and private tap; cask downloads with a GitHub token
+
+**Context.** `shiva2021/rootout` is private, and public use waits for the M6 membership gate (D-024). Homebrew can tap a private repo over git, but a cask downloading from a private GitHub Release needs authentication.
+**Decision.** New private tap `shiva2021/homebrew-rootout`, written by GoReleaser `homebrew_casks` using a fine-grained token stored as the Actions secret `TAP_GITHUB_TOKEN` (Contents read/write on the tap only). The cask uses GoReleaser's documented `GitHubPrivateRepositoryReleaseDownloadStrategy`, which reads `HOMEBREW_GITHUB_API_TOKEN` at download time (Homebrew ≥ 5.1.14 scrubs it during cask evaluation) and fetches the asset through the GitHub API.
+**Alternatives.** Make repo and tap public (rejected: code readable before the gate exists; the research folder still names a personal username); no tap, direct download only (rejected: drops the Homebrew path D-024 asked for).
+**Consequences.** Installing needs git access to the tap and a token with read access to rootout releases. The strategy calls Homebrew's internal `GitHub.get_release`, which may change; fallback is a plain API call in the same class. M6 decides how members get access.
+**Status.** Accepted
+
+## D-032 · 2026-10-22 · Release on every v* tag; notes from CHANGELOG.md; release-check is the test gate
+
+**Context.** D-028 tags every merge to `main` and keeps a curated `CHANGELOG.md`. The repo had no CI. Eight files carry darwin build tags, so tests on Linux exercise the wrong code paths, and macOS runner minutes bill at 10x on a private repo.
+**Decision.** `.github/workflows/release.yml` runs GoReleaser on every `v*` tag on `ubuntu-latest` (cross-compiling, no cgo). Release notes are the matching `CHANGELOG.md` section extracted by `scripts/release_notes.sh`; a missing or empty section fails the release; GoReleaser's own changelog is disabled. `.github/workflows/ci.yml` runs test and lint on `macos-latest` for pushes to `main` and pull requests. The release job does not re-run tests, so `make release-check NEXT=vX.Y.Z` (changelog, test, lint, `goreleaser check`) is the gate before tagging. Every action and tool version is pinned exactly; Go comes from `go.mod`.
+**Alternatives.** Manual workflow dispatch (rejected: one more step per release, D-028 already tags every merge); GoReleaser commit-based changelog (rejected: noisier, duplicates the curated file); tests inside the release job (rejected: wrong build tags on Ubuntu or 10x minutes on macOS).
+**Consequences.** Tags are never moved; a failed release is repaired with a patch tag. A tag pushed without running `release-check` can publish untested code; the runbook says to always run it.
+**Status.** Accepted
