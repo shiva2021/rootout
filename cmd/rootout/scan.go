@@ -113,9 +113,12 @@ func runScan(ctx context.Context, g *globalFlags, f scanFlags) error {
 		w.Printf("no extensions found\n")
 		return nil
 	}
-	reports := heur.ScanAll(ctx, exts, heur.Limits{})
+	rep := stderrProgress(g)
+	reports := heur.ScanAllWith(ctx, exts, heur.Limits{}, rep)
 	if f.online {
+		rep.Start("Checking registries", 0)
 		meta, errs := registry.New().LookupAll(ctx, exts)
+		rep.Done()
 		for i := range reports {
 			if m := meta[reports[i].Ext.ID]; m != nil {
 				reports[i] = heur.Rescore(ctx, reports[i], m)
