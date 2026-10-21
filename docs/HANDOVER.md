@@ -3,13 +3,13 @@
 _Updated: 2026-10-22 · Session: model picker grid (D-029)_
 
 ## Status
-v0.2 complete and pushed to https://github.com/shiva2021/rootout (`main`). Since then: Ollama pull retries, scan progress bar, Ollama format fallback, model uninstall (D-025), Full Disk Access detection (D-026) and the home screen with ctrl+x quit (D-027). The home screen work is merged into `main` (local, not yet pushed); the home loop has been exercised by unit tests plus one pty smoke test (home renders, ctrl+x exits 0) — no action has been run through it in a real terminal yet. Decisions D-019…D-027. `make test`/`make lint` green. Remaining: M2 manual QA on a throwaway account, M5 release pipeline, M6 licensing (own plan).
+Latest release `v0.3.1` (model picker grid, D-029) is on `main`, tagged and pushed to https://github.com/shiva2021/rootout, and installed in `~/.local/bin` (`rootout --version` → `v0.3.1`). Since v0.2: Ollama pull retries, scan progress bar, format fallback, model uninstall (D-025), Full Disk Access detection (D-026), home screen with ctrl+x quit (D-027), semver tags (D-028), model grid (D-029). The home loop and the new picker layout have only been exercised by unit tests and a pty smoke test, not by hand in a real terminal. Decisions D-019…D-029. `make test` (24 packages) and `make lint` green. Remaining: real-terminal checks (Next steps 1–2), M2 manual QA on a throwaway account, M5 release pipeline, M6 licensing (own plan).
 
 ## Done this session (model picker grid, D-029) — tagged v0.3.1
 - Shivang found the "Recommended for this Mac" table cluttered. The picker (`internal/tui/models.go`) and `rootout config models` now share one grid: MODEL · SIZE · FIT · NOTES with a header row; too-large models sit under "Need more memory than this Mac has"; the picker shows the selected model's description on a detail line above the flash line (plain output keeps it as a WHY column).
 - New row kinds `mrSubheading`/`mrColumns` and `modelRowKind.selectable()`; scrolling up keeps the headings above the cursor visible.
 - Tests: `TestModelPickerDetailLine`, `TooLargeGrouped`, `ScrollKeepsHeading`, plus header/grouping checks in `ReadyView`. `make test`/`make lint` green; renders checked at 80 and 60 columns via a throwaway test, and `./bin/rootout config models` on this Mac.
-- Committed and tagged `v0.3.1` (local, not pushed), installed with `make install`. Not yet done: a look in a real terminal (see Next steps 1).
+- Committed (`562fbc2`), tagged `v0.3.1`, pushed with `main`, installed with `make install`. Not yet done: a look in a real terminal (see Next steps 1).
 
 ## Done last session (versioning, D-028)
 - First release tag `v0.3.0` on `main` (annotated), pushed with `main`. Convention: tag every merge (minor = feature, patch = fix/docs) at wrap-up — see `docs/kb/conventions.md` "Releases and versions".
