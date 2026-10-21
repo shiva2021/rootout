@@ -223,12 +223,15 @@ func TestMoveDanglingSymlinkIsNotSkipped(t *testing.T) {
 	}
 }
 
-func TestMoveFailingBatch(t *testing.T) {
+func TestMoveFailingBatchRetriesEachPath(t *testing.T) {
 	m, fr := newMover(t, BackendTrash)
 	paths := mkfiles(t, t.TempDir(), 150)
+	bad := paths[120] // in the second batch
 	fr.fail = func(c call) ([]byte, error) {
-		if len(c.args)-1 == 50 { // second batch
-			return []byte("Error attempting to move x\n"), errors.New("exit status 5")
+		for _, a := range c.args[1:] {
+			if a == bad {
+				return []byte("Error attempting to move " + bad + " ... afpAccessDenied: Insufficient access privileges for operation\n"), errors.New("exit status 5")
+			}
 		}
 		return nil, nil
 	}
@@ -237,19 +240,40 @@ func TestMoveFailingBatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("partial failure must return nil error, got %v", err)
 	}
-	if len(res.Moved) != 100 {
-		t.Errorf("moved = %d, want 100", len(res.Moved))
+	if len(res.Moved) != 149 {
+		t.Errorf("moved = %d, want 149", len(res.Moved))
 	}
-	if len(res.Failed) != 50 {
-		t.Fatalf("failed = %d, want 50", len(res.Failed))
+	if len(res.Failed) != 1 {
+		t.Fatalf("failed = %v, want only %s", res.Failed, bad)
 	}
-	for p, ferr := range res.Failed {
-		if !strings.Contains(ferr.Error(), "Error attempting to move x") {
-			t.Errorf("%s: error lacks command output: %v", p, ferr)
+	ferr := res.Failed[bad]
+	for _, want := range []string{"Error attempting to move", "exit status 5", "Full Disk Access"} {
+		if ferr == nil || !strings.Contains(ferr.Error(), want) {
+			t.Errorf("error lacks %q: %v", want, ferr)
 		}
-		if !strings.Contains(ferr.Error(), "exit status 5") {
-			t.Errorf("%s: error lacks underlying error: %v", p, ferr)
+	}
+	// Two batch calls, then the 50 paths of the failed batch one by one.
+	if got := len(fr.calls); got != 52 {
+		t.Errorf("calls = %d, want 52", got)
+	}
+	single := 0
+	for _, c := range fr.calls {
+		if len(c.args)-1 == 1 {
+			single++
 		}
+	}
+	if single != 50 {
+		t.Errorf("single-path retries = %d, want 50", single)
+	}
+}
+
+func TestMoveNoHintForOtherErrors(t *testing.T) {
+	m, fr := newMover(t, BackendTrash)
+	paths := mkfiles(t, t.TempDir(), 1)
+	fr.fail = func(call) ([]byte, error) { return []byte("disk full"), errors.New("exit status 1") }
+	res, _ := m.Move(context.Background(), paths)
+	if e := res.Failed[paths[0]]; e == nil || strings.Contains(e.Error(), "Full Disk Access") {
+		t.Fatalf("unexpected hint: %v", e)
 	}
 }
 

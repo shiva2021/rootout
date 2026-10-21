@@ -74,12 +74,15 @@ func (m *Mover) Available() string {
 // `osascript -e 'tell application "Finder" to delete {POSIX file "...", ...}'`
 // (50 per call).
 //
-// Failures are per batch. When a batch command fails, each of its paths is
-// re-checked: ones that are already gone count as Moved, the others land in
-// Result.Failed with the command's output in the error. A non-nil error is
-// returned only when the input was invalid (ErrInvalidPath; nothing has run
-// yet) or when every batch failed (ErrAllFailed). Partial failures return a
-// nil error so callers can report per item from Result.Failed.
+// Both backends stop at their first failure, so when a batch command fails
+// its paths are retried one at a time: a single path macOS refuses to move
+// (for example a directory directly under ~/Library/Containers, which needs
+// Full Disk Access) no longer blocks the rest. Paths that are gone after a
+// failure count as Moved; the others land in Result.Failed with the
+// command's output in the error. A non-nil error is returned only when the
+// input was invalid (ErrInvalidPath; nothing has run yet) or when nothing
+// could be moved (ErrAllFailed). Partial failures return a nil error so
+// callers can report per item from Result.Failed.
 func (m *Mover) Move(ctx context.Context, paths []string) (Result, error) {
 	res := Result{Failed: map[string]error{}}
 
@@ -131,22 +134,46 @@ func (m *Mover) Move(ctx context.Context, paths []string) (Result, error) {
 			res.Moved = append(res.Moved, batch...)
 			continue
 		}
-		failed++
 		if firstErr == nil {
 			firstErr = err
 		}
+		movedAny := false
 		for _, p := range batch {
 			if _, lerr := os.Lstat(p); errors.Is(lerr, os.ErrNotExist) {
 				res.Moved = append(res.Moved, p)
+				movedAny = true
 				continue
 			}
-			res.Failed[p] = err
+			perr := err
+			if len(batch) > 1 && ctx.Err() == nil {
+				perr = m.runBatch(ctx, backend, []string{p})
+			}
+			if perr == nil {
+				res.Moved = append(res.Moved, p)
+				movedAny = true
+				continue
+			}
+			res.Failed[p] = withHint(perr)
+		}
+		if !movedAny {
+			failed++
 		}
 	}
 	if failed == batches {
 		return res, fmt.Errorf("%w (%d): %w", ErrAllFailed, batches, firstErr)
 	}
 	return res, nil
+}
+
+// withHint adds the likely remedy to a macOS access-denied error. Directories
+// directly under ~/Library/Containers cannot be moved by the user, Finder or
+// /usr/bin/trash unless the terminal has Full Disk Access.
+func withHint(err error) error {
+	msg := err.Error()
+	if strings.Contains(msg, "afpAccessDenied") || strings.Contains(msg, "permission") {
+		return fmt.Errorf("%w (macOS denied access; grant your terminal Full Disk Access in System Settings › Privacy & Security and retry)", err)
+	}
+	return err
 }
 
 // runBatch runs one backend command for a batch of absolute paths.

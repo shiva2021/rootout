@@ -11,6 +11,10 @@ v0.2 complete and pushed to https://github.com/shiva2021/rootout (`main`). Since
 - `rootout config models rm <model> [--yes]`; first tests in `cmd/rootout` (`config_test.go`, exercises `removeModel` with an httptest Ollama and a temp config).
 - Verified on this Mac: `rm ghost:1b --yes` → not-found error, exit 1; `echo n | rm qwen3.5:4b` → cancelled, exit 3, config untouched. Did not run a real delete (only one model installed).
 
+## Done this session (orphan removal bug)
+- Shivang ran `rootout orphans` for real: 25 paths, 0 removed, every one reported FAILED with the same error about `~/Library/Containers/ru.keepcoder.Telegram`. Cause: `/usr/bin/trash -s` stops at the first failure, so one unmovable path sank the whole batch and `trash.Move` marked all 25 failed. Fix: a failed batch is retried one path at a time (`internal/trash`), so only the truly unmovable path fails. Verified with the real tool: 2 scratch files moved, the protected dir failed alone.
+- Why the Telegram container could not be moved: macOS protects the entries directly under `~/Library/Containers`. Owner/mode/flags are normal, reading and writing *inside* works, but unlink/rename/trash of the entry itself is denied (`afpAccessDenied`, -5000) for the user, for `/usr/bin/trash` and for Finder via osascript. `~/Library/Group Containers` was not probed. The error now carries a hint to grant the terminal Full Disk Access. The `writable()` check (W_OK on the parent) cannot see this, so such paths are classified as user paths.
+
 ## Done earlier (v0.2)
 - Progress: `internal/progress`; hooks in app discovery (4 size workers), leftover search, extension scan, removal; picker loads inside the program.
 - Typed `delete` in the confirm and scan screens and the plain prompt; `--yes` is the only bypass; `scan --uninstall <id> [--yes]`.
@@ -39,6 +43,8 @@ v0.2 complete and pushed to https://github.com/shiva2021/rootout (`main`). Since
 5. M6 membership gate: write a separate plan first. Admin (Shivang) unrestricted via an admin credential; everyone else needs an active Patreon monthly membership (mechanics explored at M6). See D-024.
 
 ## Blockers and open questions
+- **Stray directory left by this session's probe:** `~/Library/Containers/zz.rootout.probe` (empty). Neither `rmdir`, `mv` nor Finder could remove it from this terminal, and the sandbox refused to run the admin prompt. Remove it with Full Disk Access granted to the terminal, or via `osascript -e 'do shell script "/bin/rmdir ~/Library/Containers/zz.rootout.probe" with administrator privileges'`. Whether that elevated command succeeds is also the answer to the next item.
+- **Shivang's request: prompt for the admin password when paths cannot be removed.** Not built yet; it needs a decision. Unverified whether elevation even bypasses the Containers protection (TCC is per responsible app, so plain `sudo` from the same terminal may be refused too; the `osascript … with administrator privileges` route that `priv.Exec` uses runs under a different responsible process and may work). Proposed design if it does: after the Trash pass, offer one admin elevation for the paths that failed with access denied; in Trash mode run `mv -n <path> ~/.Trash/<unique name>` as root (stays recoverable, no Put Back), in Permanent mode `rm -rf`; report them as "removed with admin rights". If it does not work, the only remedy is Full Disk Access for the terminal, and the hint already says so.
 - `docs/research/vscode-extension-audit/` names Shivang's LeetCode username; remove it before the repo ever goes public.
 - Binary is 26 MB stripped (was 9 MB before the AI wiring). The official SDKs (D-013) are a few MB of that; replacing them with plain HTTP would shrink it but reverses D-013. Shivang to decide.
 - `sfltool dumpbtm` blocks without Full Disk Access; login items probe has a 3 s timeout and is otherwise skipped.
