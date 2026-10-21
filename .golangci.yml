@@ -14,6 +14,7 @@ linters:
         text: "G304"
       # Test fixtures create world-readable temp files on purpose, and
       # restore directory modes they changed to simulate denied access.
+      # G204: tests run repo scripts with table-driven arguments.
       - linters: [gosec]
         path: (_test\.go|internal/testutil/)
-        text: "G30[126]"
+        text: "G(30[126]|204)"
