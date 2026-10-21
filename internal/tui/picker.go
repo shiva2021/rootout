@@ -64,11 +64,11 @@ type (
 )
 
 // PickApp shows a full-screen searchable list of apps and returns the one the
-// user chose. ok=false means the user cancelled (esc / q / ctrl+c).
+// user chose. ok=false means the user cancelled (esc / q); ctrl+x / ctrl+c return ErrQuit.
 func PickApp(ctx context.Context, apps []app.App) (chosen app.App, ok bool, err error) {
 	p := NewPicker(apps)
 	if _, err := tea.NewProgram(p, tea.WithContext(ctx)).Run(); err != nil {
-		return app.App{}, false, fmt.Errorf("tui: pick app: %w", err)
+		return app.App{}, false, runErr(err, "pick app")
 	}
 	if p.quitAll {
 		return app.App{}, false, ErrQuit
@@ -79,13 +79,13 @@ func PickApp(ctx context.Context, apps []app.App) (chosen app.App, ok bool, err 
 
 // PickAppLoad starts the picker immediately and runs load inside the program,
 // showing a progress bar until the apps arrive. ok=false means the user
-// cancelled; a load failure is shown on screen and returned once the user
-// leaves.
+// cancelled (ctrl+x and ctrl+c return ErrQuit); a load failure is shown on
+// screen and returned once the user leaves.
 func PickAppLoad(ctx context.Context, load LoadFunc) (app.App, bool, error) {
 	p := NewPickerLoading(load)
 	p.ctx = ctx
 	if _, err := tea.NewProgram(p, tea.WithContext(ctx)).Run(); err != nil {
-		return app.App{}, false, fmt.Errorf("tui: pick app: %w", err)
+		return app.App{}, false, runErr(err, "pick app")
 	}
 	if p.quitAll {
 		return app.App{}, false, ErrQuit

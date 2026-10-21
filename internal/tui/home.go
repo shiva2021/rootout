@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -61,7 +60,7 @@ var homeRows = []homeRow{
 func PickAction(ctx context.Context, flash Flash) (Action, error) {
 	h := NewHome(flash)
 	if _, err := tea.NewProgram(h, tea.WithContext(ctx)).Run(); err != nil {
-		return ActionNone, fmt.Errorf("tui: home: %w", err)
+		return ActionNone, runErr(err, "home")
 	}
 	if h.quitAll {
 		return ActionNone, ErrQuit

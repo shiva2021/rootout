@@ -12,6 +12,7 @@ v0.2 complete and pushed to https://github.com/shiva2021/rootout (`main`). Since
 - Extracted `findOrphans` and `scanReports` from `runOrphans`/`runScan`; added `declinedOnQuit` so ctrl+x and esc give the same exit code (3 for remove/orphans/config, 0 for scan). The scan assessor maps `ErrQuit` too.
 - Removed the picker's orphans row (`OrphansRow`/`Pick.Orphans`). `scan --uninstall <id>` no longer scores or does `--online` lookups first.
 - Help text, README and kb (architecture, conventions) updated. `guide.go` needed no change.
+- Interrupt/SIGTERM quits the home loop (`runErr`, `ActionNone` guard); scan assessments are cancelled when the screen closes.
 
 ## Done last session (Full Disk Access detection, D-026)
 - Shivang granted Warp Full Disk Access and the stray `~/Library/Containers/zz.rootout.probe` could then be removed: FDA for the terminal app is confirmed as the remedy for protected container entries.
@@ -27,7 +28,7 @@ v0.2 complete and pushed to https://github.com/shiva2021/rootout (`main`). Since
 - `rootout config models rm <model> [--yes]`; first tests in `cmd/rootout` (`config_test.go`, exercises `removeModel` with an httptest Ollama and a temp config).
 - Verified on this Mac: `rm ghost:1b --yes` → not-found error, exit 1; `echo n | rm qwen3.5:4b` → cancelled, exit 3, config untouched. Did not run a real delete (only one model installed).
 
-## Done this session (orphan removal bug)
+## Done earlier (orphan removal bug)
 - Shivang ran `rootout orphans` for real: 25 paths, 0 removed, every one reported FAILED with the same error about `~/Library/Containers/ru.keepcoder.Telegram`. Cause: `/usr/bin/trash -s` stops at the first failure, so one unmovable path sank the whole batch and `trash.Move` marked all 25 failed. Fix: a failed batch is retried one path at a time (`internal/trash`), so only the truly unmovable path fails. Verified with the real tool: 2 scratch files moved, the protected dir failed alone.
 - Why the Telegram container could not be moved: macOS protects the entries directly under `~/Library/Containers`. Owner/mode/flags are normal, reading and writing *inside* works, but unlink/rename/trash of the entry itself is denied (`afpAccessDenied`, -5000) for the user, for `/usr/bin/trash` and for Finder via osascript. `~/Library/Group Containers` was not probed. The error now carries a hint to grant the terminal Full Disk Access. The `writable()` check (W_OK on the parent) cannot see this, so such paths are classified as user paths.
 
@@ -41,7 +42,7 @@ v0.2 complete and pushed to https://github.com/shiva2021/rootout (`main`). Since
 
 ## Done earlier
 - Plan (`docs/PLAN.md`), decisions D-001…D-017, knowledge base.
-- Apps: `rootout` (picker → review → remove, loops), `list`, `remove` (Trash/permanent/dry-run, brew zap, one admin elevation, receipts, launchd bootout).
+- Apps: `rootout` (v0.2: picker → review → remove; now the home screen, see above), `list`, `remove` (Trash/permanent/dry-run, brew zap, one admin elevation, receipts, launchd bootout).
 - Extensions: `scan` (5 editors, 4 rule groups, capability/intent scoring, `--online` registry data, review screen with uninstall), golden corpus.
 - AI: Anthropic and OpenAI via official SDKs with structured JSON, Ollama via HTTP (`think:false`); keys in Keychain; `config` command; Ollama picker that detects, installs, starts, recommends by RAM tier and pulls with progress.
 - `doctor`.

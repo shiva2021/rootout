@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/shiva2021/rootout/internal/app"
 	"github.com/shiva2021/rootout/internal/fsx"
@@ -35,19 +36,23 @@ func runTUI(ctx context.Context, g *globalFlags) error {
 		if err != nil {
 			return err
 		}
-		flash, err = runAction(ctx, g, env, a)
+		// Bubbletea turns SIGTERM into a plain quit, which leaves nothing chosen.
+		if a == tui.ActionNone {
+			return nil
+		}
+		flash, err = runAction(ctx, env, a)
 		if errors.Is(err, tui.ErrQuit) {
 			return nil
 		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "rootout:", err)
-			flash = tui.Flash{Text: err.Error(), Err: true}
+			flash = errorFlash(err)
 		}
 	}
 }
 
 // runAction runs one home-screen action and returns what to show on the flash.
-func runAction(ctx context.Context, g *globalFlags, env fsx.Env, a tui.Action) (tui.Flash, error) {
+func runAction(ctx context.Context, env fsx.Env, a tui.Action) (tui.Flash, error) {
 	switch a {
 	case tui.ActionUninstall:
 		return homeUninstall(ctx, env)
@@ -78,7 +83,9 @@ func homeUninstall(ctx context.Context, env fsx.Env) (tui.Flash, error) {
 		}
 		p, err := plan.Build(ctx, env, a, plan.Options{Mode: plan.Trash, CrashReports: true, Run: run.Default, Progress: rep})
 		if err != nil {
-			return tui.Flash{Text: "could not plan " + a.Name + ": " + err.Error(), Err: true}, nil
+			f := errorFlash(err)
+			f.Text = "could not plan " + a.Name + ": " + f.Text
+			return f, nil
 		}
 		ok, err = tui.Confirmer{}.Confirm(ctx, p)
 		if err != nil {
@@ -148,7 +155,7 @@ func homeScan(ctx context.Context, env fsx.Env) (tui.Flash, error) {
 		return tui.Flash{}, err
 	}
 	if isExit(err, exitDeclined) {
-		return tui.Flash{}, nil
+		return tui.Flash{Text: "Scan cancelled: no model chosen"}, nil
 	}
 	if err != nil {
 		return tui.Flash{}, err
@@ -177,42 +184,64 @@ func homeModel(ctx context.Context) (tui.Flash, error) {
 	return tui.Flash{Text: "Default local model: " + m}, nil
 }
 
-// removalFlash summarises a removal for the home screen's flash line.
+// removalFlash summarises a removal for the home screen's flash line. It
+// reports what happened on disk: plan.Execute trashes user-owned paths before
+// the admin step, so a cancelled prompt can still follow real removals.
 func removalFlash(subject string, p *plan.Plan, res *plan.Result, err error) tui.Flash {
-	if errors.Is(err, priv.ErrCancelled) {
-		return tui.Flash{Text: subject + ": admin prompt cancelled", Err: true}
-	}
+	cancelled := errors.Is(err, priv.ErrCancelled)
 	if res == nil {
-		return tui.Flash{}
+		res = &plan.Result{}
 	}
-	removed := make(map[string]bool, len(res.Removed))
-	for _, path := range res.Removed {
-		removed[path] = true
-	}
-	var bytes int64
-	for _, it := range p.Selected() {
-		if removed[it.Path] {
-			bytes += it.SizeBytes
+	var f tui.Flash
+	switch {
+	case len(res.Removed) > 0:
+		removed := make(map[string]bool, len(res.Removed))
+		for _, path := range res.Removed {
+			removed[path] = true
 		}
-	}
-	noun := "items"
-	if len(res.Removed) == 1 {
-		noun = "item"
-	}
-	dest := "→ Trash"
-	if p.Mode == plan.Permanent {
-		dest = "deleted"
-	}
-	f := tui.Flash{Text: fmt.Sprintf("Removed %s · %d %s · %s %s", subject, len(res.Removed), noun, output.Bytes(bytes), dest)}
-	if len(res.Failed) > 0 {
-		f.Text += fmt.Sprintf(" · %d failed", len(res.Failed))
+		var bytes int64
+		for _, it := range p.Selected() {
+			if removed[it.Path] {
+				bytes += it.SizeBytes
+			}
+		}
+		noun := "items"
+		if len(res.Removed) == 1 {
+			noun = "item"
+		}
+		dest := "→ Trash"
+		if p.Mode == plan.Permanent {
+			dest = "deleted"
+		}
+		f.Text = fmt.Sprintf("Removed %s · %d %s · %s %s", subject, len(res.Removed), noun, output.Bytes(bytes), dest)
+		if len(res.Failed) > 0 {
+			f.Text += fmt.Sprintf(" · %d failed", len(res.Failed))
+			f.Err = true
+		}
+	case len(res.Failed) > 0:
+		f.Text = fmt.Sprintf("Nothing removed from %s · %d failed", subject, len(res.Failed))
 		f.Err = true
+	case len(res.Skipped) > 0:
+		f.Text = subject + " was already gone"
+	default:
+		f.Text = "Nothing removed from " + subject
 	}
 	if res.BrewError != "" {
 		f.Text += " · brew failed"
 		f.Err = true
 	}
+	if cancelled {
+		f.Text += " · admin prompt cancelled"
+		f.Err = true
+	}
 	return f
+}
+
+// errorFlash turns an error into a one-line error flash: the first line of
+// its text without the "tui: " prefix.
+func errorFlash(err error) tui.Flash {
+	line, _, _ := strings.Cut(err.Error(), "\n")
+	return tui.Flash{Text: strings.TrimPrefix(line, "tui: "), Err: true}
 }
 
 // scanFlash summarises a scan-screen uninstall for the home screen.

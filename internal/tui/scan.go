@@ -46,12 +46,15 @@ type Assessor struct {
 }
 
 // ReviewScan shows the scan results full screen and returns the extensions
-// the user ticked for removal. ok=false means the user cancelled.
+// the user ticked for removal. ok=false means the user cancelled; ctrl+x and
+// ctrl+c return ErrQuit. Assessments started here stop when the screen closes.
 func ReviewScan(ctx context.Context, reports []heur.Report, a Assessor) (ScanResult, bool, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	v := NewScanView(reports, a)
 	v.ctx = ctx
 	if _, err := tea.NewProgram(v, tea.WithContext(ctx)).Run(); err != nil {
-		return ScanResult{}, false, fmt.Errorf("tui: review scan: %w", err)
+		return ScanResult{}, false, runErr(err, "review scan")
 	}
 	if v.quitAll {
 		return ScanResult{}, false, ErrQuit

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/shiva2021/rootout/internal/leftover"
@@ -119,7 +118,16 @@ func TestRemovalFlash(t *testing.T) {
 			"Removed Spotify · 1 item · 5 MB → Trash · brew failed", true},
 		{"cancelled", plan.Trash,
 			&plan.Result{}, priv.ErrCancelled,
-			"Spotify: admin prompt cancelled", true},
+			"Nothing removed from Spotify · admin prompt cancelled", true},
+		{"cancelled after removals", plan.Trash,
+			&plan.Result{Removed: []string{"/a", "/b"}}, priv.ErrCancelled,
+			"Removed Spotify · 2 items · 7 MB → Trash · admin prompt cancelled", true},
+		{"all failed", plan.Trash,
+			&plan.Result{Failed: map[string]string{"/a": "x", "/b": "x", "/c": "x"}}, nil,
+			"Nothing removed from Spotify · 3 failed", true},
+		{"only skipped", plan.Trash,
+			&plan.Result{Skipped: []string{"/a"}}, nil,
+			"Spotify was already gone", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -127,8 +135,22 @@ func TestRemovalFlash(t *testing.T) {
 			if got.Text != tc.want || got.Err != tc.wantErr {
 				t.Fatalf("got %+v, want {%q %v}", got, tc.want, tc.wantErr)
 			}
-			if tc.mode == plan.Permanent && !strings.Contains(got.Text, "deleted") {
-				t.Fatalf("missing deleted: %q", got.Text)
+		})
+	}
+}
+
+func TestErrorFlash(t *testing.T) {
+	tests := []struct{ name, in, want string }{
+		{"plain", "boom", "boom"},
+		{"multi-line", "first\nsecond", "first"},
+		{"tui prefix", "tui: pick app: boom", "pick app: boom"},
+		{"both", "tui: home: x\ny", "home: x"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := errorFlash(errors.New(tc.in))
+			if got.Text != tc.want || !got.Err {
+				t.Fatalf("got %+v, want {%q true}", got, tc.want)
 			}
 		})
 	}

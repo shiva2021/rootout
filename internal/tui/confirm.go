@@ -46,10 +46,11 @@ type Confirmer struct{}
 var _ plan.Confirmer = Confirmer{}
 
 // Confirm shows the review screen and reports whether the user accepted.
+// ctrl+x and ctrl+c return ErrQuit.
 func (Confirmer) Confirm(ctx context.Context, p *plan.Plan) (bool, error) {
 	c := NewConfirm(p)
 	if _, err := tea.NewProgram(c, tea.WithContext(ctx)).Run(); err != nil {
-		return false, fmt.Errorf("tui: confirm: %w", err)
+		return false, runErr(err, "confirm")
 	}
 	if c.quitAll {
 		return false, ErrQuit

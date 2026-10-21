@@ -35,13 +35,13 @@ type ModelDeps struct {
 }
 
 // PickModel returns the chosen (and, if needed, pulled) model name.
-// ok=false means the user cancelled.
+// ok=false means the user cancelled; ctrl+x and ctrl+c return ErrQuit.
 func PickModel(ctx context.Context, d ModelDeps, current string) (model string, ok bool, err error) {
 	m := NewModelPicker(ctx, d, current)
 	_, err = tea.NewProgram(m, tea.WithContext(ctx)).Run()
 	m.cancelPull()
 	if err != nil {
-		return "", false, fmt.Errorf("tui: pick model: %w", err)
+		return "", false, runErr(err, "pick model")
 	}
 	if m.quitAll {
 		return "", false, ErrQuit
