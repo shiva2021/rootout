@@ -83,9 +83,15 @@ func TestModelPickerReadyView(t *testing.T) {
 		"qwen2.5-coder:7b (current)",
 		"Recommended for this Mac — Apple M1, 16 GB",
 		"qwen3.5:9b", "7.6 GB", "comfortable", "too large", "installed",
+		"MODEL", "SIZE", "FIT", "NOTES", tooLargeHeading, "3.2B · Q4_K_M",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("view missing %q\n%s", want, out)
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "not installed") && strings.Contains(line, "code-specialised") {
+			t.Errorf("blurb still on a row: %q", line)
 		}
 	}
 	if r := m.rows[m.cursor]; r.kind != mrInstalled || m.installed[r.idx].Name != "qwen2.5-coder:7b" {
@@ -493,5 +499,67 @@ func TestModelPickerHelpMentionsUninstall(t *testing.T) {
 	pressM(m, tea.KeyPressMsg{Code: '?', Text: "?"})
 	if !strings.Contains(viewM(m), "uninstall") {
 		t.Fatalf("? overlay lacks uninstall:\n%s", viewM(m))
+	}
+}
+
+func TestModelPickerDetailLine(t *testing.T) {
+	m := newReadyPicker(t, "")
+	cursorTo(t, m, "qwen3.5:9b")
+	if out := viewM(m); !strings.Contains(out, "qwen3.5:9b — best all-round mid-size model") {
+		t.Fatalf("no detail line for a recommended row:\n%s", out)
+	}
+	m = newReadyPicker(t, "") // cursor starts on the first installed row
+	if r := m.rows[m.cursor]; r.kind != mrInstalled || m.installed[r.idx].Name != "llama3.2:3b" {
+		t.Fatalf("cursor not on installed llama3.2:3b: %+v", r)
+	}
+	if out := viewM(m); !strings.Contains(out, "llama3.2:3b — well-tested general model") {
+		t.Fatalf("no detail line for an installed catalogue model:\n%s", out)
+	}
+
+	m = NewModelPicker(context.Background(), ModelDeps{HasBrew: true}, "")
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	m.Update(detectedMsg{err: ollama.ErrNotInstalled})
+	if d := m.detail(); d != "" {
+		t.Fatalf("install routes should have no detail, got %q", d)
+	}
+}
+
+func TestModelPickerTooLargeGrouped(t *testing.T) {
+	m := newReadyPicker(t, "")
+	sub := -1
+	for i, r := range m.rows {
+		if r.kind == mrSubheading && r.text == tooLargeHeading {
+			sub = i
+		}
+	}
+	if sub < 0 {
+		t.Fatal("no too-large sub-heading")
+	}
+	for i, r := range m.rows {
+		if r.kind != mrRecommended {
+			continue
+		}
+		large := m.recs[r.idx].Fit == ollama.FitTooLarge
+		if large != (i > sub) {
+			t.Errorf("row %d (%s, %s) on the wrong side of the sub-heading", i, m.recs[r.idx].Name, m.recs[r.idx].Fit)
+		}
+	}
+}
+
+func TestModelPickerScrollKeepsHeading(t *testing.T) {
+	m := newReadyPicker(t, "")
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 12})
+	for range len(m.rows) {
+		pressM(m, keyDown)
+	}
+	if m.top == 0 {
+		t.Fatal("list did not scroll")
+	}
+	cursorTo(t, m, "qwen3.5:9b") // first 16 GB recommendation, right under the Recommended heading
+	for m.cursor > 0 && m.rows[m.cursor-1].kind != mrHeading {
+		pressM(m, keyUp)
+	}
+	if m.rows[m.top].kind.selectable() {
+		t.Fatalf("top row %d is a data row; heading above it hidden", m.top)
 	}
 }

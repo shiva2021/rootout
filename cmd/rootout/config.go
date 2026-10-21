@@ -370,32 +370,56 @@ func listModels(ctx context.Context, g *globalFlags) error {
 	case derr != nil:
 		return derr
 	default:
-		fmt.Printf("\nOllama %s — installed models:\n", version)
+		fmt.Printf("\nOllama %s — installed models\n", version)
 		if len(installed) == 0 {
 			fmt.Println("  (none)")
+			break
 		}
+		fmt.Println("  " + modelGridRow("MODEL", "SIZE", "FIT") + "NOTES")
 		for _, m := range installed {
-			cur := ""
+			name := m.Name
 			if m.Name == c.LLM.Ollama.Model {
-				cur = "  (current)"
+				name += " (current)"
 			}
 			fit := "fits"
 			if !m.FitsRAM {
-				fit = "too large for this Mac"
+				fit = ollama.FitTooLarge
 			}
-			fmt.Printf("  %-26s %-6s %-8s %8s  %s%s\n", m.Name, m.ParameterSize, m.Quantization, output.Bytes(m.SizeBytes), fit, cur)
+			notes := strings.Trim(m.ParameterSize+" · "+m.Quantization, " ·")
+			fmt.Println("  " + modelGridRow(name, output.Bytes(m.SizeBytes), fit) + notes)
 		}
 	}
-	fmt.Println("\nRecommended for this Mac:")
-	for _, r := range recs {
-		state := r.Fit
+	fmt.Println("\nRecommended for this Mac")
+	fmt.Println("  " + modelGridRow("MODEL", "SIZE", "FIT") + fmt.Sprintf("%-13s  %s", "STATUS", "WHY"))
+	printRec := func(r ollama.Recommendation) {
+		status := "not installed"
 		if r.Installed {
-			state += ", installed"
+			status = "installed"
 		}
-		fmt.Printf("  %-26s %8s  %-11s %s\n", r.Name, output.Bytes(r.DownloadBytes), state, r.Why)
+		fmt.Println("  " + modelGridRow(r.Name, output.Bytes(r.DownloadBytes), r.Fit) + fmt.Sprintf("%-13s  %s", status, r.Why))
+	}
+	var large []ollama.Recommendation
+	for _, r := range recs {
+		if r.Fit == ollama.FitTooLarge {
+			large = append(large, r)
+			continue
+		}
+		printRec(r)
+	}
+	if len(large) > 0 {
+		fmt.Println("  Need more memory than this Mac has")
+		for _, r := range large {
+			printRec(r)
+		}
 	}
 	fmt.Println("\nDownload one with: rootout config pull <model>")
 	return nil
+}
+
+// modelGridRow lays out name, size and fit like the model picker's grid
+// (tui modelNameW, sizeWidth, modelFitW), with the trailing gap.
+func modelGridRow(name, size, fit string) string {
+	return fmt.Sprintf("%-26s  %8s  %-11s  ", output.Truncate(name, 26), size, fit)
 }
 
 func hasBrew() bool {

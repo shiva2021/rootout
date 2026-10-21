@@ -4,6 +4,11 @@ All notable changes to rootout. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-22
+
+### Changed
+- Model picker and `rootout config models` lay models out in one column grid (MODEL · SIZE · FIT · NOTES) with a header row; models too large for this Mac are grouped under "Need more memory than this Mac has"; in the picker the selected model's description sits on its own line above the footer (D-029).
+
 ## [0.3.0] - 2026-10-21
 
 ### Added

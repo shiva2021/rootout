@@ -1,11 +1,17 @@
 # Handover
 
-_Updated: 2026-10-21 · Session: home screen and ctrl+x (D-027)_
+_Updated: 2026-10-22 · Session: model picker grid (D-029)_
 
 ## Status
 v0.2 complete and pushed to https://github.com/shiva2021/rootout (`main`). Since then: Ollama pull retries, scan progress bar, Ollama format fallback, model uninstall (D-025), Full Disk Access detection (D-026) and the home screen with ctrl+x quit (D-027). The home screen work is merged into `main` (local, not yet pushed); the home loop has been exercised by unit tests plus one pty smoke test (home renders, ctrl+x exits 0) — no action has been run through it in a real terminal yet. Decisions D-019…D-027. `make test`/`make lint` green. Remaining: M2 manual QA on a throwaway account, M5 release pipeline, M6 licensing (own plan).
 
-## Done this session (versioning, D-028)
+## Done this session (model picker grid, D-029) — tagged v0.3.1
+- Shivang found the "Recommended for this Mac" table cluttered. The picker (`internal/tui/models.go`) and `rootout config models` now share one grid: MODEL · SIZE · FIT · NOTES with a header row; too-large models sit under "Need more memory than this Mac has"; the picker shows the selected model's description on a detail line above the flash line (plain output keeps it as a WHY column).
+- New row kinds `mrSubheading`/`mrColumns` and `modelRowKind.selectable()`; scrolling up keeps the headings above the cursor visible.
+- Tests: `TestModelPickerDetailLine`, `TooLargeGrouped`, `ScrollKeepsHeading`, plus header/grouping checks in `ReadyView`. `make test`/`make lint` green; renders checked at 80 and 60 columns via a throwaway test, and `./bin/rootout config models` on this Mac.
+- Committed and tagged `v0.3.1` (local, not pushed), installed with `make install`. Not yet done: a look in a real terminal (see Next steps 1).
+
+## Done last session (versioning, D-028)
 - First release tag `v0.3.0` on `main` (annotated), pushed with `main`. Convention: tag every merge (minor = feature, patch = fix/docs) at wrap-up — see `docs/kb/conventions.md` "Releases and versions".
 - Version visible in `rootout --version`, the first `doctor` line (`rootout v0.3.0`, also in `--json`), the home-screen title (`rootout v0.3.0`) and `make install`'s last line. `CHANGELOG.md` added (Keep a Changelog); add to "Unreleased" as features land.
 - Checking you have the latest: `rootout --version` should equal `git describe --tags` on `main`; a `-N-g<hash>` suffix means N commits past the tag, `-dirty` means uncommitted changes.
@@ -58,15 +64,17 @@ v0.2 complete and pushed to https://github.com/shiva2021/rootout (`main`). Since
 - Review screen and app picker verified under a pseudo-terminal (render + quit). Live removal and live LLM calls have not been run.
 
 ## Next steps
-1. Try the home loop in a real terminal: `rootout` → Uninstall → esc back to the picker → esc back to home (empty flash) → Scan → esc → `?` on home → ctrl+x. Check a real removal's flash and that the `report()` lines are visible after quitting. Not run yet — only unit tests.
-2. Verify the denied path for real: System Settings › Privacy & Security › Full Disk Access, switch Warp off, then `./bin/rootout doctor` (expect `!` and the fix line) and `./bin/rootout orphans --dry-run` / `rootout orphans` (expect `! 15 paths need Full Disk Access…` and the `[needs Full Disk Access]` tags). Switch Warp back on afterwards.
-3. Try v0.2 interactively: `rootout` (bar, `?`), `rootout scan` (`m`, then `d` on a model), `rootout orphans` (tick one group, type delete) — removal paths have only run in unit tests plus Esc-at-the-box pty checks. A real model uninstall has not been run yet.
-4. M2 task 7: follow `docs/kb/qa.md` on a throwaway macOS user account (cask, App Store and pkg app). Live removal has only run in unit tests.
-5. Try `rootout scan --llm` with a real key or `rootout config models --pick` with Ollama; only recorded-HTTP tests exist so far.
-6. M5: GoReleaser config, Homebrew tap; notarization optional (D-024). It is a CLI release, not a macOS app release.
-7. M6 membership gate: write a separate plan first. Admin (Shivang) unrestricted via an admin credential; everyone else needs an active Patreon monthly membership (mechanics explored at M6). See D-024.
+1. Look at the new model grid (D-029) in a real terminal: `./bin/rootout` → Choose local AI model, and `./bin/rootout scan` → `m`. Check the inverted cursor bar spans each row, the detail line follows ↑/↓, ↓ onto a too-large row + enter flashes why, and at ~60 columns nothing wraps.
+2. Try the home loop in a real terminal: `rootout` → Uninstall → esc back to the picker → esc back to home (empty flash) → Scan → esc → `?` on home → ctrl+x. Check a real removal's flash and that the `report()` lines are visible after quitting. Not run yet — only unit tests.
+3. Verify the denied path for real: System Settings › Privacy & Security › Full Disk Access, switch Warp off, then `./bin/rootout doctor` (expect `!` and the fix line) and `./bin/rootout orphans --dry-run` / `rootout orphans` (expect `! 15 paths need Full Disk Access…` and the `[needs Full Disk Access]` tags). Switch Warp back on afterwards.
+4. Try v0.2 interactively: `rootout` (bar, `?`), `rootout scan` (`m`, then `d` on a model), `rootout orphans` (tick one group, type delete) — removal paths have only run in unit tests plus Esc-at-the-box pty checks. A real model uninstall has not been run yet.
+5. M2 task 7: follow `docs/kb/qa.md` on a throwaway macOS user account (cask, App Store and pkg app). Live removal has only run in unit tests.
+6. Try `rootout scan --llm` with a real key or `rootout config models --pick` with Ollama; only recorded-HTTP tests exist so far.
+7. M5: GoReleaser config, Homebrew tap; notarization optional (D-024). It is a CLI release, not a macOS app release.
+8. M6 membership gate: write a separate plan first. Admin (Shivang) unrestricted via an admin credential; everyone else needs an active Patreon monthly membership (mechanics explored at M6). See D-024.
 
 ## Blockers and open questions
+- Intel Macs: `ollama.Recommend` caps them at the 8 GB tier, so bigger tiers are marked too large and now sit under "Need more memory than this Mac has", which is wrong for a large-RAM Intel Mac. Pre-existing semantics, not changed by D-029.
 - `Group Containers` is not probed or tagged by D-026; nobody has checked whether its entries carry the same TCC protection as `~/Library/Containers`. Test only with a throwaway entry and the Finder GUI as fallback.
 - `docs/research/vscode-extension-audit/` names Shivang's LeetCode username; remove it before the repo ever goes public.
 - Binary is 26 MB stripped (was 9 MB before the AI wiring). The official SDKs (D-013) are a few MB of that; replacing them with plain HTTP would shrink it but reverses D-013. Shivang to decide.

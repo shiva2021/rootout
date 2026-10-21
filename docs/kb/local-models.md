@@ -37,6 +37,7 @@ Considered and left out: `llama3.1:8b` (older, superseded by qwen3/qwen3.5 for J
 
 ## Uninstalling a model
 - Picker: `d` on an installed row (either section) asks `Uninstall <name> (<size>)? y/n`, deletes with a spinner, re-lists, and flashes the result. Recommended rows show `installed` / `not installed`.
+- Layout (D-029): one grid for both sections (MODEL 26 · SIZE 8 · FIT 11 · NOTES; widths are `modelNameW`/`sizeWidth`/`modelFitW` in `internal/tui`, duplicated in `cmd/rootout/config.go`). Installed NOTES = params · quantisation; recommended NOTES = install status. Too-large recommendations follow a dim "Need more memory than this Mac has" sub-heading and stay selectable. The picker shows the cursor model's `Why` on a detail line above the flash line; `config models` prints it as a WHY column instead.
 - CLI: `rootout config models rm <model> [--yes]`.
 - If the model was the configured default, the setting is cleared (`ModelDeps.ClearDefault` in the picker, `removeModel` in the CLI) so scans do not ask for a model that is gone. Decision D-025.
 

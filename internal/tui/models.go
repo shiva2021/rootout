@@ -19,8 +19,14 @@ const (
 	modelsPullHelp    = "esc cancel download · ctrl+x quit · ? help"
 	modelsInstallHelp = "↑/↓ move · enter run · esc back · ctrl+x quit · ? help"
 	modelsStartHelp   = "enter start Ollama · esc back · ctrl+x quit · ? help"
-	modelsChromeRows  = 4 // title row, blank row, flash row, help row
+	modelsChromeRows  = 5 // title row, blank row, detail row, flash row, help row
 	pullBarWidth      = 40
+
+	// Column widths of the model grid; cmd/rootout/config.go prints the same.
+	modelNameW = 26 // fits "qwen2.5-coder:7b (current)"
+	modelFitW  = 11 // "comfortable"
+
+	tooLargeHeading = "Need more memory than this Mac has"
 )
 
 // ModelDeps are the model picker's dependencies, injectable for tests.
@@ -101,11 +107,18 @@ type (
 type modelRowKind int
 
 const (
-	mrHeading modelRowKind = iota
+	mrHeading    modelRowKind = iota // bold section title
+	mrSubheading                     // dim note or blank separator
+	mrColumns                        // the grid's column titles
 	mrInstalled
 	mrRecommended
 	mrRoute
 )
+
+// selectable reports whether the cursor can rest on rows of this kind.
+func (k modelRowKind) selectable() bool {
+	return k == mrInstalled || k == mrRecommended || k == mrRoute
+}
 
 type modelRow struct {
 	kind modelRowKind
@@ -579,7 +592,7 @@ func (m *ModelPicker) setState(s modelState) {
 	m.rows = m.buildRows()
 	m.cursor, m.top = -1, 0
 	for i, r := range m.rows {
-		if r.kind == mrHeading {
+		if !r.kind.selectable() {
 			continue
 		}
 		if m.cursor < 0 {
@@ -605,17 +618,28 @@ func (m *ModelPicker) buildRows() []modelRow {
 			rows = append(rows, modelRow{kind: mrRoute, idx: i})
 		}
 	case stateReady:
-		rows = append(rows, modelRow{kind: mrHeading, text: "Installed"})
+		rows = append(rows, modelRow{kind: mrColumns}, modelRow{kind: mrHeading, text: "Installed"})
 		for i := range m.installed {
 			rows = append(rows, modelRow{kind: mrInstalled, idx: i})
 		}
 		if len(m.installed) == 0 {
-			rows = append(rows, modelRow{kind: mrHeading, text: "  none yet"})
+			rows = append(rows, modelRow{kind: mrSubheading, text: "none yet"})
 		}
 		hw := m.deps.Hardware
-		rows = append(rows, modelRow{kind: mrHeading, text: fmt.Sprintf("Recommended for this Mac — %s, %d GB", orDash(hw.Chip), hw.RAMBytes>>30)})
-		for i := range m.recs {
-			rows = append(rows, modelRow{kind: mrRecommended, idx: i})
+		rows = append(rows, modelRow{kind: mrSubheading},
+			modelRow{kind: mrHeading, text: fmt.Sprintf("Recommended for this Mac — %s, %d GB", orDash(hw.Chip), hw.RAMBytes>>30)})
+		var large []modelRow
+		for i, rec := range m.recs {
+			r := modelRow{kind: mrRecommended, idx: i}
+			if rec.Fit == ollama.FitTooLarge {
+				large = append(large, r)
+				continue
+			}
+			rows = append(rows, r)
+		}
+		if len(large) > 0 {
+			rows = append(rows, modelRow{kind: mrSubheading, text: tooLargeHeading})
+			rows = append(rows, large...)
 		}
 	}
 	return rows
@@ -632,7 +656,7 @@ func (m *ModelPicker) move(delta int) {
 	}
 	for ; delta > 0; delta-- {
 		j := m.cursor + step
-		for j >= 0 && j < len(m.rows) && m.rows[j].kind == mrHeading {
+		for j >= 0 && j < len(m.rows) && !m.rows[j].kind.selectable() {
 			j += step
 		}
 		if j < 0 || j >= len(m.rows) {
@@ -643,8 +667,8 @@ func (m *ModelPicker) move(delta int) {
 	m.scroll()
 }
 
-// scroll adjusts top so the cursor row is visible, showing a heading right
-// above the first selectable row.
+// scroll adjusts top so the cursor row is visible, showing the headings
+// right above it when scrolling up.
 func (m *ModelPicker) scroll() {
 	rows := m.listRows()
 	if m.cursor < 0 {
@@ -653,7 +677,7 @@ func (m *ModelPicker) scroll() {
 	}
 	if m.cursor < m.top {
 		m.top = m.cursor
-		if m.top > 0 && m.rows[m.top-1].kind == mrHeading {
+		for m.top > 0 && !m.rows[m.top-1].kind.selectable() {
 			m.top--
 		}
 	}
@@ -723,6 +747,8 @@ func (m *ModelPicker) render() string {
 	b.WriteString("\n\n")
 	b.WriteString(strings.Join(body[:rows], "\n"))
 	b.WriteString("\n")
+	b.WriteString(m.renderDetail())
+	b.WriteString("\n")
 	switch {
 	case m.ask != "":
 		b.WriteString(s.flash.Render(m.ask))
@@ -770,13 +796,53 @@ func (m *ModelPicker) renderRows(n int) []string {
 	return out
 }
 
+// detail is "<name> — <why>" for the cursor row when it is a catalogue
+// model (recommended, or installed and in the catalogue); "" otherwise.
+func (m *ModelPicker) detail() string {
+	if m.state != stateReady || m.cursor < 0 {
+		return ""
+	}
+	r := m.rows[m.cursor]
+	switch r.kind {
+	case mrRecommended:
+		rec := m.recs[r.idx]
+		return rec.Name + " — " + rec.Why
+	case mrInstalled:
+		name := strings.TrimSuffix(m.installed[r.idx].Name, ":latest")
+		for _, rec := range m.recs {
+			if strings.TrimSuffix(rec.Name, ":latest") == name {
+				return rec.Name + " — " + rec.Why
+			}
+		}
+	}
+	return ""
+}
+
+// renderDetail draws detail() with the name plain and the blurb dim,
+// truncated to the screen width.
+func (m *ModelPicker) renderDetail() string {
+	d := output.Truncate(m.detail(), m.width)
+	name, why, ok := strings.Cut(d, " — ")
+	if !ok {
+		return d
+	}
+	return name + m.styles.dim.Render(" — "+why)
+}
+
+// gridRow formats one line of the model grid after the two-cell marker.
+func gridRow(name, size, fit string) string {
+	return fmt.Sprintf("%-*s  %*s  %-*s  ", modelNameW, output.Truncate(name, modelNameW), sizeWidth, size, modelFitW, fit)
+}
+
 func (m *ModelPicker) renderRow(i int) string {
 	r, s := m.rows[i], m.styles
-	if r.kind == mrHeading {
-		if strings.HasPrefix(r.text, " ") {
-			return s.dim.Render(r.text)
-		}
+	switch r.kind {
+	case mrHeading:
 		return s.heading.Render(r.text)
+	case mrSubheading:
+		return s.dim.Render("  " + r.text)
+	case mrColumns:
+		return s.dim.Render("  " + gridRow("MODEL", "SIZE", "FIT") + "NOTES")
 	}
 	selected := i == m.cursor
 	base, dim := lipgloss.NewStyle(), s.dim
@@ -804,33 +870,47 @@ func (m *ModelPicker) renderRow(i int) string {
 		if m.isCurrent(in.Name) {
 			name += " (current)"
 		}
-		b.WriteString(base.Render(fmt.Sprintf("%-28s ", output.Truncate(name, 28))))
-		b.WriteString(dim.Render(fmt.Sprintf("%-6s %-8s %*s ", in.ParameterSize, in.Quantization, sizeWidth, output.Bytes(in.SizeBytes))))
-		if in.FitsRAM {
-			b.WriteString(s.comfortable.Inherit(base).Render("fits"))
-		} else {
-			b.WriteString(s.tooLarge.Inherit(base).Render("too large"))
+		fit, fitStyle := "fits", s.comfortable
+		if !in.FitsRAM {
+			fit, fitStyle = "too large", s.tooLarge
 		}
+		b.WriteString(base.Render(fmt.Sprintf("%-*s  ", modelNameW, output.Truncate(name, modelNameW))))
+		b.WriteString(dim.Render(fmt.Sprintf("%*s  ", sizeWidth, output.Bytes(in.SizeBytes))))
+		b.WriteString(fitStyle.Inherit(base).Render(fmt.Sprintf("%-*s", modelFitW, fit)))
+		b.WriteString(base.Render("  ") + dim.Render(m.notesCell(installedNotes(in), b.String())))
 	case mrRecommended:
 		rec := m.recs[r.idx]
 		nameStyle := base
 		if rec.Fit == ollama.FitTooLarge {
 			nameStyle = dim
 		}
-		b.WriteString(nameStyle.Render(fmt.Sprintf("%-20s ", output.Truncate(rec.Name, 20))))
-		b.WriteString(dim.Render(fmt.Sprintf("%*s ", sizeWidth, output.Bytes(rec.DownloadBytes))))
-		b.WriteString(m.fitStyle(rec.Fit).Inherit(base).Render(fmt.Sprintf("%-11s", rec.Fit)))
+		b.WriteString(nameStyle.Render(fmt.Sprintf("%-*s  ", modelNameW, output.Truncate(rec.Name, modelNameW))))
+		b.WriteString(dim.Render(fmt.Sprintf("%*s  ", sizeWidth, output.Bytes(rec.DownloadBytes))))
+		b.WriteString(m.fitStyle(rec.Fit).Inherit(base).Render(fmt.Sprintf("%-*s", modelFitW, rec.Fit)))
+		status, statusStyle := "not installed", s.notInstalled
 		if rec.Installed {
-			b.WriteString(base.Render(" ") + s.installed.Inherit(base).Render(fmt.Sprintf("%-13s", "installed")))
-		} else {
-			b.WriteString(base.Render(" ") + s.notInstalled.Inherit(base).Render("not installed"))
+			status, statusStyle = "installed", s.installed
 		}
-		used := lipgloss.Width(b.String())
-		if room := m.width - used - 1; room > 8 {
-			b.WriteString(base.Render(" ") + dim.Render(output.Truncate(rec.Why, room)))
-		}
+		b.WriteString(base.Render("  ") + statusStyle.Inherit(base).Render(m.notesCell(status, b.String())))
 	}
 	return padWith(b.String(), m.width, base)
+}
+
+// notesCell truncates the NOTES text to what is left of the row after
+// the cells already in row and the two-space gap.
+func (m *ModelPicker) notesCell(text, row string) string {
+	return output.Truncate(text, max(m.width-lipgloss.Width(row)-2, 2))
+}
+
+// installedNotes is the NOTES cell of an installed row: "3.2B · Q4_K_M".
+func installedNotes(in ollama.Installed) string {
+	var parts []string
+	for _, p := range []string{in.ParameterSize, in.Quantization} {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	return strings.Join(parts, " · ")
 }
 
 func (m *ModelPicker) fitStyle(fit string) lipgloss.Style {
