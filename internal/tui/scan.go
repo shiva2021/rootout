@@ -53,6 +53,9 @@ func ReviewScan(ctx context.Context, reports []heur.Report, a Assessor) (ScanRes
 	if _, err := tea.NewProgram(v, tea.WithContext(ctx)).Run(); err != nil {
 		return ScanResult{}, false, fmt.Errorf("tui: review scan: %w", err)
 	}
+	if v.quitAll {
+		return ScanResult{}, false, ErrQuit
+	}
 	res, ok := v.Result()
 	return res, ok, nil
 }
@@ -136,6 +139,7 @@ type ScanView struct {
 	picker        *ModelPicker  // embedded model picker; nil when closed
 	help          bool          // ? overlay open
 	accepted      bool
+	quitAll       bool // ctrl+x / ctrl+c: leave rootout, not just this screen
 }
 
 // NewScanView builds the screen with every report listed and the cursor on
@@ -224,8 +228,9 @@ func (v *ScanView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return v, tea.Batch(cmds...)
 
 	case tea.KeyPressMsg:
-		if msg.String() == "ctrl+c" {
+		if isQuitKey(msg.String()) {
 			v.closePicker()
+			v.quitAll = true
 			v.accepted = false
 			return v, tea.Quit
 		}
@@ -506,7 +511,7 @@ func (v *ScanView) footerHelp() string {
 	if v.assessor.Models != nil {
 		parts = append(parts, "m model")
 	}
-	parts = append(parts, "enter uninstall", "esc quit", "? help")
+	parts = append(parts, "enter uninstall", "esc back", "ctrl+x quit", "? help")
 	return strings.Join(parts, " · ")
 }
 
@@ -520,7 +525,8 @@ func (v *ScanView) helpKeys() []keyHelp {
 		{"l", "ask the configured AI about the selected extension"},
 		{"m", "pick a local Ollama model"},
 		{"enter", "uninstall the ticked extensions (asks you to type " + plan.ConfirmWord + ")"},
-		{"esc", "quit without changes"},
+		{"esc", "back without changes"},
+		{"ctrl+x", "quit rootout"},
 		{"?", "this help"},
 	}
 }

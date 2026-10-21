@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	confirmHelp       = "space toggle · a all · n none · enter confirm · esc cancel · ? help"
+	confirmHelp       = "space toggle · a all · n none · enter confirm · esc cancel · ctrl+x quit · ? help"
 	nothingFlash      = "nothing selected"
 	tickHint          = "space to tick what to remove"
 	recentTag         = "[recent]"
@@ -35,6 +35,7 @@ var confirmKeys = []keyHelp{
 	{"pgup/pgdn", "page"},
 	{"enter", "continue (asks you to type delete)"},
 	{"esc", "cancel"},
+	{"ctrl+x", "quit rootout"},
 	{"?", "this help"},
 }
 
@@ -49,6 +50,9 @@ func (Confirmer) Confirm(ctx context.Context, p *plan.Plan) (bool, error) {
 	c := NewConfirm(p)
 	if _, err := tea.NewProgram(c, tea.WithContext(ctx)).Run(); err != nil {
 		return false, fmt.Errorf("tui: confirm: %w", err)
+	}
+	if c.quitAll {
+		return false, ErrQuit
 	}
 	return c.Accepted(), nil
 }
@@ -108,6 +112,7 @@ type Confirm struct {
 	cursor, top   int // cursor indexes rows and is always a toggleable row (-1 when none)
 	flash         string
 	showHelp      bool
+	quitAll       bool // ctrl+x / ctrl+c: leave rootout, not just this screen
 	typing        bool // the typed-word box is open
 	typed         typedConfirm
 	accepted      bool
@@ -189,13 +194,14 @@ func (c *Confirm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return c, nil
 
 	case tea.KeyPressMsg:
+		if isQuitKey(msg.String()) {
+			c.quitAll = true
+			c.accepted = false
+			return c, tea.Quit
+		}
 		if c.showHelp {
 			c.showHelp = false
 			return c, nil
-		}
-		if msg.String() == "ctrl+c" {
-			c.accepted = false
-			return c, tea.Quit
 		}
 		if c.typing {
 			return c.updateTyped(msg)

@@ -178,14 +178,30 @@ func TestQuitKeys(t *testing.T) {
 		if _, ok := p.Selected(); ok {
 			t.Error("esc must not select")
 		}
+		if p.quitAll {
+			t.Error("esc must only back out, not quit rootout")
+		}
 	})
 	t.Run("ctrl+c", func(t *testing.T) {
 		p := newTestPicker(t)
 		assertQuit(t, press(p, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}))
+		if !p.quitAll {
+			t.Error("ctrl+c should set quitAll")
+		}
+	})
+	t.Run("ctrl+x", func(t *testing.T) {
+		p := newTestPicker(t)
+		assertQuit(t, press(p, tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl}))
+		if !p.quitAll {
+			t.Error("ctrl+x should set quitAll")
+		}
 	})
 	t.Run("q with empty search quits", func(t *testing.T) {
 		p := newTestPicker(t)
 		assertQuit(t, press(p, tea.KeyPressMsg{Code: 'q', Text: "q"}))
+		if p.quitAll {
+			t.Error("q must only back out, not quit rootout")
+		}
 	})
 	t.Run("q with text is a character", func(t *testing.T) {
 		p := newTestPicker(t)
@@ -342,6 +358,16 @@ func TestLoadErrorShowsAndEscQuits(t *testing.T) {
 		t.Error("enter after a load error must do nothing")
 	}
 	assertQuit(t, press(p, tea.KeyPressMsg{Code: tea.KeyEscape}))
+	if p.quitAll {
+		t.Error("esc on the load-error screen must not set quitAll")
+	}
+
+	q := newLoadingPicker(t, PickOptions{OrphansRow: true})
+	q.Update(loadedMsg{id: 1, err: errors.New("mdfind exploded")})
+	assertQuit(t, press(q, tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl}))
+	if !q.quitAll {
+		t.Error("ctrl+x on the load-error screen should set quitAll")
+	}
 }
 
 // TestLoadBridge drives the real goroutine + channel path from startLoad.
@@ -437,13 +463,20 @@ func TestPickerHelpOverlay(t *testing.T) {
 	}
 	press(p, tea.KeyPressMsg{Code: '?', Text: "?"})
 	v := view(p)
-	for _, want := range []string{"Keys", "pgup/pgdn", "filter the list", helpClose} {
+	for _, want := range []string{"Keys", "pgup/pgdn", "filter the list", "ctrl+x", helpClose} {
 		if !strings.Contains(v, want) {
 			t.Fatalf("help overlay missing %q:\n%s", want, v)
 		}
 	}
 	if strings.Contains(v, searchPrompt) {
 		t.Errorf("overlay should cover the screen:\n%s", v)
+	}
+	// ctrl+x quits even with the overlay open.
+	q := newTestPicker(t)
+	press(q, tea.KeyPressMsg{Code: '?', Text: "?"})
+	assertQuit(t, press(q, tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl}))
+	if !q.quitAll {
+		t.Error("ctrl+x with the overlay open should set quitAll")
 	}
 	// Any key closes the overlay and is consumed.
 	cmd := press(p, tea.KeyPressMsg{Code: 'x', Text: "x"})

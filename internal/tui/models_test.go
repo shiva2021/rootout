@@ -166,6 +166,51 @@ func TestModelPickerPullErrorAndCancel(t *testing.T) {
 	}
 }
 
+func TestModelPickerCtrlXQuitsAll(t *testing.T) {
+	ctrlX := tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl}
+	t.Run("ready", func(t *testing.T) {
+		m := newReadyPicker(t, "")
+		assertQuit(t, pressM(m, ctrlX))
+		if _, ok := m.Chosen(); ok || !m.quitAll {
+			t.Errorf("ok=%v quitAll=%v, want false/true", ok, m.quitAll)
+		}
+	})
+	t.Run("question pending", func(t *testing.T) {
+		m := newReadyPicker(t, "")
+		cursorTo(t, m, "qwen3.5:9b")
+		pressM(m, keyEnter)
+		if m.ask == "" {
+			t.Fatal("no question pending")
+		}
+		assertQuit(t, pressM(m, ctrlX))
+		if !m.quitAll {
+			t.Error("quitAll not set")
+		}
+	})
+	t.Run("during a pull", func(t *testing.T) {
+		m := newReadyPicker(t, "")
+		cursorTo(t, m, "qwen3.5:9b")
+		pressM(m, keyEnter, tea.KeyPressMsg{Code: 'y', Text: "y"})
+		if m.pullCancel == nil {
+			t.Fatal("pull not started")
+		}
+		assertQuit(t, pressM(m, ctrlX))
+		if m.pullCancel != nil || !m.quitAll {
+			t.Errorf("pullCancel set=%v quitAll=%v, want cleared/true", m.pullCancel != nil, m.quitAll)
+		}
+	})
+	t.Run("embedded", func(t *testing.T) {
+		m := newReadyPicker(t, "")
+		m.setEmbedded(true)
+		if cmd := pressM(m, ctrlX); cmd != nil {
+			t.Fatal("embedded picker must not quit the program")
+		}
+		if _, _, finished := m.done(); !finished || !m.quitAll {
+			t.Errorf("finished=%v quitAll=%v, want true/true", finished, m.quitAll)
+		}
+	})
+}
+
 func TestModelPickerNotInstalled(t *testing.T) {
 	var ran bool
 	d := ModelDeps{HasBrew: true, RunInstall: func(context.Context) error { ran = true; return nil }}
@@ -275,7 +320,7 @@ func TestModelPickerHelpOverlay(t *testing.T) {
 	}
 	pressM(m, tea.KeyPressMsg{Code: '?', Text: "?"})
 	out := viewM(m)
-	for _, want := range []string{helpClose, "choose the model", "y / n", "quit without choosing"} {
+	for _, want := range []string{helpClose, "choose the model", "y / n", "back without choosing", "ctrl+x"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("help missing %q:\n%s", want, out)
 		}

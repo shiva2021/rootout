@@ -201,18 +201,38 @@ func TestConfirmBrewOnlyAccepts(t *testing.T) {
 }
 
 func TestConfirmCancel(t *testing.T) {
-	for name, key := range map[string]tea.KeyPressMsg{
-		"esc":    keyEsc,
-		"q":      {Code: 'q', Text: "q"},
-		"ctrl+c": {Code: 'c', Mod: tea.ModCtrl},
+	for name, tc := range map[string]struct {
+		key     tea.KeyPressMsg
+		quitAll bool
+	}{
+		"esc":    {keyEsc, false},
+		"q":      {tea.KeyPressMsg{Code: 'q', Text: "q"}, false},
+		"ctrl+c": {tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}, true},
+		"ctrl+x": {tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl}, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			c, _ := newTestConfirm(t)
-			assertQuit(t, pressC(c, key))
+			assertQuit(t, pressC(c, tc.key))
 			if c.Accepted() {
 				t.Error("Accepted() should be false after cancel")
 			}
+			if c.quitAll != tc.quitAll {
+				t.Errorf("quitAll = %v, want %v", c.quitAll, tc.quitAll)
+			}
 		})
+	}
+}
+
+func TestConfirmCtrlXFromTypedQuitsAll(t *testing.T) {
+	c, _ := newTestConfirm(t)
+	pressC(c, keyEnter)
+	if !c.typing {
+		t.Fatal("enter should open the typed box")
+	}
+	pressC(c, tea.KeyPressMsg{Code: 'd', Text: "d"}, tea.KeyPressMsg{Code: 'e', Text: "e"})
+	assertQuit(t, pressC(c, tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl}))
+	if !c.quitAll || c.Accepted() {
+		t.Errorf("quitAll=%v accepted=%v, want true/false", c.quitAll, c.Accepted())
 	}
 }
 
@@ -474,7 +494,7 @@ func TestConfirmHelpOverlay(t *testing.T) {
 	}
 	pressC(c, tea.KeyPressMsg{Code: '?', Text: "?"})
 	v := viewC(c)
-	for _, want := range []string{"Keys", "space", "pgup/pgdn", "type delete", helpClose} {
+	for _, want := range []string{"Keys", "space", "pgup/pgdn", "type delete", "ctrl+x", helpClose} {
 		if !strings.Contains(v, want) {
 			t.Fatalf("help overlay missing %q:\n%s", want, v)
 		}

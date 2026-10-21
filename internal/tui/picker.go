@@ -20,7 +20,7 @@ import (
 
 const (
 	searchPrompt   = "Search apps › "
-	helpText       = "↑/↓ move · enter select · esc quit"
+	helpText       = "↑/↓ move · enter select · esc back · ctrl+x quit"
 	helpHint       = " · ? help"
 	protectedFlash = "system apps cannot be removed"
 	systemSuffix   = " (system)"
@@ -40,7 +40,8 @@ var pickerKeys = []keyHelp{
 	{"↑/↓", "move"},
 	{"pgup/pgdn", "page"},
 	{"enter", "select"},
-	{"esc", "quit"},
+	{"esc", "back to the home screen"},
+	{"ctrl+x", "quit rootout"},
 	{"?", "this help (when the search is empty)"},
 }
 
@@ -82,6 +83,9 @@ func PickApp(ctx context.Context, apps []app.App) (chosen app.App, ok bool, err 
 	if _, err := tea.NewProgram(p, tea.WithContext(ctx)).Run(); err != nil {
 		return app.App{}, false, fmt.Errorf("tui: pick app: %w", err)
 	}
+	if p.quitAll {
+		return app.App{}, false, ErrQuit
+	}
 	chosen, ok = p.Selected()
 	return chosen, ok, nil
 }
@@ -95,6 +99,9 @@ func PickAppLoad(ctx context.Context, load LoadFunc, opts PickOptions) (Pick, bo
 	p.ctx = ctx
 	if _, err := tea.NewProgram(p, tea.WithContext(ctx)).Run(); err != nil {
 		return Pick{}, false, fmt.Errorf("tui: pick app: %w", err)
+	}
+	if p.quitAll {
+		return Pick{}, false, ErrQuit
 	}
 	if p.loadErr != nil {
 		return Pick{}, false, fmt.Errorf("tui: pick app: %w", p.loadErr)
@@ -129,6 +136,7 @@ type Picker struct {
 	cursor, top   int // cursor indexes list rows (orphans row first, then matches); top is the first visible row
 	flash         string
 	showHelp      bool
+	quitAll       bool // ctrl+x / ctrl+c: leave rootout, not just this screen
 	picked        Pick
 	ok            bool
 }
@@ -237,6 +245,10 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return p, nil
 
 	case tea.KeyPressMsg:
+		if isQuitKey(msg.String()) {
+			p.quitAll = true
+			return p, p.quit()
+		}
 		if p.showHelp {
 			p.showHelp = false
 			return p, nil
@@ -247,7 +259,7 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			k = "?"
 		}
 		switch k {
-		case "ctrl+c", "esc":
+		case "esc":
 			return p, p.quit()
 		case "q":
 			if p.input.Value() == "" {

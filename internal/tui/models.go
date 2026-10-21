@@ -15,10 +15,10 @@ import (
 )
 
 const (
-	modelsHelp        = "↑/↓ move · enter choose · d uninstall · esc quit · ? help"
-	modelsPullHelp    = "esc cancel download · ? help"
-	modelsInstallHelp = "↑/↓ move · enter run · esc quit · ? help"
-	modelsStartHelp   = "enter start Ollama · esc quit · ? help"
+	modelsHelp        = "↑/↓ move · enter choose · d uninstall · esc back · ctrl+x quit · ? help"
+	modelsPullHelp    = "esc cancel download · ctrl+x quit · ? help"
+	modelsInstallHelp = "↑/↓ move · enter run · esc back · ctrl+x quit · ? help"
+	modelsStartHelp   = "enter start Ollama · esc back · ctrl+x quit · ? help"
 	modelsChromeRows  = 4 // title row, blank row, flash row, help row
 	pullBarWidth      = 40
 )
@@ -42,6 +42,9 @@ func PickModel(ctx context.Context, d ModelDeps, current string) (model string, 
 	m.cancelPull()
 	if err != nil {
 		return "", false, fmt.Errorf("tui: pick model: %w", err)
+	}
+	if m.quitAll {
+		return "", false, ErrQuit
 	}
 	model, ok = m.Chosen()
 	return model, ok, nil
@@ -167,6 +170,7 @@ type ModelPicker struct {
 	pullWait   tea.Cmd // reads the next pull message
 	chosen     string
 	ok         bool
+	quitAll    bool   // ctrl+x / ctrl+c: leave rootout, not just this screen
 	deleting   string // model being uninstalled
 
 	help     bool // ? overlay open
@@ -330,7 +334,9 @@ func (m *ModelPicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *ModelPicker) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
 	m.flash = ""
-	if k == "ctrl+c" {
+	if isQuitKey(k) {
+		m.cancelPull()
+		m.quitAll = true
 		m.ok = false
 		return m, m.quit()
 	}
@@ -749,8 +755,9 @@ func (m *ModelPicker) helpKeys() []keyHelp {
 		keys = append(keys, keyHelp{"y / n", "answer a run, download or uninstall question"})
 	}
 	if m.state != statePulling {
-		keys = append(keys, keyHelp{"esc", "quit without choosing"})
+		keys = append(keys, keyHelp{"esc", "back without choosing"})
 	}
+	keys = append(keys, keyHelp{"ctrl+x", "quit rootout"})
 	return append(keys, keyHelp{"?", "this help"})
 }
 

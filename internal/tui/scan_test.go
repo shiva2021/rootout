@@ -380,6 +380,37 @@ func TestScanViewPickModelCancel(t *testing.T) {
 	}
 }
 
+func TestScanViewCtrlXQuitsAll(t *testing.T) {
+	ctrlX := tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl}
+	for name, setup := range map[string]func(t *testing.T, v *ScanView){
+		"list": func(t *testing.T, v *ScanView) {},
+		"typed box": func(t *testing.T, v *ScanView) {
+			pressS(v, keyEnter)
+			if v.confirm == nil {
+				t.Fatal("typed box not open")
+			}
+		},
+		"embedded picker": func(t *testing.T, v *ScanView) { openEmbeddedPicker(t, v) },
+		"help overlay": func(t *testing.T, v *ScanView) {
+			pressS(v, runeKey('?'))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			a := Assessor{Models: &ModelDeps{Client: ollamaServer(t), Hardware: testHW}}
+			v := newTestScan(t, a)
+			pressS(v, keySpace) // tick one so enter opens the typed box
+			setup(t, v)
+			assertQuit(t, pressS(v, ctrlX))
+			if v.picker != nil || !v.quitAll {
+				t.Errorf("picker=%v quitAll=%v, want nil/true", v.picker, v.quitAll)
+			}
+			if _, ok := v.Result(); ok {
+				t.Error("ctrl+x must not accept the scan")
+			}
+		})
+	}
+}
+
 func TestScanViewHelpOverlay(t *testing.T) {
 	v := newTestScan(t, Assessor{})
 	if !strings.Contains(viewS(v), "? help") {
@@ -387,7 +418,7 @@ func TestScanViewHelpOverlay(t *testing.T) {
 	}
 	pressS(v, runeKey('?'))
 	out := viewS(v)
-	for _, want := range []string{helpClose, "tick / untick", "pick a local Ollama model", "type delete"} {
+	for _, want := range []string{helpClose, "tick / untick", "pick a local Ollama model", "type delete", "quit rootout"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("help missing %q:\n%s", want, out)
 		}
