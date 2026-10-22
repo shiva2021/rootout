@@ -4,6 +4,8 @@ All notable changes to rootout. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-22
+
 ### Added
 - Release pipeline: GoReleaser builds darwin arm64/amd64 on every v* tag, GitHub Release notes come from this file, and a private Homebrew tap (shiva2021/homebrew-rootout) is updated (D-030…D-032). `make release-check` and `make snapshot`.
 
