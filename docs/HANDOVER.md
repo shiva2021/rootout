@@ -1,22 +1,37 @@
 # Handover
 
-_Updated: 2026-10-22 · Session: model picker grid (D-029)_
+_Updated: 2026-10-22 · Session: M5 release pipeline (D-030…D-032)_
 
 ## Status
-Latest release `v0.3.1` (model picker grid, D-029) is on `main`, tagged and pushed to https://github.com/shiva2021/rootout, and installed in `~/.local/bin` (`rootout --version` → `v0.3.1`). Since v0.2: Ollama pull retries, scan progress bar, format fallback, model uninstall (D-025), Full Disk Access detection (D-026), home screen with ctrl+x quit (D-027), semver tags (D-028), model grid (D-029). The home loop and the new picker layout have only been exercised by unit tests and a pty smoke test, not by hand in a real terminal. Decisions D-019…D-029. `make test` (24 packages) and `make lint` green. Remaining: real-terminal checks (Next steps 1–2), M2 manual QA on a throwaway account, M5 release pipeline, M6 licensing (own plan).
+M5 is built and committed on `main`; the first release through it (v0.4.0) is **waiting on one manual step**: the Actions secret `TAP_GITHUB_TOKEN` does not exist yet. Everything else is in place: GoReleaser config, `CI` and `Release` workflows, `scripts/release_notes.sh`, `make release-check` / `make snapshot`, runbook `docs/kb/release.md`, README Install section, private tap repo `shiva2021/homebrew-rootout` (created, README only). `CI` is green on GitHub (macOS, 1m18s). The `0.4.0` CHANGELOG section is committed locally (`5a08a0b`, not pushed) and `make release-check NEXT=v0.4.0` passes. Spec and plan: `docs/plans/m5-release.md` (Tasks 1–5 done, Task 6 from step 1b, Task 7 pending).
 
-## Done this session (model picker grid, D-029) — tagged v0.3.1
+## Done this session (M5, D-030…D-032)
+- Decisions logged first: D-030 signing deferred (cask clears quarantine), D-031 private repo + private tap with GoReleaser's token download strategy, D-032 release on every `v*` tag with CHANGELOG notes and `make release-check` as the test gate.
+- `scripts/release_notes.sh` + `cmd/rootout/release_notes_test.go` (7 cases). gosec G204 added to the test-file exclusion in `.golangci.yml`.
+- `.goreleaser.yaml`: darwin amd64/arm64, `-X main.version=v{{ .Version }}`, changelog disabled, `homebrew_casks` to the private tap. **Deviation:** the live GoReleaser docs show `hooks.post.install_steps` and `{{ .StagedPath }}`; 2.18.3 rejects both, so the hook uses `hooks.post.install` with `#{staged_path}` as in the docs at the v2.18.3 tag. The download strategy is verbatim from those docs. The snapshot renders the cask without `TAP_GITHUB_TOKEN`, so the Makefile has no placeholder.
+- `make snapshot` verified: two archives, `checksums.txt`, arm64 binary prints `rootout version v0.3.2-next`, amd64 is x86_64 Mach-O, `dist/homebrew/Casks/rootout.rb` passes `ruby -c`.
+- Workflows pass `actionlint`. GoReleaser 2.18.3 and actionlint installed locally via Homebrew.
+
+## Next steps
+1. **Shivang:** create a fine-grained token on github.com (Settings › Developer settings › Fine-grained tokens): owner shiva2021, repository `homebrew-rootout` only, Contents read and write, one-year expiry. Then `gh secret set TAP_GITHUB_TOKEN --repo shiva2021/rootout` and paste it.
+2. Cut v0.4.0 (plan Task 6 steps 3–4): `git tag -a v0.4.0 -m "v0.4.0: release pipeline (GoReleaser, CI, private Homebrew tap)"`, `git push origin main v0.4.0`, watch the `Release` run, check the release assets/notes and `Casks/rootout.rb` in the tap.
+3. Install from the tap on this Mac (Task 6 steps 5–6): needs `HOMEBREW_GITHUB_API_TOKEN` with read access to `shiva2021/rootout`; then `rm ~/.local/bin/rootout` so it does not shadow the brew copy. If the download fails in the strategy class, apply the `GitHub.get_release` fallback from `docs/kb/release.md` and cut v0.4.1.
+4. Earlier manual checks still open (unchanged from last session): model grid and home loop in a real terminal; Full Disk Access denied path; v0.2 interactive flows; M2 QA on a throwaway account; live `scan --llm`.
+5. M6 membership gate: write its plan (D-024).
+
+## Done before this session
+### Model picker grid (D-029), tagged v0.3.1
 - Shivang found the "Recommended for this Mac" table cluttered. The picker (`internal/tui/models.go`) and `rootout config models` now share one grid: MODEL · SIZE · FIT · NOTES with a header row; too-large models sit under "Need more memory than this Mac has"; the picker shows the selected model's description on a detail line above the flash line (plain output keeps it as a WHY column).
 - New row kinds `mrSubheading`/`mrColumns` and `modelRowKind.selectable()`; scrolling up keeps the headings above the cursor visible.
 - Tests: `TestModelPickerDetailLine`, `TooLargeGrouped`, `ScrollKeepsHeading`, plus header/grouping checks in `ReadyView`. `make test`/`make lint` green; renders checked at 80 and 60 columns via a throwaway test, and `./bin/rootout config models` on this Mac.
 - Committed (`562fbc2`), tagged `v0.3.1`, pushed with `main`, installed with `make install`. Not yet done: a look in a real terminal (see Next steps 1).
 
-## Done last session (versioning, D-028)
+### Versioning (D-028)
 - First release tag `v0.3.0` on `main` (annotated), pushed with `main`. Convention: tag every merge (minor = feature, patch = fix/docs) at wrap-up — see `docs/kb/conventions.md` "Releases and versions".
 - Version visible in `rootout --version`, the first `doctor` line (`rootout v0.3.0`, also in `--json`), the home-screen title (`rootout v0.3.0`) and `make install`'s last line. `CHANGELOG.md` added (Keep a Changelog); add to "Unreleased" as features land.
 - Checking you have the latest: `rootout --version` should equal `git describe --tags` on `main`; a `-N-g<hash>` suffix means N commits past the tag, `-dirty` means uncommitted changes.
 
-## Done this session (home screen and ctrl+x, D-027)
+### Home screen and ctrl+x (D-027)
 - Home screen `internal/tui/home.go` (`PickAction`, `Flash`): four action rows (uninstall, orphans, scan, model) plus a flash line with the last outcome.
 - `tui.ErrQuit`: ctrl+x and ctrl+c quit from every screen via `quitAll`; esc/q only end the current screen (ok=false) and the caller decides what back means.
 - `runTUI` home loop in `cmd/rootout/tui.go`: bare `rootout` opens home, each action returns to it with a flash summary.
@@ -25,7 +40,7 @@ Latest release `v0.3.1` (model picker grid, D-029) is on `main`, tagged and push
 - Help text, README and kb (architecture, conventions) updated. `guide.go` needed no change.
 - Interrupt/SIGTERM quits the home loop (`runErr`, `ActionNone` guard); scan assessments are cancelled when the screen closes.
 
-## Done last session (Full Disk Access detection, D-026)
+### Full Disk Access detection (D-026)
 - Shivang granted Warp Full Disk Access and the stray `~/Library/Containers/zz.rootout.probe` could then be removed: FDA for the terminal app is confirmed as the remedy for protected container entries.
 - New `internal/tcc`: `FullDiskAccess(env)` lists `~/Library/Safari` → `Mail` → `Application Support/com.apple.TCC` (permission error = denied, success = granted, none exist = unknown); `NeedsFullDiskAccess(env, path)` (direct child of `~/Library/Containers`); `TerminalApp(getenv)` from `TERM_PROGRAM`.
 - `doctor` (and `guide`) show a "Full Disk Access" line: `granted to Warp` here; denied gives a `!` with `System Settings › Privacy & Security › Full Disk Access → add <terminal>`.
@@ -33,17 +48,17 @@ Latest release `v0.3.1` (model picker grid, D-029) is on `main`, tagged and push
 - `.golangci.yml`: gosec G302 excluded in tests (a test chmods a dir to 0 and restores it).
 - Verified on this Mac with FDA granted: `doctor` line, `make test` (24 packages), `make lint` clean, `orphans --dry-run` lists 15 `~/Library/Containers` entries that would be tagged. **The denied path has only run in unit tests** (see Next steps 1).
 
-## Done before that (model uninstall)
+### Model uninstall
 - `ollama.Client.Delete` (`DELETE /api/delete`, `ErrModelNotFound`), verified against docs.ollama.com.
 - Picker: `d` on an installed row → `Uninstall X (size)? y/n` → spinner → re-list → flash; recommended rows show `installed` / `not installed`; `?` overlay and footer updated. `ModelDeps.ClearDefault` clears the saved default when that model goes.
 - `rootout config models rm <model> [--yes]`; first tests in `cmd/rootout` (`config_test.go`, exercises `removeModel` with an httptest Ollama and a temp config).
 - Verified on this Mac: `rm ghost:1b --yes` → not-found error, exit 1; `echo n | rm qwen3.5:4b` → cancelled, exit 3, config untouched. Did not run a real delete (only one model installed).
 
-## Done earlier (orphan removal bug)
+### Orphan removal bug
 - Shivang ran `rootout orphans` for real: 25 paths, 0 removed, every one reported FAILED with the same error about `~/Library/Containers/ru.keepcoder.Telegram`. Cause: `/usr/bin/trash -s` stops at the first failure, so one unmovable path sank the whole batch and `trash.Move` marked all 25 failed. Fix: a failed batch is retried one path at a time (`internal/trash`), so only the truly unmovable path fails. Verified with the real tool: 2 scratch files moved, the protected dir failed alone.
 - Why the Telegram container could not be moved: macOS protects the entries directly under `~/Library/Containers`. Owner/mode/flags are normal, reading and writing *inside* works, but unlink/rename/trash of the entry itself is denied (`afpAccessDenied`, -5000) for the user, for `/usr/bin/trash` and for Finder via osascript. `~/Library/Group Containers` was not probed. The error now carries a hint to grant the terminal Full Disk Access. The `writable()` check (W_OK on the parent) cannot see this, so such paths are classified as user paths.
 
-## Done earlier (v0.2)
+### v0.2
 - Progress: `internal/progress`; hooks in app discovery (4 size workers), leftover search, extension scan, removal; picker loads inside the program.
 - Typed `delete` in the confirm and scan screens and the plain prompt; `--yes` is the only bypass; `scan --uninstall <id> [--yes]`.
 - Help: `Long`/`Example` everywhere, `rootout guide`, first-run hint, `?` overlays.
@@ -51,7 +66,7 @@ Latest release `v0.3.1` (model picker grid, D-029) is on `main`, tagged and push
 - `rootout orphans`: `leftover.FindOrphans` (reverse-DNS ids only; owned via installed apps, Apple, SDK list, Spotlight, launchd, processes; vendor-still-installed annotation). On this Mac: 29 candidates, all plausible (old Telegram, ChatGPT, 1Password 7, RStudio, DaVinci…); nothing under com.apple.
 - Scan performance: 31 s → 5 s on this Mac (`FindAround`, literal gates, no counted repetitions).
 
-## Done earlier
+### Earlier
 - Plan (`docs/PLAN.md`), decisions D-001…D-017, knowledge base.
 - Apps: `rootout` (v0.2: picker → review → remove; now the home screen, see above), `list`, `remove` (Trash/permanent/dry-run, brew zap, one admin elevation, receipts, launchd bootout).
 - Extensions: `scan` (5 editors, 4 rule groups, capability/intent scoring, `--online` registry data, review screen with uninstall), golden corpus.
@@ -63,17 +78,9 @@ Latest release `v0.3.1` (model picker grid, D-029) is on `main`, tagged and push
 - `rootout scan --all`: scores 5–30. The 30 is `ms-python.vscode-python-envs`, which pipes the official uv installer from astral.sh into `sh` (true finding, Medium).
 - Review screen and app picker verified under a pseudo-terminal (render + quit). Live removal and live LLM calls have not been run.
 
-## Next steps
-1. Look at the new model grid (D-029) in a real terminal: `./bin/rootout` → Choose local AI model, and `./bin/rootout scan` → `m`. Check the inverted cursor bar spans each row, the detail line follows ↑/↓, ↓ onto a too-large row + enter flashes why, and at ~60 columns nothing wraps.
-2. Try the home loop in a real terminal: `rootout` → Uninstall → esc back to the picker → esc back to home (empty flash) → Scan → esc → `?` on home → ctrl+x. Check a real removal's flash and that the `report()` lines are visible after quitting. Not run yet — only unit tests.
-3. Verify the denied path for real: System Settings › Privacy & Security › Full Disk Access, switch Warp off, then `./bin/rootout doctor` (expect `!` and the fix line) and `./bin/rootout orphans --dry-run` / `rootout orphans` (expect `! 15 paths need Full Disk Access…` and the `[needs Full Disk Access]` tags). Switch Warp back on afterwards.
-4. Try v0.2 interactively: `rootout` (bar, `?`), `rootout scan` (`m`, then `d` on a model), `rootout orphans` (tick one group, type delete) — removal paths have only run in unit tests plus Esc-at-the-box pty checks. A real model uninstall has not been run yet.
-5. M2 task 7: follow `docs/kb/qa.md` on a throwaway macOS user account (cask, App Store and pkg app). Live removal has only run in unit tests.
-6. Try `rootout scan --llm` with a real key or `rootout config models --pick` with Ollama; only recorded-HTTP tests exist so far.
-7. M5: GoReleaser config, Homebrew tap; notarization optional (D-024). It is a CLI release, not a macOS app release.
-8. M6 membership gate: write a separate plan first. Admin (Shivang) unrestricted via an admin credential; everyone else needs an active Patreon monthly membership (mechanics explored at M6). See D-024.
-
 ## Blockers and open questions
+- Unsigned binary relies on the cask's quarantine-clearing hook (D-030); a future macOS may block it. Signing via the D-015 quill flow is the fix.
+- `TAP_GITHUB_TOKEN` expires after a year; rotation steps in `docs/kb/release.md`.
 - Intel Macs: `ollama.Recommend` caps them at the 8 GB tier, so bigger tiers are marked too large and now sit under "Need more memory than this Mac has", which is wrong for a large-RAM Intel Mac. Pre-existing semantics, not changed by D-029.
 - `Group Containers` is not probed or tagged by D-026; nobody has checked whether its entries carry the same TCC protection as `~/Library/Containers`. Test only with a throwaway entry and the Finder GUI as fallback.
 - `docs/research/vscode-extension-audit/` names Shivang's LeetCode username; remove it before the repo ever goes public.
@@ -84,6 +91,7 @@ Latest release `v0.3.1` (model picker grid, D-029) is on `main`, tagged and push
 ## How to verify
 ```bash
 make build && make test && make lint && scripts/toolchain_check.sh
+make release-check NEXT=v0.4.0 && make snapshot
 ./bin/rootout doctor
 ./bin/rootout remove Spotify --dry-run
 ./bin/rootout scan --all --no-tui
