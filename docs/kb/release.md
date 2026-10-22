@@ -20,6 +20,7 @@ You need git access to the tap (SSH key on GitHub, or `gh auth setup-git`) and a
 ```bash
 export HOMEBREW_GITHUB_API_TOKEN=<token with read access to shiva2021/rootout>
 brew tap shiva2021/rootout git@github.com:shiva2021/homebrew-rootout.git
+brew trust shiva2021/rootout   # newer Homebrew refuses casks from untrusted taps
 brew install --cask rootout
 brew upgrade --cask rootout   # later, for a new version (token still exported)
 ```
@@ -41,9 +42,9 @@ brew upgrade --cask rootout   # later, for a new version (token still exported)
 - `TAP_GITHUB_TOKEN`: Actions secret on `shiva2021/rootout`. Fine-grained, resource owner shiva2021, repository `homebrew-rootout` only, Contents read and write, one-year expiry.
 - Rotate it before it expires: create a new token with the same settings, then `gh secret set TAP_GITHUB_TOKEN --repo shiva2021/rootout` and paste it. Delete the old token.
 - `HOMEBREW_GITHUB_API_TOKEN`: each user's own token, read access to `shiva2021/rootout` releases. Needed for `brew install` and `brew upgrade`.
-- On a machine with `gh` logged in, `export HOMEBREW_GITHUB_API_TOKEN=$(gh auth token)` should be enough (its OAuth token has `repo` scope). Not yet verified against a real release.
+- On a machine with `gh` logged in, `export HOMEBREW_GITHUB_API_TOKEN=$(gh auth token)` is enough (its OAuth token has `repo` scope; verified with v0.4.1).
 
 ## Known limits
 - The binary is not code-signed or notarized (D-030). The cask clears the quarantine flag after install; a direct download needs `xattr -d com.apple.quarantine rootout`. A future macOS may block this; signing is the fix.
 - The tap is private, so `brew tap` needs git credentials. Over HTTPS it prompts; the SSH URL avoids that.
-- The cask's download strategy calls Homebrew's internal `GitHub.get_release`, which may change. Fallback: fetch `https://api.github.com/repos/<owner>/<repo>/releases/tags/<tag>` in the same class and pick the asset id from that (D-031).
+- The cask's download strategy calls Homebrew's internal `GitHub.get_release` (works as of v0.4.1), which may change. Fallback: fetch `https://api.github.com/repos/<owner>/<repo>/releases/tags/<tag>` in the same class and pick the asset id from that (D-031).

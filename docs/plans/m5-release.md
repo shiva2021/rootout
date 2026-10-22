@@ -1,6 +1,6 @@
 # M5 · Release pipeline
 
-_Spec written 2026-10-22. Status: approved; Tasks 1–5 done, Task 6 waits on the `TAP_GITHUB_TOKEN` secret._ Decisions D-030…D-032 are logged once this is approved._
+_Spec written 2026-10-22. Status: done. v0.4.1 is the first release through the full pipeline (2026-10-22)._ Decisions D-030…D-032 are logged once this is approved._
 
 ## Goal
 
@@ -576,7 +576,7 @@ Expected: no missing pin reported (the new files add no language).
 
 Manual steps are Shivang's; the agent prepares and verifies.
 
-- [ ] **Step 1 (Shivang): tap repo and secret** (tap repo created 2026-10-22; `TAP_GITHUB_TOKEN` secret still missing)
+- [x] **Step 1 (Shivang): tap repo and secret** (tap repo created by the agent; token needed a second attempt: the first lacked access to the tap, so v0.4.0 has no cask and v0.4.1 is the first complete release)
 
 ```bash
 gh repo create shiva2021/homebrew-rootout --private --description "Homebrew tap for rootout" --add-readme
@@ -587,7 +587,7 @@ Then on github.com: Settings › Developer settings › Fine-grained tokens › 
 
 Move the Unreleased items under `## [0.4.0] - <today>`; `make release-check NEXT=v0.4.0` passes. Commit: `release: v0.4.0 changelog`.
 
-- [ ] **Step 3: Tag and push**
+- [x] **Step 3: Tag and push**
 
 ```bash
 git tag -a v0.4.0 -m "v0.4.0: release pipeline (GoReleaser, CI, private Homebrew tap)"
@@ -596,12 +596,12 @@ git push origin main v0.4.0
 Poll `gh run list --workflow Release --commit "$(git rev-parse v0.4.0^{commit})" --json databaseId --jq '.[0].databaseId'` until it prints an id (first ever Release run; the list is empty for a moment), then `gh run watch --exit-status <id>`.
 Expected: exit 0.
 
-- [ ] **Step 4: Inspect the release and the tap**
+- [x] **Step 4: Inspect the release and the tap**
 
 Run: `gh release view v0.4.0 --json assets,body --jq '.assets[].name, .body' && gh api repos/shiva2021/homebrew-rootout/contents/Casks/rootout.rb --jq .name`
 Expected: `rootout_0.4.0_darwin_arm64.tar.gz`, `rootout_0.4.0_darwin_amd64.tar.gz`, `checksums.txt`; the body is the 0.4.0 CHANGELOG section; `rootout.rb`.
 
-- [ ] **Step 5: Install from the tap on this Mac**
+- [x] **Step 5: Install from the tap on this Mac**
 
 Try `export HOMEBREW_GITHUB_API_TOKEN=$(gh auth token)` first (the `gh` OAuth token has `repo` scope, which covers the strategy's `GitHub.repository` and `get_release` calls; unverified until this step runs). Otherwise create a fine-grained token with Contents: Read on `shiva2021/rootout`. Then:
 ```bash
@@ -611,7 +611,7 @@ which -a rootout; /opt/homebrew/bin/rootout --version; /opt/homebrew/bin/rootout
 ```
 Expected: `rootout version v0.4.0`; `doctor` runs normally with no Gatekeeper dialog. If the download fails inside the strategy class (the `GitHub.get_release` risk), replace `asset_id` with a `Utils::Curl` call to `https://api.github.com/repos/#{@owner}/#{@repo}/releases/tags/#{@tag}` parsed with `JSON.parse`, commit, and cut `v0.4.1`.
 
-- [ ] **Step 6: Remove the shadow copy and re-check**
+- [x] **Step 6: Remove the shadow copy and re-check**
 
 Run: `rm ~/.local/bin/rootout && hash -r && rootout --version`
 Expected: `rootout version v0.4.0` from `/opt/homebrew/bin`. `brew uninstall --cask rootout && brew install --cask rootout` round-trips cleanly.
@@ -620,11 +620,11 @@ Expected: `rootout version v0.4.0` from `/opt/homebrew/bin`. `brew uninstall --c
 
 ### Task 7: Handover and knowledge base refresh
 
-- [ ] **Step 1: Update `docs/HANDOVER.md`**
+- [x] **Step 1: Update `docs/HANDOVER.md`**
 
 New "Done this session (M5, D-030…D-032)" block: what shipped, the CI run time, whether the `TAP_GITHUB_TOKEN ?= snapshot` guard was kept, whether the strategy class needed the fallback, token expiry dates. Next steps: the remaining manual QA items (unchanged) and "M6 membership gate: write its plan". Blockers: add "unsigned binary relies on the xattr hook".
 
-- [ ] **Step 2: Commit, tag if anything changed after v0.4.0, push**
+- [x] **Step 2: Commit, tag if anything changed after v0.4.0, push**
 
 ```bash
 git add docs/HANDOVER.md && git commit -m "docs: handover — M5 release pipeline live" && git push origin main

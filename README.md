@@ -22,6 +22,7 @@ rootout guide                 # a step-by-step tour adapted to this Mac
 # Homebrew (private tap: needs git access to shiva2021/homebrew-rootout and a GitHub token)
 export HOMEBREW_GITHUB_API_TOKEN=<token with read access to shiva2021/rootout>
 brew tap shiva2021/rootout git@github.com:shiva2021/homebrew-rootout.git
+brew trust shiva2021/rootout   # newer Homebrew refuses untrusted taps
 brew install --cask rootout
 
 # Direct download: grab rootout_<version>_darwin_<arch>.tar.gz from the Releases page, then

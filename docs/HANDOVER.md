@@ -3,9 +3,11 @@
 _Updated: 2026-10-22 · Session: M5 release pipeline (D-030…D-032)_
 
 ## Status
-v0.4.0 is tagged and published to GitHub Releases (two archives, checksums; notes backfilled by hand). The tap update failed: GoReleaser got `404` on `shiva2021/homebrew-rootout` with `TAP_GITHUB_TOKEN`, so the token cannot see the tap repo. A second bug, an empty release body, is fixed on `main` (`3ac1b32`: `changelog.disable` skipped loading `--release-notes`). The `0.4.1` CHANGELOG section is committed and `make release-check NEXT=v0.4.1` passes; **v0.4.1 waits on Shivang fixing the token's repository access**. Spec and plan: `docs/plans/m5-release.md`.
+M5 is done. Pushing a `v*` tag now builds, publishes a GitHub Release with CHANGELOG notes and updates the private tap. **v0.4.1** is the first complete release: two archives, checksums, notes, and `Casks/rootout.rb` in `shiva2021/homebrew-rootout` with matching sha256s. Installed on this Mac from the tap (`/opt/homebrew/bin/rootout`, `v0.4.1`, no quarantine attribute, `doctor` runs); the old `~/.local/bin/rootout` (v0.3.1) is removed. v0.4.0 is on GitHub Releases without a cask (first token lacked tap access) and its notes were backfilled by hand. CI green on macOS. Spec and plan: `docs/plans/m5-release.md`; runbook: `docs/kb/release.md`.
 
 ## Done this session (M5, D-030…D-032)
+- First releases: v0.4.0 published but the tap update got 404 (token lacked access to `homebrew-rootout`) and its body was empty; v0.4.1 fixed both. Empty body cause: in GoReleaser 2.18.3 `changelog.disable` skips the pipe that loads `--release-notes`, so the setting is gone (D-032 wording updated).
+- Tap install verified with `HOMEBREW_GITHUB_API_TOKEN=$(gh auth token)`. Newer Homebrew needs `brew trust shiva2021/rootout` before it loads the cask; README and runbook updated.
 - Decisions logged first: D-030 signing deferred (cask clears quarantine), D-031 private repo + private tap with GoReleaser's token download strategy, D-032 release on every `v*` tag with CHANGELOG notes and `make release-check` as the test gate.
 - `scripts/release_notes.sh` + `cmd/rootout/release_notes_test.go` (7 cases). gosec G204 added to the test-file exclusion in `.golangci.yml`.
 - `.goreleaser.yaml`: darwin amd64/arm64, `-X main.version=v{{ .Version }}`, changelog disabled, `homebrew_casks` to the private tap. **Deviation:** the live GoReleaser docs show `hooks.post.install_steps` and `{{ .StagedPath }}`; 2.18.3 rejects both, so the hook uses `hooks.post.install` with `#{staged_path}` as in the docs at the v2.18.3 tag. The download strategy is verbatim from those docs. The snapshot renders the cask without `TAP_GITHUB_TOKEN`, so the Makefile has no placeholder.
@@ -13,11 +15,10 @@ v0.4.0 is tagged and published to GitHub Releases (two archives, checksums; note
 - Workflows pass `actionlint`. GoReleaser 2.18.3 and actionlint installed locally via Homebrew.
 
 ## Next steps
-1. **Shivang:** edit the fine-grained token behind `TAP_GITHUB_TOKEN` (github.com › Settings › Developer settings › Fine-grained tokens): Resource owner shiva2021, Repository access "Only select repositories" including `homebrew-rootout`, Permissions › Contents: Read and write. If you regenerate it, run `gh secret set TAP_GITHUB_TOKEN --repo shiva2021/rootout` again.
-2. Cut v0.4.1: `git tag -a v0.4.1 -m "v0.4.1: tap cask and release notes fixes"`, `git push origin v0.4.1`, watch `Release`; check the release body is the 0.4.1 CHANGELOG section and `Casks/rootout.rb` exists in the tap.
-3. Install from the tap on this Mac (plan Task 6 steps 5–6): try `export HOMEBREW_GITHUB_API_TOKEN=$(gh auth token)` first (repo scope, unverified), then `brew tap shiva2021/rootout git@github.com:shiva2021/homebrew-rootout.git && brew install --cask rootout`; then `rm ~/.local/bin/rootout`. If the download fails in the strategy class, apply the `GitHub.get_release` fallback from `docs/kb/release.md` and cut v0.4.2.
-4. Earlier manual checks still open: model grid and home loop in a real terminal; Full Disk Access denied path; v0.2 interactive flows; M2 QA on a throwaway account; live `scan --llm`.
-5. M6 membership gate: write its plan (D-024).
+1. `make install` now puts a second `rootout` in `~/.local/bin`, which comes first on `PATH` and hides the brew copy. Use it only for testing a branch and remove it afterwards (`docs/kb/release.md`, "Which binary am I running").
+2. Earlier manual checks still open: model grid and home loop in a real terminal; Full Disk Access denied path; v0.2 interactive flows; M2 QA on a throwaway account; live `scan --llm`.
+3. M6 membership gate: write its plan (D-024). It decides how members get the binary, since the tap and releases are private.
+4. Optional later: signing and notarization (D-030 / D-015 quill flow).
 
 ## Done before this session
 ### Model picker grid (D-029), tagged v0.3.1
@@ -81,7 +82,6 @@ v0.4.0 is tagged and published to GitHub Releases (two archives, checksums; note
 ## Blockers and open questions
 - Unsigned binary relies on the cask's quarantine-clearing hook (D-030); a future macOS may block it. Signing via the D-015 quill flow is the fix.
 - `TAP_GITHUB_TOKEN` expires after a year; rotation steps in `docs/kb/release.md`.
-- The release job has never run. `scripts/release_notes.sh` passed its tests under GNU sed 4.10 and mawk locally (Ubuntu uses those), but the job itself, the pinned `goreleaser-action` install and the cask download strategy are first exercised by v0.4.0. Release notes run before GoReleaser, so a script failure publishes nothing.
 - Intel Macs: `ollama.Recommend` caps them at the 8 GB tier, so bigger tiers are marked too large and now sit under "Need more memory than this Mac has", which is wrong for a large-RAM Intel Mac. Pre-existing semantics, not changed by D-029.
 - `Group Containers` is not probed or tagged by D-026; nobody has checked whether its entries carry the same TCC protection as `~/Library/Containers`. Test only with a throwaway entry and the Finder GUI as fallback.
 - `docs/research/vscode-extension-audit/` names Shivang's LeetCode username; remove it before the repo ever goes public.
