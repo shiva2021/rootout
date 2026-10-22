@@ -3,7 +3,7 @@
 _Updated: 2026-10-22 · Session: M5 release pipeline (D-030…D-032)_
 
 ## Status
-M5 is built and committed on `main`; the first release through it (v0.4.0) is **waiting on one manual step**: the Actions secret `TAP_GITHUB_TOKEN` does not exist yet. Everything else is in place: GoReleaser config, `CI` and `Release` workflows, `scripts/release_notes.sh`, `make release-check` / `make snapshot`, runbook `docs/kb/release.md`, README Install section, private tap repo `shiva2021/homebrew-rootout` (created, README only). `CI` is green on GitHub (macOS, 50s to 1m18s; latest run on `4f54b99` green). The `0.4.0` CHANGELOG section is committed and pushed (`5a08a0b`) and `make release-check NEXT=v0.4.0` passes. Spec and plan: `docs/plans/m5-release.md` (Tasks 1–5 done, Task 6 from step 1b, Task 7 pending).
+v0.4.0 is tagged and published to GitHub Releases (two archives, checksums; notes backfilled by hand). The tap update failed: GoReleaser got `404` on `shiva2021/homebrew-rootout` with `TAP_GITHUB_TOKEN`, so the token cannot see the tap repo. A second bug, an empty release body, is fixed on `main` (`3ac1b32`: `changelog.disable` skipped loading `--release-notes`). The `0.4.1` CHANGELOG section is committed and `make release-check NEXT=v0.4.1` passes; **v0.4.1 waits on Shivang fixing the token's repository access**. Spec and plan: `docs/plans/m5-release.md`.
 
 ## Done this session (M5, D-030…D-032)
 - Decisions logged first: D-030 signing deferred (cask clears quarantine), D-031 private repo + private tap with GoReleaser's token download strategy, D-032 release on every `v*` tag with CHANGELOG notes and `make release-check` as the test gate.
@@ -13,10 +13,10 @@ M5 is built and committed on `main`; the first release through it (v0.4.0) is **
 - Workflows pass `actionlint`. GoReleaser 2.18.3 and actionlint installed locally via Homebrew.
 
 ## Next steps
-1. **Shivang:** create a fine-grained token on github.com (Settings › Developer settings › Fine-grained tokens): owner shiva2021, repository `homebrew-rootout` only, Contents read and write, one-year expiry. Then `gh secret set TAP_GITHUB_TOKEN --repo shiva2021/rootout` and paste it.
-2. Cut v0.4.0 (plan Task 6 steps 3–4): `git tag -a v0.4.0 -m "v0.4.0: release pipeline (GoReleaser, CI, private Homebrew tap)"`, `git push origin v0.4.0`, watch the `Release` run, check the release assets/notes and `Casks/rootout.rb` in the tap.
-3. Install from the tap on this Mac (Task 6 steps 5–6): try `export HOMEBREW_GITHUB_API_TOKEN=$(gh auth token)` first (repo scope, unverified), else a fine-grained token with read access to `shiva2021/rootout`; then `rm ~/.local/bin/rootout` so it does not shadow the brew copy. If the download fails in the strategy class, apply the `GitHub.get_release` fallback from `docs/kb/release.md` and cut v0.4.1.
-4. Earlier manual checks still open (unchanged from last session): model grid and home loop in a real terminal; Full Disk Access denied path; v0.2 interactive flows; M2 QA on a throwaway account; live `scan --llm`.
+1. **Shivang:** edit the fine-grained token behind `TAP_GITHUB_TOKEN` (github.com › Settings › Developer settings › Fine-grained tokens): Resource owner shiva2021, Repository access "Only select repositories" including `homebrew-rootout`, Permissions › Contents: Read and write. If you regenerate it, run `gh secret set TAP_GITHUB_TOKEN --repo shiva2021/rootout` again.
+2. Cut v0.4.1: `git tag -a v0.4.1 -m "v0.4.1: tap cask and release notes fixes"`, `git push origin v0.4.1`, watch `Release`; check the release body is the 0.4.1 CHANGELOG section and `Casks/rootout.rb` exists in the tap.
+3. Install from the tap on this Mac (plan Task 6 steps 5–6): try `export HOMEBREW_GITHUB_API_TOKEN=$(gh auth token)` first (repo scope, unverified), then `brew tap shiva2021/rootout git@github.com:shiva2021/homebrew-rootout.git && brew install --cask rootout`; then `rm ~/.local/bin/rootout`. If the download fails in the strategy class, apply the `GitHub.get_release` fallback from `docs/kb/release.md` and cut v0.4.2.
+4. Earlier manual checks still open: model grid and home loop in a real terminal; Full Disk Access denied path; v0.2 interactive flows; M2 QA on a throwaway account; live `scan --llm`.
 5. M6 membership gate: write its plan (D-024).
 
 ## Done before this session
