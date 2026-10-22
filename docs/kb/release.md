@@ -35,6 +35,7 @@ brew upgrade --cask rootout   # later, for a new version (token still exported)
 - Fix the cause on `main`, add a CHANGELOG entry for the next patch version, run `make release-check`, and cut the patch tag.
 - A tag with no CHANGELOG section (or an empty one) fails before GoReleaser runs; that is intended.
 - If GoReleaser left a half-made GitHub Release behind, delete that release by hand on GitHub (keep the tag).
+- `homebrew cask: could not get default branch: ... homebrew-rootout: 404 Not Found` means `TAP_GITHUB_TOKEN` cannot see the tap: the token's repository access does not include `homebrew-rootout` (or its owner is not shiva2021). The GitHub Release is already published at that point; fix the token, then cut a patch tag so the cask is written (happened on v0.4.0).
 
 ## Tokens
 - `TAP_GITHUB_TOKEN`: Actions secret on `shiva2021/rootout`. Fine-grained, resource owner shiva2021, repository `homebrew-rootout` only, Contents read and write, one-year expiry.

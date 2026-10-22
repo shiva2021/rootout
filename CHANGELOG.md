@@ -4,6 +4,11 @@ All notable changes to rootout. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-22
+
+### Fixed
+- Homebrew tap: v0.4.0 was published to GitHub Releases without its cask because the tap token could not reach `shiva2021/homebrew-rootout`; this release writes the cask.
+
 ## [0.4.0] - 2026-10-22
 
 ### Added
