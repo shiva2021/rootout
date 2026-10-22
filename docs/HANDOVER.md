@@ -1,6 +1,6 @@
 # Handover
 
-_Updated: 2026-10-22 · Session: M5 release pipeline (D-030…D-032)_
+_Updated: 2026-10-22 · Session: M5 release pipeline (D-030…D-032); public-releases design recorded for M6_
 
 ## Status
 M5 is done. Pushing a `v*` tag now builds, publishes a GitHub Release with CHANGELOG notes and updates the private tap. **v0.4.1** is the first complete release: two archives, checksums, notes, and `Casks/rootout.rb` in `shiva2021/homebrew-rootout` with matching sha256s. Installed on this Mac from the tap (`/opt/homebrew/bin/rootout`, `v0.4.1`, no quarantine attribute, `doctor` runs); the old `~/.local/bin/rootout` (v0.3.1) is removed. v0.4.0 is on GitHub Releases without a cask (first token lacked tap access) and its notes were backfilled by hand. CI green on macOS. Spec and plan: `docs/plans/m5-release.md`; runbook: `docs/kb/release.md`.
@@ -17,9 +17,28 @@ M5 is done. Pushing a `v*` tag now builds, publishes a GitHub Release with CHANG
 ## Next steps
 1. `make install` now puts a second `rootout` in `~/.local/bin`, which comes first on `PATH` and hides the brew copy. Use it only for testing a branch and remove it afterwards (`docs/kb/release.md`, "Which binary am I running").
 2. Earlier manual checks still open: model grid and home loop in a real terminal; Full Disk Access denied path; v0.2 interactive flows; M2 QA on a throwaway account; live `scan --llm`.
-3. M6 membership gate: write its plan (D-024). It decides how members get the binary, since the tap and releases are private.
+3. M6 membership gate: write its plan (D-024). It decides how members get the binary, since the tap and releases are private. **Agreed on 2026-10-22, deferred to M6:** drop the token requirement by publishing to a public releases repo; recipe below ("Public releases repo").
 4. Optional later: signing and notarization (D-030 / D-015 quill flow).
 5. When GoReleaser 2.19 is released as stable (only nightlies on 2026-10-22): bump the pin in `.github/workflows/release.yml` (`version: v2.19.x`) and locally (`brew upgrade goreleaser`, `docs/kb/setup.md`); in `.goreleaser.yaml` replace `hooks.post.install` with `install_steps` (`on_macos do run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/rootout"] end`); `make snapshot` and check the cask has `postflight_steps`; cut a patch release. Why: Homebrew 7.0.10 warns "Calling `postflight` is deprecated! Use `postflight_steps` instead." on every command that loads the cask. Install still works; Homebrew will eventually remove `postflight`. Shivang chose to wait for 2.19 over hand-writing the block in `custom_block` or using a nightly.
+
+## Public releases repo (planned 2026-10-22, execute at M6)
+**Why.** `brew install --cask rootout` fails without `HOMEBREW_GITHUB_API_TOKEN` because `shiva2021/rootout` is private and GitHub will not serve its release assets anonymously (D-031). Shivang does not want new users to deal with a token. Until then, reinstalling on this Mac is `HOMEBREW_GITHUB_API_TOKEN=$(gh auth token) brew install --cask rootout`.
+
+**Design (Shivang approved the defaults).** Source stays private. Release assets go to a new **public** repo `shiva2021/rootout-releases`; the tap `shiva2021/homebrew-rootout` keeps its name and becomes public. The cask is then a plain `CurlDownloadStrategy` cask: no token, no custom Ruby class, no Homebrew internals. The paywall lives in the binary (M6 gate, D-024). Not done now because a public binary before the gate is a free rootout, and building it while the repos are private would 404 every `brew install/upgrade`. Log it as D-033 when executing.
+
+**Verified against GoReleaser 2.18.3 (docs + `internal/client/github.go`, `internal/pipe/release/release.go`):**
+- `release.github.owner/name` picks the repo the release is created in; `release.token` (since v2.17) is that repo's token. The cask's default download URL is built from `Release.GitHub.Owner/Name` (`ReleaseURLTemplate`), so no `url.template` is needed.
+- Actions' default `GITHUB_TOKEN` cannot write to another repo. One fine-grained PAT with Contents read/write on `rootout-releases` + `homebrew-rootout`, stored as `RELEASE_GITHUB_TOKEN` (replaces `TAP_GITHUB_TOKEN`; one thing to rotate).
+- GitHub creates the tag in `rootout-releases` at release time; that repo needs one commit first (README with the install steps).
+- `brew trust shiva2021/rootout` stays necessary on Homebrew 7 for any third-party cask tap.
+
+**Steps.**
+1. Create `shiva2021/rootout-releases` (README = install steps); make it and `homebrew-rootout` public.
+2. Edit the fine-grained token to cover both repos; `gh secret set RELEASE_GITHUB_TOKEN --repo shiva2021/rootout`; delete `TAP_GITHUB_TOKEN`.
+3. `.goreleaser.yaml`: `release.github.name: rootout-releases`, `release.token: "{{ .Env.RELEASE_GITHUB_TOKEN }}"`. In `homebrew_casks`: remove `url` and `custom_block`; `repository.token` → the same env; `homepage` → `rootout-releases`; caveats → "not code-signed; quarantine cleared on install". Keep the post-install hook (`install_steps` once on GoReleaser ≥ 2.19, Next steps 5).
+4. `.github/workflows/release.yml`: `TAP_GITHUB_TOKEN` env → `RELEASE_GITHUB_TOKEN`.
+5. Docs: README install block becomes `brew tap shiva2021/rootout && brew trust shiva2021/rootout && brew install --cask rootout`; rewrite "Install from the tap", "Tokens", "Known limits" in `docs/kb/release.md`; D-033 in `docs/DECISIONS.md` (supersedes D-031's cask).
+6. Verify: `make snapshot` → `dist/homebrew/Casks/rootout.rb` has a plain `url` and no custom class; cut a patch tag; `gh release view --repo shiva2021/rootout-releases`; in a shell with **no** `HOMEBREW_GITHUB_API_TOKEN`: `brew untap shiva2021/rootout`, tap, trust, install, `rootout --version`. Old releases v0.4.0/v0.4.1 stay on the private repo.
 
 ## Done before this session
 ### Model picker grid (D-029), tagged v0.3.1
