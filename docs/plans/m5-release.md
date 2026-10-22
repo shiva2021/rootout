@@ -1,6 +1,6 @@
 # M5 · Release pipeline
 
-_Spec written 2026-10-22. Status: approved; implementation in progress. Decisions D-030…D-032 are logged once this is approved._
+_Spec written 2026-10-22. Status: approved; Tasks 1–5 done, Task 6 waits on the `TAP_GITHUB_TOKEN` secret._ Decisions D-030…D-032 are logged once this is approved._
 
 ## Goal
 
@@ -204,7 +204,7 @@ Done in this order; each step must pass before the next.
 **Interfaces:**
 - Produces: `scripts/release_notes.sh <version> [changelog]`. `<version>` is `vX.Y.Z` or `X.Y.Z`; `[changelog]` defaults to `CHANGELOG.md` relative to the current directory. Prints the body of the `## [X.Y.Z]` section (lines after the heading up to, not including, the next line starting with `## `, with leading and trailing blank lines removed) to stdout, exit 0. Exit 1 with `release_notes: no CHANGELOG section for X.Y.Z` or `release_notes: empty CHANGELOG section for X.Y.Z` on stderr. Exit 2 on a missing argument or unreadable file.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `cmd/rootout/release_notes_test.go`, package `main`, stdlib only. Helper `runReleaseNotes(t, version, changelog string) (stdout string, exitCode int)` that writes `changelog` to `filepath.Join(t.TempDir(), "CHANGELOG.md")` and runs `exec.Command("bash", "../../scripts/release_notes.sh", version, path)`. Table cases:
 
@@ -220,21 +220,21 @@ Done in this order; each step must pass before the next.
 
 Assert stdout after `strings.TrimRight(.., "\n")` equals want and the exit code matches (`exec.ExitError.ExitCode()`).
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `go test ./cmd/rootout -run TestReleaseNotes -v`
 Expected: FAIL, every case, because the script does not exist (`bash: ../../scripts/release_notes.sh: No such file`).
 
-- [ ] **Step 3: Write `scripts/release_notes.sh`**
+- [x] **Step 3: Write `scripts/release_notes.sh`**
 
 `#!/usr/bin/env bash`, `set -euo pipefail`. Strip a leading `v` from `$1`; `awk` with the version passed as `-v ver=`, matching `^## \[` ver `\]` with the dots escaped (build the pattern with `gsub(/\./, "\\.", ver)` in a `BEGIN` block, or use `index($0, "## [" ver "]") == 1` which needs no escaping and is the simpler choice). Collect lines until the next `/^## /`. Trim blank lines at both ends in the shell (or awk). Emit the two error messages and exit codes from the Interfaces block. `chmod +x`.
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `go test ./cmd/rootout -run TestReleaseNotes -v`
 Expected: PASS, seven subtests. Also run against the real file: `scripts/release_notes.sh v0.3.1` prints the `### Changed` block from `CHANGELOG.md`; `scripts/release_notes.sh v9.9.9; echo $?` prints the error and `1`.
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 Run: `make lint`. Expected: clean. If gosec reports G204 (subprocess with variable arguments) on the `exec.Command` in the test, add `G204` to the existing test-file exclusion in `.golangci.yml` next to G302 (repo precedent, handover gotcha: exclude in config, never `//nolint` inline).
 ```bash
@@ -255,12 +255,12 @@ git commit -m "scripts: release_notes.sh extracts one CHANGELOG section (D-032)"
 - Consumes: `scripts/release_notes.sh` (Task 1).
 - Produces: `make release-check NEXT=vX.Y.Z` (exit 0 = safe to tag), `make snapshot` (writes `dist/`). Archive names `rootout_<ver>_darwin_<arch>.tar.gz`, `checksums.txt`; cask somewhere under `dist/` (located with `find dist -name rootout.rb`; path confirmed in step 6).
 
-- [ ] **Step 1: Install GoReleaser locally**
+- [x] **Step 1: Install GoReleaser locally**
 
 Run: `brew install goreleaser && goreleaser --version`
 Expected: `2.18.3` (if Homebrew ships a newer 2.x, record that version in setup.md and keep the CI pin at v2.18.3; `goreleaser check` must pass on both).
 
-- [ ] **Step 2: Write `.goreleaser.yaml`**
+- [x] **Step 2: Write `.goreleaser.yaml`**
 
 ```yaml
 version: 2
@@ -365,15 +365,16 @@ homebrew_casks:
       end
     hooks:
       post:
-        install_steps: |
-          on_macos do
-            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/rootout"]
+        # GoReleaser 2.18.3 form (docs at that tag); newer docs use install_steps.
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/rootout"]
           end
 ```
 
 The `custom_block` is verbatim from the GoReleaser `homebrew_casks` docs ("Private repositories", fetched 2026-10-22). Key names must match GoReleaser 2.18 docs; if `goreleaser check` rejects one (for example `archives.formats` vs `format`), fix to the documented name and note it in the commit body.
 
-- [ ] **Step 3: Add Makefile targets**
+- [x] **Step 3: Add Makefile targets**
 
 Append to `.PHONY`: `release-check snapshot`. Targets:
 
@@ -393,22 +394,22 @@ snapshot:
 	goreleaser release --snapshot --clean --skip=publish
 ```
 
-- [ ] **Step 4: Validate the config**
+- [x] **Step 4: Validate the config**
 
 Run: `goreleaser check`
 Expected: `1 configuration file(s) validated` with no deprecation warnings. Fix any reported key and re-run.
 
-- [ ] **Step 5: Run the release gate against the current tag**
+- [x] **Step 5: Run the release gate against the current tag**
 
 Run: `make release-check NEXT=v0.3.1`
 Expected: `CHANGELOG has v0.3.1`, then tests and lint pass, then `goreleaser check` passes. `make release-check` with no `NEXT` exits 2 with the usage line in under a second, before any test runs.
 
-- [ ] **Step 6: Build a snapshot and inspect it**
+- [x] **Step 6: Build a snapshot and inspect it**
 
 Run: `make snapshot && ls dist/ && tar tzf dist/rootout_*_darwin_arm64.tar.gz && "$(find dist -type f -name rootout -path '*arm64*' | head -1)" --version && grep -c 'GitHubPrivateRepositoryReleaseDownloadStrategy\|com.apple.quarantine\|releases/download' "$(find dist -name rootout.rb)"`
 Expected: `rootout_0.3.2-next_darwin_arm64.tar.gz`, `..._amd64.tar.gz`, `checksums.txt`; the archive lists `rootout`, `README.md`, `CHANGELOG.md`; the binary prints `rootout version v0.3.2-next`; exactly one `rootout.rb` under `dist/` (record its path in the Interfaces block above) and the grep count is at least 3. Then run `env -u TAP_GITHUB_TOKEN goreleaser release --snapshot --clean --skip=publish`: if it succeeds, delete the `TAP_GITHUB_TOKEN ?= snapshot` / `export` lines from the Makefile and say so in the commit body; if it fails on the missing env key, keep them.
 
-- [ ] **Step 7: Record GoReleaser in setup.md and commit**
+- [x] **Step 7: Record GoReleaser in setup.md and commit**
 
 Add to `docs/kb/setup.md` Prerequisites: `- GoReleaser 2.18.3 (`brew install goreleaser`) for `make snapshot` and `make release-check`; CI pins the same version.`
 ```bash
@@ -428,7 +429,7 @@ git commit -m "release: GoReleaser config, snapshot and release-check targets (D
 - Consumes: `scripts/release_notes.sh` (Task 1), `.goreleaser.yaml` (Task 2), repo secret `TAP_GITHUB_TOKEN` (Task 6, created by Shivang).
 - Produces: workflow names `CI` and `Release`, referenced by the runbook.
 
-- [ ] **Step 1: Write `ci.yml`**
+- [x] **Step 1: Write `ci.yml`**
 
 ```yaml
 name: CI
@@ -456,7 +457,7 @@ jobs:
           version: v2.15.0
 ```
 
-- [ ] **Step 2: Write `release.yml`**
+- [x] **Step 2: Write `release.yml`**
 
 ```yaml
 name: Release
@@ -487,12 +488,12 @@ jobs:
           TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
 ```
 
-- [ ] **Step 3: Static check**
+- [x] **Step 3: Static check**
 
 Run: `brew install actionlint && actionlint`
 Expected: no output. (actionlint is a dev convenience, not a project dependency; do not add it to setup.md.)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add .github/workflows/ci.yml .github/workflows/release.yml
@@ -512,11 +513,11 @@ Independent of Tasks 1–3 in content; can run in parallel with them. `[P]`
 **Interfaces:**
 - Consumes: D-030…D-032 (logged in Step 0); target names from Tasks 1–3. GitHub access on this Mac is SSH (`origin` is `git@github.com:…`, `gh` protocol ssh, checked 2026-10-22), so the SSH tap URL is the right copy here.
 
-- [ ] **Step 1: Write `docs/kb/release.md`**
+- [x] **Step 1: Write `docs/kb/release.md`**
 
 Sections, each a short list: **Cut a release** (add the CHANGELOG entry under a new `## [X.Y.Z] - date` heading, `make release-check NEXT=vX.Y.Z`, `git tag -a`, `git push origin main vX.Y.Z`, watch the `Release` workflow, check the release page and `homebrew-rootout`); **Install from the tap** (the three commands from the spec plus `brew upgrade --cask rootout`); **Which binary am I running** (`which -a rootout`; tap for daily use, `make install` for a branch under test, never both on `PATH`); **Repair a failed release** (never move a tag: fix, add a CHANGELOG entry, cut a patch tag; delete a half-made GitHub Release by hand if GoReleaser left one); **Tokens** (`TAP_GITHUB_TOKEN`: fine-grained, `homebrew-rootout` only, Contents read/write, one-year expiry, rotate by creating a new one and updating the Actions secret; a user's `HOMEBREW_GITHUB_API_TOKEN`: read access to `shiva2021/rootout` releases); **Known limits** (unsigned, xattr hook, private tap needs git credentials, `GitHub.get_release` fallback).
 
-- [ ] **Step 2: README Install section**
+- [x] **Step 2: README Install section**
 
 ```bash
 # Homebrew (private tap: needs git access to shiva2021/homebrew-rootout and a GitHub token)
@@ -533,11 +534,11 @@ make install
 
 One sentence below: the binary is not code-signed yet; Homebrew clears the quarantine flag for you.
 
-- [ ] **Step 3: kb index, conventions, PLAN.md, CHANGELOG**
+- [x] **Step 3: kb index, conventions, PLAN.md, CHANGELOG**
 
 kb README row: `` `release.md` | Cutting, verifying or repairing a release; tap and token setup ``. CHANGELOG Unreleased: `- Release pipeline: GoReleaser builds darwin arm64/amd64 on every v* tag, GitHub Release notes come from this file, and a private Homebrew tap (shiva2021/homebrew-rootout) is updated (D-030…D-032). \`make release-check\` and \`make snapshot\`.`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs README.md CHANGELOG.md
@@ -550,7 +551,7 @@ git commit -m "docs: release runbook, install section, M5 pointers"
 
 Depends on Tasks 1–4 being committed on `main`.
 
-- [ ] **Step 1: Push and watch**
+- [x] **Step 1: Push and watch**
 
 Run `git push origin main`, then poll until the run for this commit appears (Monitor until-loop; foreground sleep is blocked):
 ```bash
@@ -559,12 +560,12 @@ gh run list --workflow CI --commit "$(git rev-parse HEAD)" --json databaseId,sta
 and once it lists an id: `gh run watch --exit-status <id>`.
 Expected: the `CI` run completes with exit 0. If `make test` fails on `macos-latest` but passes locally, the cause is environmental (no Homebrew casks, no Ollama, different `/usr/bin/trash`); fix the test to use its fake, never the workflow.
 
-- [ ] **Step 2: Confirm the run time**
+- [x] **Step 2: Confirm the run time**
 
 Run: `gh run list --workflow CI --limit 1`
 Expected: under 5 minutes. Note the figure in the handover (it sets the billed-minutes estimate).
 
-- [ ] **Step 3: Toolchain check still clean**
+- [x] **Step 3: Toolchain check still clean**
 
 Run: `scripts/toolchain_check.sh`
 Expected: no missing pin reported (the new files add no language).
@@ -575,14 +576,14 @@ Expected: no missing pin reported (the new files add no language).
 
 Manual steps are Shivang's; the agent prepares and verifies.
 
-- [ ] **Step 1 (Shivang): tap repo and secret**
+- [ ] **Step 1 (Shivang): tap repo and secret** (tap repo created 2026-10-22; `TAP_GITHUB_TOKEN` secret still missing)
 
 ```bash
 gh repo create shiva2021/homebrew-rootout --private --description "Homebrew tap for rootout" --add-readme
 ```
 Then on github.com: Settings › Developer settings › Fine-grained tokens › Generate: resource owner shiva2021, repository access only `homebrew-rootout`, permission Contents: Read and write, expiry one year. Save it: `gh secret set TAP_GITHUB_TOKEN --repo shiva2021/rootout` (paste when prompted).
 
-- [ ] **Step 2: CHANGELOG entry and gate**
+- [x] **Step 2: CHANGELOG entry and gate**
 
 Move the Unreleased items under `## [0.4.0] - <today>`; `make release-check NEXT=v0.4.0` passes. Commit: `release: v0.4.0 changelog`.
 
@@ -602,7 +603,7 @@ Expected: `rootout_0.4.0_darwin_arm64.tar.gz`, `rootout_0.4.0_darwin_amd64.tar.g
 
 - [ ] **Step 5: Install from the tap on this Mac**
 
-Shivang creates a second fine-grained token with Contents: Read on `shiva2021/rootout` (or reuses an existing one with that access) and exports it as `HOMEBREW_GITHUB_API_TOKEN`. Then:
+Try `export HOMEBREW_GITHUB_API_TOKEN=$(gh auth token)` first (the `gh` OAuth token has `repo` scope, which covers the strategy's `GitHub.repository` and `get_release` calls; unverified until this step runs). Otherwise create a fine-grained token with Contents: Read on `shiva2021/rootout`. Then:
 ```bash
 brew tap shiva2021/rootout git@github.com:shiva2021/homebrew-rootout.git
 brew install --cask rootout

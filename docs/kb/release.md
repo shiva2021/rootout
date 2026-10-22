@@ -40,6 +40,7 @@ brew upgrade --cask rootout   # later, for a new version (token still exported)
 - `TAP_GITHUB_TOKEN`: Actions secret on `shiva2021/rootout`. Fine-grained, resource owner shiva2021, repository `homebrew-rootout` only, Contents read and write, one-year expiry.
 - Rotate it before it expires: create a new token with the same settings, then `gh secret set TAP_GITHUB_TOKEN --repo shiva2021/rootout` and paste it. Delete the old token.
 - `HOMEBREW_GITHUB_API_TOKEN`: each user's own token, read access to `shiva2021/rootout` releases. Needed for `brew install` and `brew upgrade`.
+- On a machine with `gh` logged in, `export HOMEBREW_GITHUB_API_TOKEN=$(gh auth token)` should be enough (its OAuth token has `repo` scope). Not yet verified against a real release.
 
 ## Known limits
 - The binary is not code-signed or notarized (D-030). The cask clears the quarantine flag after install; a direct download needs `xattr -d com.apple.quarantine rootout`. A future macOS may block this; signing is the fix.

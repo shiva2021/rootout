@@ -3,7 +3,7 @@
 _Updated: 2026-10-22 · Session: M5 release pipeline (D-030…D-032)_
 
 ## Status
-M5 is built and committed on `main`; the first release through it (v0.4.0) is **waiting on one manual step**: the Actions secret `TAP_GITHUB_TOKEN` does not exist yet. Everything else is in place: GoReleaser config, `CI` and `Release` workflows, `scripts/release_notes.sh`, `make release-check` / `make snapshot`, runbook `docs/kb/release.md`, README Install section, private tap repo `shiva2021/homebrew-rootout` (created, README only). `CI` is green on GitHub (macOS, 1m18s). The `0.4.0` CHANGELOG section is committed and pushed (`5a08a0b`) and `make release-check NEXT=v0.4.0` passes. Spec and plan: `docs/plans/m5-release.md` (Tasks 1–5 done, Task 6 from step 1b, Task 7 pending).
+M5 is built and committed on `main`; the first release through it (v0.4.0) is **waiting on one manual step**: the Actions secret `TAP_GITHUB_TOKEN` does not exist yet. Everything else is in place: GoReleaser config, `CI` and `Release` workflows, `scripts/release_notes.sh`, `make release-check` / `make snapshot`, runbook `docs/kb/release.md`, README Install section, private tap repo `shiva2021/homebrew-rootout` (created, README only). `CI` is green on GitHub (macOS, 50s to 1m18s; latest run on `4f54b99` green). The `0.4.0` CHANGELOG section is committed and pushed (`5a08a0b`) and `make release-check NEXT=v0.4.0` passes. Spec and plan: `docs/plans/m5-release.md` (Tasks 1–5 done, Task 6 from step 1b, Task 7 pending).
 
 ## Done this session (M5, D-030…D-032)
 - Decisions logged first: D-030 signing deferred (cask clears quarantine), D-031 private repo + private tap with GoReleaser's token download strategy, D-032 release on every `v*` tag with CHANGELOG notes and `make release-check` as the test gate.
@@ -15,7 +15,7 @@ M5 is built and committed on `main`; the first release through it (v0.4.0) is **
 ## Next steps
 1. **Shivang:** create a fine-grained token on github.com (Settings › Developer settings › Fine-grained tokens): owner shiva2021, repository `homebrew-rootout` only, Contents read and write, one-year expiry. Then `gh secret set TAP_GITHUB_TOKEN --repo shiva2021/rootout` and paste it.
 2. Cut v0.4.0 (plan Task 6 steps 3–4): `git tag -a v0.4.0 -m "v0.4.0: release pipeline (GoReleaser, CI, private Homebrew tap)"`, `git push origin v0.4.0`, watch the `Release` run, check the release assets/notes and `Casks/rootout.rb` in the tap.
-3. Install from the tap on this Mac (Task 6 steps 5–6): needs `HOMEBREW_GITHUB_API_TOKEN` with read access to `shiva2021/rootout`; then `rm ~/.local/bin/rootout` so it does not shadow the brew copy. If the download fails in the strategy class, apply the `GitHub.get_release` fallback from `docs/kb/release.md` and cut v0.4.1.
+3. Install from the tap on this Mac (Task 6 steps 5–6): try `export HOMEBREW_GITHUB_API_TOKEN=$(gh auth token)` first (repo scope, unverified), else a fine-grained token with read access to `shiva2021/rootout`; then `rm ~/.local/bin/rootout` so it does not shadow the brew copy. If the download fails in the strategy class, apply the `GitHub.get_release` fallback from `docs/kb/release.md` and cut v0.4.1.
 4. Earlier manual checks still open (unchanged from last session): model grid and home loop in a real terminal; Full Disk Access denied path; v0.2 interactive flows; M2 QA on a throwaway account; live `scan --llm`.
 5. M6 membership gate: write its plan (D-024).
 
@@ -81,6 +81,7 @@ M5 is built and committed on `main`; the first release through it (v0.4.0) is **
 ## Blockers and open questions
 - Unsigned binary relies on the cask's quarantine-clearing hook (D-030); a future macOS may block it. Signing via the D-015 quill flow is the fix.
 - `TAP_GITHUB_TOKEN` expires after a year; rotation steps in `docs/kb/release.md`.
+- The release job has never run. `scripts/release_notes.sh` passed its tests under GNU sed 4.10 and mawk locally (Ubuntu uses those), but the job itself, the pinned `goreleaser-action` install and the cask download strategy are first exercised by v0.4.0. Release notes run before GoReleaser, so a script failure publishes nothing.
 - Intel Macs: `ollama.Recommend` caps them at the 8 GB tier, so bigger tiers are marked too large and now sit under "Need more memory than this Mac has", which is wrong for a large-RAM Intel Mac. Pre-existing semantics, not changed by D-029.
 - `Group Containers` is not probed or tagged by D-026; nobody has checked whether its entries carry the same TCC protection as `~/Library/Containers`. Test only with a throwaway entry and the Finder GUI as fallback.
 - `docs/research/vscode-extension-audit/` names Shivang's LeetCode username; remove it before the repo ever goes public.
