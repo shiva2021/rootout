@@ -23,8 +23,9 @@ archives:
 checksum:
   name_template: checksums.txt
 
-changelog:
-  disable: true
+# No changelog.disable: in 2.18.3 it skips the pipe that loads --release-notes,
+# leaving the release body empty (v0.4.0). With --release-notes set, the pipe
+# uses that file and never builds a commit-based changelog.
 
 snapshot:
   version_template: "{{ incpatch .Version }}-next"

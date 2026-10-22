@@ -49,7 +49,7 @@ Windows builds.
 - **archives**: `tar.gz`, `name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"`,
   files `README.md` and `CHANGELOG.md`.
 - **checksum**: `checksums.txt`.
-- **changelog**: `disable: true`. Notes are supplied with `--release-notes`.
+- **changelog**: left enabled. Notes are supplied with `--release-notes`, which makes the changelog pipe use that file and skip commit-based generation. (Implementation note: `disable: true` skips the pipe that loads `--release-notes`, so v0.4.0 shipped with an empty body.)
 - **release**: `github: {owner: shiva2021, name: rootout}`, `prerelease: auto`.
 - **snapshot**: `version_template: "{{ incpatch .Version }}-next"`.
 - **homebrew_casks** (one entry, `name: rootout`):
