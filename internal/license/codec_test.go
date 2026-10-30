@@ -1,6 +1,7 @@
 package license
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
@@ -85,6 +86,30 @@ func TestDecodeRejects(t *testing.T) {
 	}
 }
 
+// The Worker signs JSON.stringify output, which does not escape HTML characters.
+func TestEncodeNoHTMLEscape(t *testing.T) {
+	c := patronClaims()
+	c.Sub = "a&b<c>"
+	key, err := Encode(c, testPriv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := b64.DecodeString(strings.Split(key, ".")[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(payload), `"sub":"a&b<c>"`) {
+		t.Errorf("payload %s escapes HTML characters", payload)
+	}
+	if bytes.HasSuffix(payload, []byte("\n")) {
+		t.Errorf("payload %q ends with a newline", payload)
+	}
+	got, err := Decode(key, testPub)
+	if err != nil || got != c {
+		t.Errorf("round trip = %+v, %v", got, err)
+	}
+}
+
 func TestDecodeBadPublicKeyLength(t *testing.T) {
 	key, err := Encode(patronClaims(), testPriv)
 	if err != nil {
@@ -163,7 +188,10 @@ func TestGoldenKey(t *testing.T) {
 		t.Errorf("got %+v, want %+v", got, g.Claims)
 	}
 	// Encoding is deterministic, so the committed key must match a fresh one.
-	fresh, _ := Encode(g.Claims, testPriv)
+	fresh, err := Encode(g.Claims, testPriv)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if fresh != g.Key {
 		t.Error("golden key differs from a fresh encode; run with -update if intended")
 	}

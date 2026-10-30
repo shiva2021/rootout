@@ -1,6 +1,7 @@
 package license
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/hex"
@@ -32,10 +33,14 @@ func Encode(c Claims, priv ed25519.PrivateKey) (string, error) {
 	if len(priv) != ed25519.PrivateKeySize {
 		return "", fmt.Errorf("license: private key has %d bytes", len(priv))
 	}
-	payload, err := json.Marshal(c)
-	if err != nil {
+	// No HTML escaping, so the bytes match JSON.stringify in the Worker.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(c); err != nil {
 		return "", fmt.Errorf("license: encode claims: %w", err)
 	}
+	payload := bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
 	sig := ed25519.Sign(priv, payload)
 	return Prefix + "." + b64.EncodeToString(payload) + "." + b64.EncodeToString(sig), nil
 }
