@@ -156,3 +156,30 @@ func TestInspectPrintsClaims(t *testing.T) {
 		t.Errorf("bad key: exit %d, want 2", code)
 	}
 }
+
+func TestExitCodes(t *testing.T) {
+	path := genKey(t)
+	missing := filepath.Join(t.TempDir(), "none.pem")
+	tests := []struct {
+		name string
+		args []string
+		want int
+	}{
+		{"unknown flag", []string{"admin", "--bogus"}, 2},
+		{"unknown command", []string{"bogus"}, 2},
+		{"missing mid", []string{"admin", "--key", path}, 2},
+		{"missing sign flags", []string{"sign", "--kind", "trial", "--key", path}, 2},
+		{"non-integer days", []string{"sign", "--kind", "trial", "--sub", "u", "--mid", testMID, "--days", "x", "--key", path}, 2},
+		{"extra args", []string{"gen", "extra", "--out", missing}, 2},
+		{"inspect needs a key", []string{"inspect", "--key", path}, 2},
+		{"unreadable key file", []string{"admin", "--mid", testMID, "--key", missing}, 1},
+		{"ok", []string{"admin", "--mid", testMID, "--key", path}, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if code, _, errs := runCmd(t, tt.args...); code != tt.want {
+				t.Errorf("exit %d, want %d (stderr %q)", code, tt.want, errs)
+			}
+		})
+	}
+}

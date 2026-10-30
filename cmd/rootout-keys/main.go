@@ -16,7 +16,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -59,7 +58,15 @@ The private key stays on the maintainer's Mac (default
 manager; see docs/kb/membership.md.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		Args:          cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				return badInput{fmt.Errorf("unknown command %q", args[0])}
+			}
+			return cmd.Help()
+		},
 	}
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return badInput{err} })
 	root.SetArgs(args)
 	root.SetIn(in)
 	root.SetOut(out)
@@ -72,21 +79,37 @@ manager; see docs/kb/membership.md.`,
 	}
 	_, _ = fmt.Fprintln(errw, "rootout-keys:", err)
 	var bi badInput
-	if errors.As(err, &bi) || isUsageError(err) {
+	if errors.As(err, &bi) {
 		return exitBadInput
 	}
 	return exitError
 }
 
-// isUsageError reports cobra's own flag and argument errors, which have no
-// sentinel type.
-func isUsageError(err error) bool {
-	for _, p := range []string{"unknown ", "required flag", "invalid argument", "accepts ", "flag needs"} {
-		if strings.HasPrefix(err.Error(), p) {
-			return true
+// requireFlags fails with a usage error unless every named flag was given.
+func requireFlags(cmd *cobra.Command, names ...string) error {
+	for _, n := range names {
+		if !cmd.Flags().Changed(n) {
+			return badInput{fmt.Errorf("required flag --%s not set", n)}
 		}
 	}
-	return false
+	return nil
+}
+
+// noArgs and exactArgs turn cobra's argument errors into usage errors.
+func noArgs(cmd *cobra.Command, args []string) error {
+	if err := cobra.NoArgs(cmd, args); err != nil {
+		return badInput{err}
+	}
+	return nil
+}
+
+func exactArgs(n int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if err := cobra.ExactArgs(n)(cmd, args); err != nil {
+			return badInput{err}
+		}
+		return nil
+	}
 }
 
 func genCmd() *cobra.Command {
@@ -99,7 +122,7 @@ func genCmd() *cobra.Command {
 license.PublicKeyHex and the base64 PKCS#8 for the Worker's SIGNING_KEY secret.`,
 		Example: `  rootout-keys gen
   rootout-keys gen --out /path/to/private.pem`,
-		Args: cobra.NoArgs,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			pub, priv, err := ed25519.GenerateKey(rand.Reader)
 			if err != nil {
@@ -130,15 +153,18 @@ func adminCmd() *cobra.Command {
 		Long: `Issue an admin key bound to one Mac. Get the machine code by running
 "rootout license" on that Mac. Admin keys never expire.`,
 		Example: `  rootout-keys admin --mid 0123456789abcdef0123456789abcdef`,
-		Args:    cobra.NoArgs,
+		Args:    noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := requireFlags(cmd, "mid"); err != nil {
+				return err
+			}
 			c := license.Claims{V: 1, Kind: license.KindAdmin, Sub: "admin", MID: mid, IAT: time.Now().Unix()}
 			return issue(cmd.OutOrStdout(), c, keyPath)
 		},
 	}
 	cmd.Flags().StringVar(&mid, "mid", "", "machine code from rootout license (32 lowercase hex)")
 	cmd.Flags().StringVar(&keyPath, "key", defaultKeyPath, "private key file")
-	_ = cmd.MarkFlagRequired("mid")
+
 	return cmd
 }
 
@@ -153,8 +179,11 @@ func signCmd() *cobra.Command {
 trial 7). A negative or zero --days is rejected because the key would
 already be expired.`,
 		Example: `  rootout-keys sign --kind patron --sub 12345 --mid 0123456789abcdef0123456789abcdef --days 35`,
-		Args:    cobra.NoArgs,
+		Args:    noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := requireFlags(cmd, "kind", "sub", "mid"); err != nil {
+				return err
+			}
 			k := license.Kind(kind)
 			if k != license.KindPatron && k != license.KindTrial {
 				return badInput{fmt.Errorf("--kind must be patron or trial, got %q", kind)}
@@ -176,9 +205,7 @@ already be expired.`,
 	cmd.Flags().StringVar(&mid, "mid", "", "machine code from rootout license (32 lowercase hex)")
 	cmd.Flags().IntVar(&days, "days", 0, "lifetime in days (default: the kind's real lifetime)")
 	cmd.Flags().StringVar(&keyPath, "key", defaultKeyPath, "private key file")
-	_ = cmd.MarkFlagRequired("kind")
-	_ = cmd.MarkFlagRequired("sub")
-	_ = cmd.MarkFlagRequired("mid")
+
 	return cmd
 }
 
@@ -190,7 +217,7 @@ func inspectCmd() *cobra.Command {
 		Long: `Verify a key against the public half of the private key file and print its
 claims. Fails for a key signed by a different keypair.`,
 		Example: `  rootout-keys inspect ro1.eyJ2IjoxLi4u.c2ln...`,
-		Args:    cobra.ExactArgs(1),
+		Args:    exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			priv, err := loadKey(keyPath)
 			if err != nil {
@@ -248,9 +275,11 @@ func saveKey(path string, der []byte) error {
 	}
 	if err := pem.Encode(f, &pem.Block{Type: "PRIVATE KEY", Bytes: der}); err != nil {
 		_ = f.Close()
+		_ = os.Remove(path)
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
