@@ -104,7 +104,7 @@ Run: `cd service && npm init -y && npm i -D typescript wrangler vitest @cloudfla
   export async function putCreator(kv, pair): Promise<void>          // copies current → creator_prev, then writes creator
   export interface Device { mid: string; iat: number }
   export async function getDevices(kv, userId): Promise<Device[]>
-  export async function addDevice(kv, userId, mid, now): Promise<{ devices: Device[]; evicted: Device | null }> // cap 2, refresh if present, else drop oldest
+  export async function addDevice(kv, userId, mid, now): Promise<{ devices: Device[]; evicted: Device | null }> // cap 2; if mid present → no write, no eviction; else drop oldest by iat when full
   export async function hasDevice(kv, userId, mid): Promise<boolean>
   export async function trialSeen(kv, mid): Promise<boolean>; export async function markTrial(kv, mid, now)
   export async function getMember(kv, userId): Promise<string | null>; export async function putMember(kv, userId, memberId)
@@ -126,7 +126,7 @@ Run: `cd service && npm init -y && npm i -D typescript wrangler vitest @cloudfla
 - [ ] **Step 1: Write failing tests** using `fetchMock` from `cloudflare:test` for Patreon and the Miniflare KV binding:
   - `patreon.test.ts`: `exchangeCode posts form fields and parses tokens`; `identityMembership picks our campaign and ignores others`; `identityMembership returns memberId null when not a member`; `memberById maps fields`; `isActive table` (active+cents, active+gifted, active+0 cents not gifted → false, declined → false, null → false); `401 throws PatreonAuthError`.
   - `state.test.ts`: `round trip`; `expired → null`; `tampered sig → null`.
-  - `kv.test.ts`: `addDevice caps at 2 and evicts oldest`; `addDevice refreshes an existing mid without eviction`; `putCreator keeps the previous pair`; `getCreator falls back to creator_prev`.
+  - `kv.test.ts`: `addDevice caps at 2 and evicts oldest`; `addDevice with an existing mid writes nothing and evicts nothing`; `putCreator keeps the previous pair`; `getCreator falls back to creator_prev`.
 - [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
 - [ ] **Step 5: Commit** `git commit -m "service: router, KV helpers, Patreon client and signed state"`
 
@@ -140,12 +140,15 @@ Run: `cd service && npm init -y && npm i -D typescript wrangler vitest @cloudfla
 
 **Interfaces:**
 - Consumes: S1 `sign`, S2 everything.
-- `GET /?m=<mid>` → 200 HTML; form field `m` prefilled when `isMid`; button links to `authorizeUrl(env, signState({mid, nonce, exp}))`; without a valid `m` the page explains how to get the machine code (`rootout license`).
+- `GET /?m=<mid>` → 200 HTML; a form (`method=GET action=/start`) with field `m` prefilled when `isMid` and a "Log in with Patreon" submit button; without a valid `m` the page explains how to get the machine code (`rootout license`). The field is editable, so the form must act on edits:
+- `GET /start?m=<mid>` → `isMid` else 400 page → 302 to `authorizeUrl(env, await signState(env, {mid, nonce: crypto.randomUUID(), exp: now+600}))`. Add `"GET /start"` to the router table.
 - `GET /callback?code=&state=` → verify state (400 on failure) → `exchangeCode` → `identityMembership(user token)` → if `memberId`: try `memberById(creator)`; on `PatreonAuthError` fall back to the identity membership and `ctx.waitUntil(alert(env, "creator token rejected"))` → `isActive`? → `addDevice`, `putMember`, `sign({v:1, kind:"patron", sub:userId, mid, iat:now, exp:now+PATRON_LIFE})` → `keyPage` (200, `Cache-Control: no-store`). Not active → `deniedPage(reason)` 200 with reasons `free_member | declined_patron | former_patron | not_a_member`.
 
 - [ ] **Step 1: Write failing tests** (`SELF.fetch` from `cloudflare:test`, Patreon via `fetchMock`, env secrets via `vitest.config.ts` `miniflare.bindings` with the test PKCS#8 and a fixed `STATE_SECRET`):
-  - `home: prefills a valid mid and links to Patreon with a state`
+  - `home: prefills a valid mid in a form posting to /start`
   - `home: without m explains rootout license`
+  - `start: valid mid redirects 302 to patreon.com/oauth2/authorize with scope=identity and a verifiable state carrying that mid`
+  - `start: bad mid → 400`
   - `callback: active patron gets a patron key bound to the state mid` (decode with `verify` + golden pub; `exp-iat === 35*86400`; KV has `devices:<uid>` and `member:<uid>`)
   - `callback: third device evicts the oldest` (pre-seed two devices)
   - `callback: null patron_status is not active` → denied page contains `free`
@@ -163,11 +166,12 @@ Run: `cd service && npm init -y && npm i -D typescript wrangler vitest @cloudfla
 - Create: `service/src/routes/renew.ts`, `service/src/routes/trial.ts`, `service/test/renew.test.ts`, `service/test/trial.test.ts`
 
 **Interfaces:**
-- `POST /renew` body `{key}` → `verify(key, pub)` (public key derived from `SIGNING_KEY` at startup; cache the `CryptoKey`s in module scope) → null → 400 `{"reason":"bad_key"}`; `kind !== "patron"` → 403 `{"reason":"not_renewable"}`; `!hasDevice(sub, mid)` → 403 `device_replaced`; `getMember(sub)` null → 403 `unknown_member`; `memberById(creator)` → `PatreonAuthError` → 503 `creator_token` (+ alert); `!isActive` → 403 `patronStatus ?? "inactive"`; else 200 `{key: sign({... same sub, mid, iat: now, exp: now+PATRON_LIFE})}` and refresh the device's `iat`.
+- `POST /renew` body `{key}` → `verify(key, pub)` (public key derived from `SIGNING_KEY` at startup; cache the `CryptoKey`s in module scope) → null → 400 `{"reason":"bad_key"}`; `kind !== "patron"` → 403 `{"reason":"not_renewable"}`; `!hasDevice(sub, mid)` → 403 `device_replaced`; `getMember(sub)` null → 403 `unknown_member`; `memberById(creator)` → `PatreonAuthError` → 503 `creator_token` (+ alert); `!isActive` → 403 `patronStatus ?? "inactive"`; else 200 `{key: sign({... same sub, mid, iat: now, exp: now+PATRON_LIFE})}` with no KV write.
 - `POST /trial` body `{mid}` → `!isMid` → 400; `trialSeen` → 409 `{"reason":"trial_used"}`; else `markTrial`, 200 `{key: sign({v:1, kind:"trial", sub:"trial", mid, iat, exp: iat+TRIAL_LIFE})}`.
 - Both: `Content-Type` must be JSON, body ≤ 4 KiB, otherwise 400.
+- **KV write budget.** The Workers Free plan allows roughly 1,000 KV writes per day (verify the current figure at docs.cloudflare.com/kv/platform/limits when implementing). `/trial` is an unauthenticated write per call, so a trivial loop could exhaust the day's quota and block real trials and renewals. Therefore: (a) a successful `/renew` performs **no** KV write (do not refresh the device `iat`; eviction order uses issue time only); (b) `/trial` and `/renew` go through a Workers **rate-limit binding** (`[[unsafe.bindings]] type = "ratelimit"` or its current stable name; confirm it works without a zone) keyed by client IP: 5 requests per minute → 429 `{"reason":"rate_limited"}`; (c) the CLI treats 429 like a network error. The runbook lists the quota as a known limit and the `wrangler kv` command to inspect write counts.
 
-- [ ] **Step 1: Write failing tests**: `renew: active member gets a fresh key with same sub and mid`; `renew: trial key → 403 not_renewable`; `renew: admin key → 403`; `renew: foreign signature → 400`; `renew: evicted device gets device_replaced`; `renew: declined → 403 declined_patron`; `renew: creator 401 → 503 creator_token`; `trial: first call issues 7-day key and marks KV`; `trial: second call 409`; `trial: bad mid 400`.
+- [ ] **Step 1: Write failing tests**: `renew: active member gets a fresh key with same sub and mid and performs no KV write` (spy on `KEYS.put`); `renew: sixth call in a minute from one IP → 429`; `trial: sixth call in a minute → 429`; `renew: trial key → 403 not_renewable`; `renew: admin key → 403`; `renew: foreign signature → 400`; `renew: evicted device gets device_replaced`; `renew: declined → 403 declined_patron`; `renew: creator 401 → 503 creator_token`; `trial: first call issues 7-day key and marks KV`; `trial: second call 409`; `trial: bad mid 400`.
 - [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
 - [ ] **Step 5: Commit** `git commit -m "service: renew and trial endpoints"`
 

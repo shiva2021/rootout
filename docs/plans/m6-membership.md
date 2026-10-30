@@ -71,9 +71,9 @@ rootout: deletion and AI features are for members (trial ended 2026-11-06).
 | `remove` | `cmd/rootout/remove.go` after the dry-run return, before the confirm | yes (y/n notice; `--yes` skips) |
 | `orphans` | `orphans.go` after the empty-plan check, before the confirm switch | yes |
 | `scan --uninstall <id>` | top of `uninstallByID` | yes |
-| review-screen uninstall | `tui.ReviewScan` gets `Assessor.Gate func() error`, run on `enter` before the typed box opens; `reviewAndUninstall` checks again before `uninstallExtensions` | no |
+| review-screen uninstall | `tui.ReviewScan` gets `Assessor.Gate func() error`, run on `enter` before the typed box opens; `reviewAndUninstall(…, startTrial bool)` checks again before `uninstallExtensions` | yes from the home loop (two-phase, below); from the subcommand the y/n result is passed in |
 | LLM | `assessFunc` wrapper returns `ErrMembership`; `buildAssessor` sets `Label` to "AI: members · rootout license" when not allowed | no (per row, concurrent, not destructive intent) |
-| home loop | `homeUninstall` / `homeOrphans` gate before `Confirm`; denied → red flash | yes, auto-start with flash "7-day trial started" |
+| home loop | `homeUninstall` / `homeOrphans` are **two-phase**: `gate(…, false)` before `Confirm` denies real refusals (trial used, expired, invalid) with a red flash; `StatusNone` proceeds to `Confirm`; only after the user confirms does `gate(…, true)` start the trial | yes, after the confirm, with flash "7-day trial started" (look-and-cancel never spends the trial) |
 
 `Resolve` runs once per process per gated action (a small cache in `cmd/rootout/gate.go`); the scan screen may call `assessFunc` many times. `doctor` and `license status` read and verify the key but never call `/renew` or `/trial`. Under `--json` the denial goes to stderr and the exit code is 4; stdout stays JSON-only.
 
@@ -153,7 +153,8 @@ Patron key life 35 days, silent renewal under 7 days left, 14-day grace only whe
 2. `ioreg` output without `IOPlatformUUID` (VM, odd hardware) → `MachineID` error → every gate denies with "could not read this Mac's id" (Task 2 test `TestMachineIDMissingUUID`; Task 5 test `TestGateMachineIDError`).
 3. The service returns a key that does not verify (wrong `mid`, bad signature) on `/renew` or `/trial` → treated like a network error, old key kept (Task 3 test `TestResolveRenewReturnsBadKey`).
 4. `remove --json` without a key → stdout empty, stderr carries the denial, exit 4 (Task 5 test `TestRemoveJSONDenied`).
-5. Many concurrent `assessFunc` calls on the scan screen → one `Resolve`, one `/trial` at most, no data race under `go test -race` (Task 5 test `TestGateCacheConcurrent`).
+5. Many concurrent `assessFunc` calls on the scan screen → one `Resolve`, **zero** `/trial` calls (the LLM path never passes `startTrial=true`), no data race under `go test -race` (Task 5 test `TestGateCacheConcurrent`).
+6. A keyless user in the TUI opens a removal plan, looks, and cancels → the once-per-Mac trial is **not** spent (Task 5 test `TestHomeUninstallCancelKeepsTrial`).
 
 ---
 
@@ -241,6 +242,7 @@ git commit -m "release: GoReleaser 2.19.0, cask hook via install_steps"
 ```go
 func TestEncodeDecodeRoundTrip(t *testing.T) // patron claims survive; Decode with testPub returns equal Claims
 func TestDecodeRejects(t *testing.T) // table: wrong prefix, 2 segments, bad base64, tampered payload byte, wrong public key, Valid() failures (v=2, kind "x", mid 10 chars, patron without exp, exp<iat) → errors.Is(err, ErrBadKey)
+func TestDecodeBadPublicKeyLength(t *testing.T) // pub of 0 and 31 bytes → ErrBadKey, no panic (ed25519.Verify panics on a wrong-length key; Decode checks len(pub)==ed25519.PublicKeySize first; an empty PublicKeyHex therefore fails closed)
 func TestExpiresAdminNone(t *testing.T) // admin claims → ok=false
 func TestGoldenKey(t *testing.T) // decode testdata/golden.json "key" with pub from the file; with -update regenerate: {"seed_hex","pub_hex","key","claims"} for the fixed claims {1,patron,"12345678","0123456789abcdef0123456789abcdef",1730246400,1733270400}
 ```
@@ -305,7 +307,7 @@ git commit -m "license: Ed25519 key codec and machine id (D-034)"
   type DeniedError struct{ Reason string }        // 403 from /renew; Error() = "membership check failed: "+Reason
   var ErrTrialUsed = errors.New("license: the trial was already used on this Mac")
   var ErrServiceUnavailable = errors.New("license: key service unavailable")
-  func (c Client) Renew(ctx context.Context, key string) (string, error) // POST /renew {"key"}; 200 {"key"}; 403 {"reason"} → *DeniedError; 5xx/net → wraps ErrServiceUnavailable
+  func (c Client) Renew(ctx context.Context, key string) (string, error) // POST /renew {"key"}; 200 {"key"}; 403 {"reason"} → *DeniedError; 429/5xx/net → wraps ErrServiceUnavailable
   func (c Client) Trial(ctx context.Context, mid string) (string, error)  // POST /trial {"mid"}; 200 {"key"}; 409 → ErrTrialUsed; else ErrServiceUnavailable
 
   type Status string
@@ -364,7 +366,7 @@ git commit -m "license: Ed25519 key codec and machine id (D-034)"
 | `InvalidSignature` | tampered | down | `StatusInvalid`, denied, Reason mentions `rootout license remove` |
 | `NoMachineID` | any | down | `StatusNoMachine`, denied |
 
-plus `TestResolveMalformedClaims` (patron key without `exp`, `iat` 2 days in the future → `StatusInvalid`) and `TestResolveRenewReturnsBadKey` (200 with a key signed by another keypair → old key kept, `StatusGrace` when expired, `StatusMember` when not).
+plus `TestResolveMalformedClaims` (patron key without `exp` → `StatusInvalid`; `iat` 2 days in the future → `StatusInvalid`; `iat` 5 minutes in the future → accepted: **tolerance is `iat ≤ now + 24h`**, checked in `Resolve`, not in `Valid()`, because `Valid()` has no clock) and `TestResolveRenewReturnsBadKey` (200 with a key signed by another keypair → old key kept, `StatusGrace` when expired, `StatusMember` when not).
 
 - [ ] **Step 10: Run to verify they fail**; **Step 11: Implement `resolve.go`** following the state machine in the spec (renew before evaluate; `DaysLeft = ceil((exp−now)/24h)`); **Step 12: Run to verify they pass**
 
@@ -382,11 +384,11 @@ git commit -m "license: key store, service client and Resolve state machine (D-0
 
 ### Task 4: `rootout-keys` admin tool and the membership runbook
 
+Fully automatable; the human step is **Checkpoint K** right after it.
+
 **Files:**
 - Create: `cmd/rootout-keys/main.go`, `cmd/rootout-keys/main_test.go`
 - Create: `docs/kb/membership.md`; modify `docs/kb/README.md` (index row)
-- Modify: `internal/license/claims.go` → set `PublicKeyHex` to the real public key produced by `gen` (Shivang runs `gen` once; the hex goes in this commit)
-- Modify: `.gitignore` (nothing: the key lives under `~/.config`, outside the repo)
 
 **Interfaces:**
 - Consumes: `license.Encode`, `license.Claims`, constants from Task 3.
@@ -403,21 +405,27 @@ git commit -m "license: key store, service client and Resolve state machine (D-0
 
 Run: `go test ./cmd/rootout-keys/ -v && go vet ./...`
 
-- [ ] **Step 5: Shivang generates the real keypair**
-
-Run: `go run ./cmd/rootout-keys gen`
-Then: paste the public hex into `license.PublicKeyHex`; store `~/.config/rootout-keys/private.pem` **and** the printed PKCS8 base64 in the password manager (the runbook names the entry "rootout signing key"). The Worker secret is set in `m6-service.md` Task S6.
-
-- [ ] **Step 6: Write `docs/kb/membership.md`**
+- [ ] **Step 5: Write `docs/kb/membership.md`**
 
 Sections: How keys work (format, kinds, lifetimes, machine id); Admin key per Mac (`rootout license` prints the machine code → `rootout-keys admin --mid …` → `rootout license <key>`); Key backup and rotation (second accepted const for one release cycle); Service operations (secrets list, `wrangler kv` re-seed of the creator token, reading the alert issue, resetting a trial `wrangler kv key delete trial:<mid>`, device list `devices:<userId>`); Support answers (declined payment, device replaced, lost key). Add the row to `docs/kb/README.md`: "`membership.md` | Touching the gate, issuing or rotating keys, or operating the key service".
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add cmd/rootout-keys internal/license/claims.go docs/kb/membership.md docs/kb/README.md
-git commit -m "rootout-keys: local signing tool; embed the public key; membership runbook (D-034)"
+git add cmd/rootout-keys docs/kb/membership.md docs/kb/README.md
+git commit -m "rootout-keys: local signing tool and membership runbook (D-034)"
 ```
+
+---
+
+### Checkpoint K: Shivang generates and backs up the real keypair (human, ~10 min)
+
+Depended on by Task 5 Step 12 (manual check), Task 7 (release) and `m6-service.md` S6 (Worker secret). Tasks 5 and 6 can be developed and unit-tested before K with the test keypair, since every test injects `Deps.Pub`.
+
+- [ ] **K1.** `go run ./cmd/rootout-keys gen` → writes `~/.config/rootout-keys/private.pem` (0600), prints the public hex and the PKCS8 base64.
+- [ ] **K2.** Store both the PEM file contents and the PKCS8 base64 in the password manager under "rootout signing key" (the runbook names this entry). Confirm the entry opens before continuing.
+- [ ] **K3.** Paste the public hex into `license.PublicKeyHex` in `internal/license/claims.go`; `make test` still green (tests use `Deps.Pub`).
+- [ ] **K4.** Commit: `git commit -am "license: embed the production public key (D-034)"`.
 
 ---
 
@@ -453,7 +461,7 @@ git commit -m "rootout-keys: local signing tool; embed the public key; membershi
   func PickAction(ctx context.Context, version, status string, flash Flash) (Action, error)
   ```
 
-- [ ] **Step 1: Write failing gate tests** (`gate_test.go`, `FakeHome`, `ROOTOUT_LICENSE_FILE` into the fake home, injected fake Runner and `httptest` service via a package-level `gateDepsFn` hook): `TestGateAllowedCached` (two calls, one Resolve), `TestGateCacheConcurrent` (50 goroutines, `-race`, one `/trial` call), `TestGateMachineIDError` (Runner error → `ErrMembership`, message contains "could not read this Mac's id"), `TestMembershipErrorMessage` (contains `ServiceURL + "/?m=" + mid`, "rootout license", no Patreon URL).
+- [ ] **Step 1: Write failing gate tests** (`gate_test.go`, `FakeHome`, `ROOTOUT_LICENSE_FILE` into the fake home, injected fake Runner and `httptest` service via a package-level `gateDepsFn` hook): `TestGateAllowedCached` (two calls, one Resolve), `TestGateCacheConcurrent` (50 goroutines all `startTrial=false`, `-race`, one Resolve, zero `/trial` calls), `TestGateNoneThenTrial` (`gate(false)` → `StatusNone` denied, then `gate(true)` → `/trial` called once, allowed, later `gate(false)` served from cache), `TestGateMachineIDError` (Runner error → `ErrMembership`, message contains "could not read this Mac's id"), `TestMembershipErrorMessage` (contains `ServiceURL + "/?m=" + mid`, "rootout license", no Patreon URL).
 
 - [ ] **Step 2: Run to verify they fail**; **Step 3: Implement `gate.go`**; **Step 4: Run to verify they pass**
 
@@ -461,15 +469,16 @@ git commit -m "rootout-keys: local signing tool; embed the public key; membershi
   - `TestRemoveDryRunFreeWithoutKey` (exit 0, no service call), `TestRemoveDeniedExit4` (trial used → exit 4, stderr has the two-route message), `TestRemoveJSONDenied` (stdout empty), `TestRemoveTrialPromptNo` (stdin "n" → exit 3, nothing removed), `TestRemoveTrialYesStarts` (`--yes` → `/trial` called once).
   - `TestOrphansListFreeWithoutKey`, `TestOrphansRemoveDenied`.
   - `TestScanHeuristicsFreeWithoutKey` (`scan --no-tui`, exit 0), `TestScanLLMDeniedExit4` (`--no-tui --llm` with a configured provider and no key → heuristics printed, exit 4), `TestScanUninstallDenied`.
+  - `cmd/rootout/tui_test.go`: `TestHomeUninstallCancelKeepsTrial` (no key, fake Confirmer returns false → zero `/trial` calls, flash "Nothing removed"), `TestHomeUninstallConfirmStartsTrial` (Confirmer true → one `/trial` call, flash starts with "7-day trial started"), `TestHomeUninstallTrialUsedDeniedBeforeConfirm` (409 → red flash, Confirmer never called). These need `homeUninstall` to take its Confirmer and plan deps through a small struct (`homeDeps{confirm plan.Confirmer; run run.Runner; gate gateFn}`) so tests inject fakes; `runAction` builds the real one.
   - `internal/tui/scan_test.go`: `TestReviewScanGateBlocksEnter` (Gate returns an error → typed box never opens, flash shows the message), `TestReviewScanGateNilAllows`.
   - `internal/tui/home_test.go`: `TestHomeTitleStatus` (title contains `· trial: 5 days left`), `TestHomeBlurbsMembers` (uninstall and orphans rows end with `(members)` when status says so).
 
 - [ ] **Step 6: Run to verify they fail**; **Step 7: Wire the gates**
   - `remove.go`: after the dry-run return and before `yesBanner`: `st, err := gate(ctx, env, f.yes || confirmTrial(os.Stdin, os.Stderr)); if err != nil { return denyExit(err) }; trialNotice(st, os.Stderr)`. The prompt is shown only when no key exists (check `license.Store.Load` first so members never see it).
   - `orphans.go`: same, after the empty-plan check, before the confirm switch.
-  - `scan.go`: `uninstallByID` top (same pattern); `reviewAndUninstall` passes `a.Gate = func() error { _, err := gate(ctx, env, false); return err }` and re-checks before `uninstallExtensions`.
+  - `scan.go`: `uninstallByID` top (same pattern); `reviewAndUninstall(ctx, env, shown, a, startTrial bool)` sets `a.Gate = func() error { st, err := gate(ctx, env, false); if err != nil && st.Status != license.StatusNone { return err }; return nil }` (a keyless user may tick and press enter) and after `ReviewScan` returns ok calls `gate(ctx, env, startTrial)` before `uninstallExtensions`, returning `denyExit` on failure. The subcommand passes `f.yes || confirmTrial(...)` (prompt only when no key file exists); `homeScan` passes `true`.
   - `assess.go`: `assessFunc(p, allowed func() error)`; when it returns an error, `Assess` returns it (shows inline). `buildAssessor` resolves once (`gate(ctx, env, false)`); when denied, `Label = "AI: members · rootout license"` and `Assess` still set so the row error explains; `OnModel` keeps the same `allowed`.
-  - `tui.go`: `homeUninstall`/`homeOrphans` gate with `startTrial=true` before `Confirm`; on `*membershipError` return `tui.Flash{Text: err.Error() first line, Err: true}`; on `st.Started` prepend "7-day trial started · " to the outcome flash. `runTUI` computes `status := licenseStatusLine(ctx, env)` (Resolve with `Client=nil`, `StartTrial=false`) before each `PickAction`.
+  - `tui.go`: `homeUninstall`/`homeOrphans` two-phase: `st, err := gate(ctx, env, false)`; if `err != nil && st.Status != license.StatusNone` → `tui.Flash{Text: first line of err.Error(), Err: true}` before `Confirm`; after `Confirm` returns ok → `st, err = gate(ctx, env, true)`; on error the same red flash, nothing executed; on `st.Started` prepend "7-day trial started · " to the outcome flash. `runTUI` computes `status := licenseStatusLine(ctx, env)` (Resolve with `Client=nil`, `StartTrial=false`) before each `PickAction`.
   - `main.go`: remove the root `license.Check`; add `newLicenseCmd`; `firstRunHint` skip list gains `"license"`.
   - `doctor.go`: `Membership` check after `Config` using `licenseStatus` state: `OK = Allowed || Status==StatusNone`-style: `admin`/`member`/`trial` → OK; `expired`/`trial-used`/`invalid`/`no-machine-id` → `!` with Fix `rootout license`; `none` → OK with Detail "no key · 7-day trial available (rootout license)". Add to `Long`.
   - `internal/tui/home.go`: title suffix `· <status>` when non-empty; blurbs.
@@ -484,7 +493,7 @@ git commit -m "rootout-keys: local signing tool; embed the public key; membershi
 Run: `make test && make lint && go test -race ./cmd/... ./internal/license/ ./internal/tui/`
 Expected: all PASS, lint clean.
 
-- [ ] **Step 12: Manual check on this Mac**
+- [ ] **Step 12: Manual check on this Mac** (needs Checkpoint K)
 
 Run: `make build && ./bin/rootout doctor | grep Membership && ./bin/rootout license && ./bin/rootout remove Spotify --dry-run >/dev/null && echo free`
 Expected: `Membership` line with "no key · 7-day trial available", the licence screen with this Mac's machine code and URL, `free`. Then `go run ./cmd/rootout-keys admin --mid <code>` → `./bin/rootout license <key>` → `doctor` shows `admin`; bare `./bin/rootout` title ends `· admin`.
