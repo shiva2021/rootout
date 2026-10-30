@@ -8,6 +8,9 @@ export async function getCreator(kv: KVNamespace): Promise<TokenPair | null> {
   return (await kv.get<TokenPair>("creator", "json")) ?? (await kv.get<TokenPair>("creator_prev", "json"));
 }
 
+// putCreator and addDevice are read-modify-write on KV, so they are not atomic. Concurrent requests can briefly
+// exceed the device cap or clobber creator_prev. That is accepted: traffic is low and the next write self-heals.
+
 /** Keeps the pair being replaced as creator_prev so a failed refresh write never loses both. */
 export async function putCreator(kv: KVNamespace, pair: TokenPair): Promise<void> {
   const current = await kv.get("creator");

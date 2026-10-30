@@ -103,4 +103,11 @@ describe("patreon", () => {
     expect(err).not.toBeInstanceOf(PatreonAuthError);
     expect(err.status).toBe(429);
   });
+
+  it("a non-JSON 2xx body throws PatreonError", async () => {
+    const html = () => new Response("<html></html>", { status: 200, headers: { "content-type": "text/html" } });
+    await expect(identityMembership("t", "999", stubFetch(html()).fetchFn)).rejects.toBeInstanceOf(PatreonError);
+    await expect(exchangeCode(env, "c", stubFetch(html()).fetchFn)).rejects.toBeInstanceOf(PatreonError);
+    await expect(memberById("t", "m1", stubFetch(new Response("", { status: 200 })).fetchFn)).rejects.toBeInstanceOf(PatreonError);
+  });
 });

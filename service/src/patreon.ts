@@ -47,7 +47,11 @@ export function authorizeUrl(env: Env, state: string): string {
 async function checked(res: Response): Promise<unknown> {
   if (res.status === 401) throw new PatreonAuthError();
   if (!res.ok) throw new PatreonError(res.status);
-  return res.json();
+  try {
+    return await res.json();
+  } catch {
+    throw new PatreonError(res.status, "Patreon returned a non-JSON body");
+  }
 }
 
 async function tokenRequest(
