@@ -25,15 +25,31 @@ const membersOnly = tui.StatusMembersOnly
 // noKeyReason is Resolve's Reason for a plain "no key, no trial attempted".
 const noKeyReason = "no key installed"
 
+// deniedMark precedes the service's reason in an expired key's Reason
+// (license.DeniedError's text).
+const deniedMark = "membership check failed: "
+
 // membershipError is a denial: why, and the two routes to a key.
 type membershipError struct{ st license.State }
 
-func (e *membershipError) Error() string {
+// first is the opening of the message without its full stop.
+func (e *membershipError) first() string {
 	detail := e.st.Summary()
-	if e.st.Status == license.StatusNone && e.st.Reason != "" && e.st.Reason != noKeyReason {
-		detail += " · " + e.st.Reason
+	switch e.st.Status {
+	case license.StatusNone:
+		if e.st.Reason != "" && e.st.Reason != noKeyReason {
+			detail += " · " + e.st.Reason
+		}
+	case license.StatusExpired:
+		if _, why, ok := strings.Cut(e.st.Reason, deniedMark); ok && why != "" {
+			detail += " · " + why
+		}
 	}
-	return "deletion and AI features are for members (" + detail + ").\n" +
+	return "deletion and AI features are for members (" + detail + ")"
+}
+
+func (e *membershipError) Error() string {
+	return e.first() + ".\n" +
 		"  Already a member? get your key at " + keysURL(e.st.MID) + "\n" +
 		"  then run: rootout license <key>\n" +
 		"  Not yet? the same page links to the membership."
@@ -80,16 +96,18 @@ func resetGate() {
 }
 
 // gate decides whether a gated action may run, resolving at most once per
-// process: a keyless result from startTrial=false is resolved again the first
-// time a caller may start the trial; every other result is final. Denials
-// return *membershipError.
+// process: a keyless result is resolved again whenever a caller may start the
+// trial (it was not asked, or the service could not be reached); every other
+// result is final. Denials return *membershipError.
 func gate(ctx context.Context, env fsx.Env, startTrial bool) (license.State, error) {
 	gateCache.Lock()
 	defer gateCache.Unlock()
 	c := &gateCache
 	if !c.ok || (startTrial && !c.trial && c.st.Status == license.StatusNone) {
 		st := license.Resolve(ctx, gateDepsFn(env, startTrial))
-		c.st, c.trial, c.ok = st, startTrial, true
+		// A keyless result is never final for a later trial start: the
+		// service may have been unreachable.
+		c.st, c.trial, c.ok = st, startTrial && st.Status != license.StatusNone, true
 		c.st.Started = false // announce a new trial once
 		return verdict(st)
 	}
@@ -143,6 +161,9 @@ func licenseStatusLine(ctx context.Context, env fsx.Env) string {
 	case license.StatusMember, license.StatusGrace:
 		return "member"
 	case license.StatusTrial:
+		if st.DaysLeft == 1 {
+			return "trial: 1 day left"
+		}
 		return fmt.Sprintf("trial: %d days left", st.DaysLeft)
 	case license.StatusExpired, license.StatusTrialUsed, license.StatusInvalid:
 		return membersOnly
@@ -196,4 +217,20 @@ func gateAction(ctx context.Context, env fsx.Env, yes bool, nothing string) erro
 	}
 	trialNotice(st, os.Stderr)
 	return nil
+}
+
+// denyLine is the one-line form of err for a flash or an error row: a
+// denial keeps its first line and gains the command that explains it; any
+// other error is cut to its first line.
+func denyLine(err error) string {
+	const hint = " · rootout license"
+	var me *membershipError
+	if errors.As(err, &me) {
+		return me.first() + hint
+	}
+	line, _, _ := strings.Cut(err.Error(), "\n")
+	if isExit(err, exitLicensing) {
+		return strings.TrimSuffix(line, ".") + hint
+	}
+	return line
 }

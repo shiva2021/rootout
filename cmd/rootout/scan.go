@@ -259,7 +259,7 @@ func reviewAndUninstall(ctx context.Context, env fsx.Env, shown []heur.Report, a
 	a.Gate = func() error {
 		st, err := gate(ctx, env, false)
 		if err != nil && st.Status != license.StatusNone {
-			return err
+			return errors.New(denyLine(err))
 		}
 		return nil
 	}
@@ -322,7 +322,7 @@ func uninstallByID(ctx context.Context, env fsx.Env, exts []ext.Extension, f sca
 func uninstallExtensions(ctx context.Context, env fsx.Env, targets []ext.Extension) (done, failed int) {
 	editors := ext.Editors(env, ext.Options{})
 	for _, r := range targets {
-		if err := ext.Uninstall(ctx, env, r, editors, ext.Options{}); err != nil {
+		if err := extUninstall(ctx, env, r, editors, ext.Options{}); err != nil {
 			failed++
 			fmt.Fprintf(os.Stderr, "rootout: %s: %v\n", r.ID, err)
 			continue

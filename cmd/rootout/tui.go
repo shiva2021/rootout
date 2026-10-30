@@ -279,8 +279,7 @@ func removalFlash(subject string, p *plan.Plan, res *plan.Result, err error) tui
 // errorFlash turns an error into a one-line error flash: the first line of
 // its text without the "tui: " prefix.
 func errorFlash(err error) tui.Flash {
-	line, _, _ := strings.Cut(err.Error(), "\n")
-	return tui.Flash{Text: strings.TrimPrefix(line, "tui: "), Err: true}
+	return tui.Flash{Text: strings.TrimPrefix(denyLine(err), "tui: "), Err: true}
 }
 
 // scanFlash summarises a scan-screen uninstall for the home screen.

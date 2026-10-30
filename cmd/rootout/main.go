@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/shiva2021/rootout/internal/config"
+	"github.com/shiva2021/rootout/internal/ext"
 	"github.com/shiva2021/rootout/internal/fsx"
 	"github.com/shiva2021/rootout/internal/plan"
 	"github.com/shiva2021/rootout/internal/progress"
@@ -25,9 +26,10 @@ var version = "dev"
 
 // Test seams, defaulted to the real functions here and nowhere else.
 var (
-	realEnv                = fsx.Real     // the user's home and "/"; tests swap it for a fake home
-	cmdRun      run.Runner = run.Default  // external commands; tests swap it for a fake Runner
-	planExecute            = plan.Execute // removal; tests swap it so nothing is trashed
+	realEnv                 = fsx.Real      // the user's home and "/"; tests swap it for a fake home
+	cmdRun       run.Runner = run.Default   // external commands; tests swap it for a fake Runner
+	planExecute             = plan.Execute  // removal; tests swap it so nothing is trashed
+	extUninstall            = ext.Uninstall // extension removal; tests swap it so nothing is removed
 )
 
 // Exit codes shared by every subcommand (see docs/kb/conventions.md).

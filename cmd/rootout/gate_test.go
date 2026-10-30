@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/shiva2021/rootout/internal/config"
+	"github.com/shiva2021/rootout/internal/ext"
 	"github.com/shiva2021/rootout/internal/fsx"
 	"github.com/shiva2021/rootout/internal/license"
 	"github.com/shiva2021/rootout/internal/plan"
@@ -45,6 +47,7 @@ type harness struct {
 	trial       atomic.Int32
 	renew       atomic.Int32
 	execs       atomic.Int32 // planExecute calls
+	uninstalls  atomic.Int32 // extUninstall calls
 	mu          sync.Mutex
 	ran         []string // every command name the fake Runner saw
 }
@@ -67,7 +70,7 @@ func newHarness(t *testing.T, spec testutil.Spec) *harness {
 	t.Setenv("ROOTOUT_LICENSE_FILE", filepath.Join(env.Home, ".config", "rootout", "license"))
 	t.Setenv("ROOTOUT_CONFIG", filepath.Join(env.Home, ".config", "rootout", "config.toml"))
 
-	oldDeps, oldEnv, oldRun, oldExec := gateDepsFn, realEnv, cmdRun, planExecute
+	oldDeps, oldEnv, oldRun, oldExec, oldUninst := gateDepsFn, realEnv, cmdRun, planExecute, extUninstall
 	gateDepsFn = func(e fsx.Env, startTrial bool) license.Deps {
 		d := gateDeps(e, startTrial)
 		d.Run, d.Pub = h.run, testPub
@@ -82,9 +85,13 @@ func newHarness(t *testing.T, spec testutil.Spec) *harness {
 		h.execs.Add(1)
 		return &plan.Result{}, nil
 	}
+	extUninstall = func(context.Context, fsx.Env, ext.Extension, []ext.Editor, ext.Options) error {
+		h.uninstalls.Add(1)
+		return nil
+	}
 	resetGate()
 	t.Cleanup(func() {
-		gateDepsFn, realEnv, cmdRun, planExecute = oldDeps, oldEnv, oldRun, oldExec
+		gateDepsFn, realEnv, cmdRun, planExecute, extUninstall = oldDeps, oldEnv, oldRun, oldExec, oldUninst
 		resetGate()
 	})
 	return h
@@ -225,6 +232,42 @@ func TestGateTrialUsedCached(t *testing.T) {
 	}
 }
 
+func TestGateTrialUnavailableRetried(t *testing.T) {
+	h := newHarness(t, testutil.Spec{})
+	h.trialStatus = http.StatusServiceUnavailable
+	ctx := context.Background()
+	for i := range 2 {
+		st, err := gate(ctx, h.env, true)
+		if !errors.Is(err, ErrMembership) || st.Status != license.StatusNone {
+			t.Fatalf("call %d: st=%+v err=%v", i, st, err)
+		}
+	}
+	if n := h.trial.Load(); n != 2 {
+		t.Fatalf("/trial called %d times, want 2 (a failed start is never final)", n)
+	}
+	h.trialStatus = http.StatusOK
+	if st, err := gate(ctx, h.env, true); err != nil || !st.Started {
+		t.Fatalf("after the service recovered: st=%+v err=%v", st, err)
+	}
+}
+
+func TestDenyLine(t *testing.T) {
+	st := license.State{Status: license.StatusTrialUsed, MID: "0123456789abcdef0123456789abcdef"}
+	want := "deletion and AI features are for members (trial used on this Mac) · rootout license"
+	for name, err := range map[string]error{
+		"membershipError": &membershipError{st: st},
+		"denyExit":        denyExit(&membershipError{st: st}),
+		"wrapped":         fmt.Errorf("x: %w", &membershipError{st: st}),
+	} {
+		if got := denyLine(err); got != want {
+			t.Errorf("%s: denyLine = %q, want %q", name, got, want)
+		}
+	}
+	if got := denyLine(errors.New("boom\nmore")); got != "boom" {
+		t.Errorf("other error: denyLine = %q, want first line", got)
+	}
+}
+
 func TestGateMachineIDError(t *testing.T) {
 	h := newHarness(t, testutil.Spec{})
 	h.runErr = errors.New("ioreg: boom")
@@ -247,7 +290,9 @@ func TestMembershipErrorMessage(t *testing.T) {
 		{"trial used", license.State{Status: license.StatusTrialUsed, MID: mid}, "trial used on this Mac"},
 		{"no key", license.State{Status: license.StatusNone, MID: mid, Reason: "no key installed"}, "no key"},
 		{"offline", license.State{Status: license.StatusNone, MID: mid, Reason: "starting the trial needs the network once"}, "no key · starting the trial needs the network once"},
-		{"expired", license.State{Status: license.StatusExpired, MID: mid, Expires: time.Date(2026, 11, 6, 0, 0, 0, 0, time.UTC)}, "expired 2026-11-06"},
+		{"expired", license.State{Status: license.StatusExpired, MID: mid, Expires: time.Date(2026, 11, 6, 0, 0, 0, 0, time.UTC), Reason: "membership expired 2026-11-06"}, "expired 2026-11-06"},
+		{"expired denied", license.State{Status: license.StatusExpired, MID: mid, Expires: time.Date(2026, 11, 6, 0, 0, 0, 0, time.UTC),
+			Reason: "membership expired 2026-11-06: membership check failed: declined_patron"}, "expired 2026-11-06 · declined_patron"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -328,6 +373,7 @@ func TestLicenseStatusLine(t *testing.T) {
 		{"member", func(h *harness) string { return h.sign(license.KindPatron, 30*day) }, "member"},
 		{"grace", func(h *harness) string { return h.sign(license.KindPatron, -2*day) }, "member"},
 		{"trial", func(h *harness) string { return h.sign(license.KindTrial, 5*day) }, "trial: 5 days left"},
+		{"last trial day", func(h *harness) string { return h.sign(license.KindTrial, day) }, "trial: 1 day left"},
 		{"expired trial", func(h *harness) string { return h.sign(license.KindTrial, -day) }, membersOnly},
 		{"invalid", func(*harness) string { return "ro1.garbage.sig" }, membersOnly},
 		{"other mac", func(*harness) string { return signFor(license.KindAdmin, "ffffffffffffffffffffffffffffffff", 0) }, membersOnly},
@@ -402,7 +448,10 @@ func extSpec() testutil.Spec {
 	}}
 }
 
-const deniedTrialUsed = "deletion and AI features are for members (trial used on this Mac)."
+const (
+	deniedTrialUsed     = "deletion and AI features are for members (trial used on this Mac)."
+	deniedTrialUsedLine = "deletion and AI features are for members (trial used on this Mac) · rootout license"
+)
 
 func wantDenied(t *testing.T, h *harness, code int, stderr, detail string) {
 	t.Helper()
@@ -555,7 +604,16 @@ func TestScanUninstallDenied(t *testing.T) {
 	h.trialStatus = http.StatusConflict
 	code, _, stderr := runCLI(t, "", "scan", "--uninstall", "evil.stealer", "--yes")
 	wantDenied(t, h, code, stderr, deniedTrialUsed)
-	if !testutil.Exists(h.env, "~/.vscode/extensions/evil.stealer-1.0.0/package.json") {
-		t.Fatal("the extension was removed despite the denial")
+	if n := h.uninstalls.Load(); n != 0 || !testutil.Exists(h.env, "~/.vscode/extensions/evil.stealer-1.0.0/package.json") {
+		t.Fatalf("uninstalled %d extension(s) despite the denial", n)
+	}
+}
+
+func TestScanUninstallAllowed(t *testing.T) {
+	h := newHarness(t, extSpec())
+	h.install(t, h.sign(license.KindAdmin, 0))
+	code, _, stderr := runCLI(t, "", "scan", "--uninstall", "evil.stealer", "--yes")
+	if code != 0 || h.uninstalls.Load() != 1 {
+		t.Fatalf("exit %d, uninstalls %d; stderr:\n%s", code, h.uninstalls.Load(), stderr)
 	}
 }

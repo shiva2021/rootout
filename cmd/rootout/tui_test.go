@@ -269,7 +269,7 @@ func TestHomeUninstallTrialUsedDeniedBeforeConfirm(t *testing.T) {
 		"uninstall": homeUninstall, "orphans": homeOrphans,
 	} {
 		f, err := run(context.Background(), h.env, d)
-		if err != nil || !f.Err || f.Text != deniedTrialUsed {
+		if err != nil || !f.Err || f.Text != deniedTrialUsedLine {
 			t.Fatalf("%s: flash %+v err %v", name, f, err)
 		}
 	}
@@ -283,7 +283,7 @@ func TestHomeUninstallTrialRefusedAfterConfirm(t *testing.T) {
 	h.trialStatus = http.StatusConflict
 	c := &fakeConfirmer{ok: true}
 	f, err := homeUninstall(context.Background(), h.env, testHomeDeps(t, h, c))
-	if err != nil || !f.Err || f.Text != deniedTrialUsed {
+	if err != nil || !f.Err || f.Text != deniedTrialUsedLine {
 		t.Fatalf("flash %+v err %v", f, err)
 	}
 	if c.calls != 1 || h.execs.Load() != 0 {
@@ -300,7 +300,7 @@ func TestHomeGateFakeDenied(t *testing.T) {
 		return st, &membershipError{st: st}
 	}
 	f, err := homeUninstall(context.Background(), h.env, d)
-	if err != nil || !f.Err || !strings.HasPrefix(f.Text, "deletion and AI features are for members (expired") || strings.Contains(f.Text, "\n") {
+	if err != nil || !f.Err || !strings.HasPrefix(f.Text, "deletion and AI features are for members (expired") || !strings.HasSuffix(f.Text, ") · rootout license") {
 		t.Fatalf("flash %+v err %v", f, err)
 	}
 	if c.calls != 0 {
