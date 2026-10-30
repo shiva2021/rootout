@@ -716,3 +716,36 @@ func TestClip(t *testing.T) {
 		}
 	}
 }
+
+func TestServiceURLOverride(t *testing.T) {
+	env := func(v string) func(string) string {
+		return func(k string) string {
+			if k == "ROOTOUT_SERVICE_URL" {
+				return v
+			}
+			return ""
+		}
+	}
+	cases := []struct{ name, set, want string }{
+		{"unset", "", license.ServiceURL},
+		{"set", "http://127.0.0.1:8787", "http://127.0.0.1:8787"},
+		{"trailing slash trimmed", "http://127.0.0.1:8787/", "http://127.0.0.1:8787"},
+		{"blank is unset", "   ", license.ServiceURL},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := serviceURL(env(c.set)); got != c.want {
+				t.Fatalf("serviceURL = %q, want %q", got, c.want)
+			}
+		})
+	}
+	t.Run("keysURL and gateDeps follow the override", func(t *testing.T) {
+		t.Setenv("ROOTOUT_SERVICE_URL", "http://127.0.0.1:8787")
+		if got := keysURL("0123456789abcdef0123456789abcdef"); got != "http://127.0.0.1:8787/?m=0123456789abcdef0123456789abcdef" {
+			t.Fatalf("keysURL = %q", got)
+		}
+		if got := gateDeps(fsx.Env{Home: t.TempDir(), Root: t.TempDir()}, false).Client.BaseURL; got != "http://127.0.0.1:8787" {
+			t.Fatalf("gateDeps BaseURL = %q", got)
+		}
+	})
+}

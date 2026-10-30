@@ -96,12 +96,25 @@ func (e *membershipError) Error() string {
 
 func (e *membershipError) Is(target error) bool { return target == ErrMembership }
 
+// serviceURL is the key service origin: $ROOTOUT_SERVICE_URL when set (a dev
+// build pointed at `wrangler dev`), else the host baked into the binary. Keys
+// are signed, so a wrong or hostile host can only refuse, never grant.
+func serviceURL(getenv func(string) string) string {
+	if getenv != nil {
+		if v := strings.TrimSpace(getenv("ROOTOUT_SERVICE_URL")); v != "" {
+			return strings.TrimRight(v, "/")
+		}
+	}
+	return license.ServiceURL
+}
+
 // keysURL is the key service page for this Mac's machine code.
 func keysURL(mid string) string {
+	base := serviceURL(os.Getenv)
 	if mid == "" {
-		return license.ServiceURL
+		return base
 	}
-	return license.ServiceURL + "/?m=" + mid
+	return base + "/?m=" + mid
 }
 
 // gateDepsFn builds Resolve's inputs; tests swap it for a fake Mac, clock and key service.
@@ -114,7 +127,7 @@ func gateDeps(env fsx.Env, startTrial bool) license.Deps {
 		Getenv:     os.Getenv,
 		Run:        run.Default,
 		Now:        time.Now,
-		Client:     &license.Client{BaseURL: license.ServiceURL, UserAgent: "rootout/" + version},
+		Client:     &license.Client{BaseURL: serviceURL(os.Getenv), UserAgent: "rootout/" + version},
 		StartTrial: startTrial,
 	}
 }

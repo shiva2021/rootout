@@ -68,6 +68,7 @@ The key service is the Cloudflare Worker `rootout-keys` at `rootout-keys.<accoun
 
 - **Read the device list:** `wrangler kv key get --remote --binding KEYS devices:<userId>`.
 - **Contract test:** start `npm run dev` in `service/` (needs `service/.dev.vars`, git-ignored), then run `make contract`. It checks the Go client against the real Worker, including that issued keys verify with the test public key.
+- **Local end-to-end:** point a dev build at the local Worker with `ROOTOUT_SERVICE_URL=http://127.0.0.1:8787 ./bin/rootout license` (trial start, renewal and the keys URL all follow it; unset means the host baked into the binary). Safe to leave in the binary: keys are signed, so a wrong host can only refuse.
 - **Alerts** arrive as a GitHub issue labelled `rootout-keys` on `shiva2021/rootout`. Fix the cause, then close the issue.
 - **Known limit:** the Workers Free plan allows about 1,000 KV writes a day. `/renew` writes nothing; the writers are `/trial` (one per new Mac) and `/callback` (the member id on each keys-page visit, the device list when the Mac is new), plus the daily creator-token refresh. A burst of new trials or keys-page visits can hit it; the fix is the paid plan. `/renew` and `/trial` are rate-limited to 5 requests per minute per IP (429 `rate_limited`); the CLI treats 429 like a network error.
 
