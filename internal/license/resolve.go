@@ -19,11 +19,16 @@ const (
 	TrialLife  = 7 * 24 * time.Hour
 )
 
+// IATSkew is the tolerated clock difference for a key's issue time.
+const IATSkew = 24 * time.Hour
+
 const (
 	renewAhead = 7 * 24 * time.Hour  // renew a patron key this long before it expires
 	grace      = 14 * 24 * time.Hour // a patron key that could not be renewed still works this long
 	renewEvery = 24 * time.Hour      // at most one renewal attempt per this interval
-	iatSkew    = 24 * time.Hour      // tolerated clock difference for a key's issue time
+	// renewEveryExpired replaces renewEvery once the key is past exp and no 403
+	// is remembered, so a patron whose first run was offline is not locked out for a day.
+	renewEveryExpired = time.Hour
 )
 
 const (
@@ -31,7 +36,7 @@ const (
 	noPubKey     = "this build cannot verify keys (no public key embedded)"
 	hintNetwork  = "check your connection"
 	hintService  = "the key service returned an error; try again later"
-	hintNotTried = "rootout tries again once a day"
+	hintNotTried = "rootout tries again within the hour"
 )
 
 // Deps are Resolve's inputs, injectable for tests.
@@ -117,22 +122,27 @@ func verify(key string, pub ed25519.PublicKey, mid string, now time.Time) (Claim
 	if c.MID != mid {
 		return Claims{}, fmt.Errorf("%w: the key belongs to another Mac", ErrBadKey)
 	}
-	if c.IAT > now.Add(iatSkew).Unix() {
+	if c.IAT > now.Add(IATSkew).Unix() {
 		return Claims{}, fmt.Errorf("%w: issued in the future; check the clock", ErrBadKey)
 	}
 	return c, nil
 }
 
 // renewalDue reports whether a patron key is near or past expiry and the last
-// attempt is at least renewEvery old (a stamp in the future does not throttle).
-// It also returns the 403 reason the stamp remembers, if any.
+// attempt is old enough: renewEvery, or renewEveryExpired past exp when the
+// stamp remembers no 403 (a stamp in the future does not throttle). It also
+// returns the 403 reason the stamp remembers, if any.
 func renewalDue(c Claims, store Store, now time.Time) (bool, string) {
 	last, denied, ok := store.LastRenew()
 	exp, _ := c.Expires()
 	if exp.Sub(now) >= renewAhead {
 		return false, denied
 	}
-	if age := now.Sub(last); ok && age >= 0 && age < renewEvery {
+	every := renewEvery
+	if denied == "" && !now.Before(exp) {
+		every = renewEveryExpired
+	}
+	if age := now.Sub(last); ok && age >= 0 && age < every {
 		return false, denied
 	}
 	return true, denied

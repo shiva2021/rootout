@@ -14,7 +14,7 @@ Read when touching the gate, issuing or rotating keys, or operating the key serv
   | `admin` | none (no `exp`) | Shivang's own Macs |
 
 - **Machine bound:** every kind carries `mid`, the first 32 hex characters of SHA-256 of `"rootout:" + IOPlatformUUID`. `rootout license` prints it. A key pasted on another Mac fails.
-- **Renewal:** silent when under 7 days remain or the key has expired, at most once per 24 hours. A 14-day grace applies only when the service could not be reached. A 403 denial is remembered beside the key until a renewal succeeds or a new key is pasted.
+- **Renewal:** silent when under 7 days remain or the key has expired, at most once per 24 hours; once the key is past expiry with no remembered 403, at most once an hour, so a run made before the network came up does not lock a returning member out for a day. A 14-day grace applies only when the service could not be reached. A 403 denial is remembered beside the key until a renewal succeeds or a new key is pasted.
 - **Verification:** the public key is `license.PublicKeyHex` in `internal/license/codec.go`. Empty means every key fails closed.
 
 ## Admin key per Mac

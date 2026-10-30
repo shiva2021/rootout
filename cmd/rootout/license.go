@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -96,8 +97,9 @@ again at any time; a used trial cannot be restarted.`,
 	return cmd
 }
 
-// licenseInstall checks key was issued for this Mac, saves it and prints the
-// resulting status. A malformed key or one for another Mac is exit 2.
+// licenseInstall checks key was issued for this Mac and is current, saves it
+// and prints the resulting status. A malformed, expired or future-dated key,
+// or one for another Mac, is exit 2.
 func licenseInstall(ctx context.Context, env fsx.Env, key string, out io.Writer) error {
 	d := offlineDeps(env)
 	pub := d.Pub
@@ -119,6 +121,16 @@ func licenseInstall(ctx context.Context, env fsx.Env, key string, out io.Writer)
 	}
 	if c.MID != mid {
 		return &exitErr{code: exitBadInput, msg: "this key was issued for another Mac; get the key for this Mac at " + keysURL(mid)}
+	}
+	now := time.Now()
+	if d.Now != nil {
+		now = d.Now()
+	}
+	if exp, ok := c.Expires(); ok && !now.Before(exp) {
+		return &exitErr{code: exitBadInput, msg: "this key has expired; get a new key for this Mac at " + keysURL(mid)}
+	}
+	if c.IAT > now.Add(license.IATSkew).Unix() {
+		return &exitErr{code: exitBadInput, msg: "this key is not valid yet; check your clock"}
 	}
 	if err := (license.Store{Path: license.Path(env, os.Getenv)}).Save(key); err != nil {
 		return err

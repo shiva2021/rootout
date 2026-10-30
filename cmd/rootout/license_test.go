@@ -258,3 +258,26 @@ func TestLicenseJSONOnlyJSON(t *testing.T) {
 		t.Fatal("--json must never start the trial")
 	}
 }
+
+func TestLicenseInstallRejectsExpiredAndFutureKeys(t *testing.T) {
+	h := newHarness(t, testutil.Spec{})
+	future, err := license.Encode(license.Claims{V: 1, Kind: license.KindPatron, Sub: "12345678", MID: h.mid,
+		IAT: testNow.Add(48 * time.Hour).Unix(), EXP: testNow.Add(60 * 24 * time.Hour).Unix()}, testPriv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, key, want string }{
+		{"expired", h.sign(license.KindPatron, -time.Hour), "this key has expired"},
+		{"future", future, "this key is not valid yet; check your clock"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, _, stderr := runCLI(t, "", "license", tc.key)
+			if code != exitBadInput || !strings.Contains(stderr, tc.want) {
+				t.Fatalf("exit %d, stderr %q", code, stderr)
+			}
+			if _, err := os.Stat(licensePath()); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("the key was saved: %v", err)
+			}
+		})
+	}
+}

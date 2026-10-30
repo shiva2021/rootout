@@ -332,7 +332,7 @@ func TestResolveNilClient(t *testing.T) {
 	expired := signKey(t, testPriv, KindPatron, testMID(t), -3*24*time.Hour)
 	f := setup(t, expired, nil, false)
 	f.deps.Client = nil
-	if got := Resolve(context.Background(), f.deps); got.Status != StatusGrace || strings.Contains(got.Warning, "once a day") ||
+	if got := Resolve(context.Background(), f.deps); got.Status != StatusGrace || strings.Contains(got.Warning, "within the hour") ||
 		!strings.HasSuffix(got.Warning, "could not be renewed") {
 		t.Errorf("expired, nil client: %+v, want grace with no retry hint", got)
 	}
@@ -566,10 +566,10 @@ func TestResolveFailureWording(t *testing.T) {
 
 	t.Run("throttled", func(t *testing.T) {
 		f := setup(t, signKey(t, testPriv, KindPatron, mid, -3*day), nil, true)
-		if err := f.store.MarkRenew(testNow.Add(-time.Hour), ""); err != nil {
+		if err := f.store.MarkRenew(testNow.Add(-30*time.Minute), ""); err != nil {
 			t.Fatal(err)
 		}
-		if got := Resolve(context.Background(), f.deps); !strings.Contains(got.Warning, "once a day") {
+		if got := Resolve(context.Background(), f.deps); !strings.Contains(got.Warning, "within the hour") {
 			t.Errorf("Warning = %q, want the retry note", got.Warning)
 		}
 	})
@@ -604,5 +604,51 @@ func TestResolveRenewClearsRememberedDenial(t *testing.T) {
 	}
 	if last, denied, ok := f.store.LastRenew(); !ok || !last.Equal(testNow) || denied != "" {
 		t.Errorf("stamp = %v, %q, %v; want testNow with no reason", last, denied, ok)
+	}
+}
+
+// TestResolveExpiredOfflineThenOnline is a patron back after a long break: the
+// first run fails offline and is stamped; past exp without a remembered 403
+// the throttle is an hour, so a run two hours later renews.
+func TestResolveExpiredOfflineThenOnline(t *testing.T) {
+	mid := testMID(t)
+	day := 24 * time.Hour
+	renewed := signKey(t, testPriv, KindPatron, mid, 35*day)
+	for _, tt := range []struct {
+		name  string
+		after time.Duration
+		want  Status
+		calls int32
+	}{
+		{"ExpiredOfflineThenOnline", 2 * time.Hour, StatusMember, 1},
+		{"ExpiredOfflineRetryThrottled", 30 * time.Minute, StatusExpired, 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := newService(t, http.StatusOK, keyBody(renewed))
+			f := setup(t, signKey(t, testPriv, KindPatron, mid, -20*day), svc, false)
+			live := f.deps.Client.BaseURL
+			f.deps.Client.BaseURL = "http://127.0.0.1:1" // nothing listens: unreachable
+
+			if got := Resolve(context.Background(), f.deps); got.Status != StatusExpired {
+				t.Fatalf("run 1: %+v, want expired", got)
+			}
+			if last, _, ok := f.store.LastRenew(); !ok || !last.Equal(testNow) {
+				t.Fatalf("run 1 not stamped: %v, %v", last, ok)
+			}
+
+			f.deps.Client.BaseURL = live
+			later := testNow.Add(tt.after)
+			f.deps.Now = func() time.Time { return later }
+			got := Resolve(context.Background(), f.deps)
+			if got.Status != tt.want {
+				t.Errorf("run 2: %+v, want %s", got, tt.want)
+			}
+			if n := svc.calls.Load(); n != tt.calls {
+				t.Errorf("service calls on run 2 = %d, want %d", n, tt.calls)
+			}
+			if last, _, _ := f.store.LastRenew(); tt.calls == 1 && !last.Equal(later) {
+				t.Errorf("run 2 not stamped: %v", last)
+			}
+		})
 	}
 }
