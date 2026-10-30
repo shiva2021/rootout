@@ -1,8 +1,10 @@
 # Handover
 
-_Updated: 2026-10-22 · Session: M5 release pipeline (D-030…D-032); public-releases design recorded for M6_
+_Updated: 2026-10-30 · Session: M6 membership gate brainstormed, researched and planned; nothing implemented yet_
 
 ## Status
+**M6 is planned, not started.** Spec and task plans are committed on branch `m6/membership` (`cad25a1`): `docs/plans/m6-membership.md` (design, Part A Go CLI tasks 1–7, Part C public flip) and `docs/plans/m6-service.md` (Cloudflare Worker tasks S1–S6). Shivang approved the design on 2026-10-30; the implementation plans await his review and a choice of execution method (subagent-driven vs native). Work happens on `m6/membership` and merges to `main` for the v0.5.0 tag. Summary of the design: patrons paste a machine-bound Ed25519 licence key issued by a Worker after Patreon login; 7-day trial once per Mac; `list`/`doctor`/`guide`/`--dry-run`/heuristic `scan` stay free; deletion and AI need a key; admin keys are minted offline per Mac with `cmd/rootout-keys`; keys live 35 days, renew silently, 14-day grace only when renewal fails; two Macs per account; Worker on workers.dev; alerts via GitHub issue. GoReleaser 2.19.0 is stable now (released 2026-10-22, has `install_steps`) and is Task 1. Patreon research (2026-10-30) is summarised in the spec; the decisive fact is that Patreon's token exchange needs the client secret server-side, so a backend is unavoidable.
+
 M5 is done. Pushing a `v*` tag now builds, publishes a GitHub Release with CHANGELOG notes and updates the private tap. **v0.4.1** is the first complete release: two archives, checksums, notes, and `Casks/rootout.rb` in `shiva2021/homebrew-rootout` with matching sha256s. Installed on this Mac from the tap (`/opt/homebrew/bin/rootout`, `v0.4.1`, no quarantine attribute, `doctor` runs); the old `~/.local/bin/rootout` (v0.3.1) is removed. v0.4.0 is on GitHub Releases without a cask (first token lacked tap access) and its notes were backfilled by hand. CI green on macOS. Spec and plan: `docs/plans/m5-release.md`; runbook: `docs/kb/release.md`.
 
 ## Done this session (M5, D-030…D-032)
@@ -15,6 +17,7 @@ M5 is done. Pushing a `v*` tag now builds, publishes a GitHub Release with CHANG
 - Workflows pass `actionlint`. GoReleaser 2.18.3 and actionlint installed locally via Homebrew.
 
 ## Next steps
+0. **M6**: Shivang reviews `docs/plans/m6-membership.md` and `m6-service.md`, picks the execution method, then execute Part A Task 1 onwards on `m6/membership`. Task 4 and S6 need Shivang at the keyboard (keypair generation and backup, Cloudflare and Patreon accounts, secrets). The public flip (Part C) is a separate patch tag after v0.5.0.
 1. `make install` now puts a second `rootout` in `~/.local/bin`, which comes first on `PATH` and hides the brew copy. Use it only for testing a branch and remove it afterwards (`docs/kb/release.md`, "Which binary am I running").
 2. Earlier manual checks still open: model grid and home loop in a real terminal; Full Disk Access denied path; v0.2 interactive flows; M2 QA on a throwaway account; live `scan --llm`.
 3. M6 membership gate: write its plan (D-024). It decides how members get the binary, since the tap and releases are private. **Agreed on 2026-10-22, deferred to M6:** drop the token requirement by publishing to a public releases repo; recipe below ("Public releases repo").
