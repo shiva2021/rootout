@@ -1,10 +1,9 @@
 import { markTrial, trialSeen } from "../kv";
 import { signingKey } from "../keys";
-import type { RateLimiter } from "../ratelimit";
+import { type RateLimiter, defaultLimiter } from "../ratelimit";
 import { type Handler, json } from "../router";
 import { TRIAL_LIFE, isMid, sign } from "../sign";
 import { limited, readJson } from "./body";
-import { defaultLimiter } from "./renew";
 
 /** One 7-day trial per machine id. Costs one KV write per new mid, hence the rate limit. */
 export function trialHandler(deps: { now?: () => number; limiter?: RateLimiter } = {}): Handler {

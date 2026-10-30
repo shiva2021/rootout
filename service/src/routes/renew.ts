@@ -1,15 +1,11 @@
 import { alert } from "../alert";
-import type { Env } from "../env";
 import { getCreator, getMember, hasDevice } from "../kv";
 import { signingKey, verifyingKey } from "../keys";
 import { PatreonAuthError, PatreonError, isActive, memberById } from "../patreon";
-import { type RateLimiter, bindingLimiter, memoryLimiter } from "../ratelimit";
+import { type RateLimiter, defaultLimiter } from "../ratelimit";
 import { type Handler, json } from "../router";
 import { PATRON_LIFE, sign, verify } from "../sign";
 import { limited, readJson } from "./body";
-
-const fallback = memoryLimiter(5, 60);
-export const defaultLimiter = (env: Env): RateLimiter => (env.RATE ? bindingLimiter(env.RATE) : fallback);
 
 /** Renews a patron key. Never writes KV: the device iat is left alone so eviction order stays issue-time only. */
 export function renewHandler(deps: { fetchFn?: typeof fetch; now?: () => number; limiter?: RateLimiter } = {}): Handler {
@@ -36,7 +32,9 @@ export function renewHandler(deps: { fetchFn?: typeof fetch; now?: () => number;
     }
     try {
       const m = await memberById(creator.access, memberId, fetchFn);
-      if (!isActive(m)) return json(403, { reason: m.patronStatus ?? "inactive" });
+      // A corrupted member mapping must never renew against someone else's membership.
+      if (m.userId !== claims.sub) return json(403, { reason: "unknown_member" });
+      if (!isActive(m)) return json(403, { reason: m.patronStatus === "active_patron" ? "free_member" : (m.patronStatus ?? "inactive") });
     } catch (e) {
       if (e instanceof PatreonAuthError) {
         ctx.waitUntil(alert(env, "creator token rejected", "Patreon returned 401 for the creator token; /renew is refusing."));

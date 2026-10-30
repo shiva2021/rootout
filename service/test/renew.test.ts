@@ -25,13 +25,13 @@ const member = (status: string | null, cents = 500) =>
     },
   });
 
-async function call(body: unknown, fetchFn: typeof fetch, opts: { limiter?: ReturnType<typeof memoryLimiter>; ip?: string; raw?: string; type?: string } = {}) {
+async function call(body: unknown, fetchFn: typeof fetch, opts: { ctx?: ExecutionContext; limiter?: ReturnType<typeof memoryLimiter>; ip?: string; raw?: string; type?: string } = {}) {
   const req = new Request("https://keys.test/renew", {
     method: "POST",
     headers: { "content-type": opts.type ?? "application/json", "cf-connecting-ip": opts.ip ?? "1.2.3.4" },
     body: opts.raw ?? JSON.stringify(body),
   });
-  const res = await renewHandler({ fetchFn, now: () => NOW, limiter: opts.limiter ?? memoryLimiter(5, 60) })(req, env, ctx);
+  const res = await renewHandler({ fetchFn, now: () => NOW, limiter: opts.limiter ?? memoryLimiter(5, 60) })(req, env, opts.ctx ?? ctx);
   return { res, body: (await res.json()) as Record<string, string> };
 }
 
@@ -113,15 +113,37 @@ describe("renew", () => {
     expect([res.status, body.reason]).toEqual([403, "inactive"]);
   });
 
+  it("active_patron with zero cents and not gifted → 403 free_member", async () => {
+    const { res, body } = await call({ key: await sign(patron, await ourKey()) }, stubFetch(member("active_patron", 0)).fetchFn);
+    expect([res.status, body.reason]).toEqual([403, "free_member"]);
+  });
+
+  it("member record for a different user → 403 unknown_member", async () => {
+    await env.KEYS.put("member:u1", "m2");
+    const other = jsonResponse(200, {
+      data: {
+        id: "m2", type: "member",
+        attributes: { patron_status: "active_patron", currently_entitled_amount_cents: 500, is_gifted: false },
+        relationships: { user: { data: { id: "someone-else" } } },
+      },
+    });
+    const { res, body } = await call({ key: await sign(patron, await ourKey()) }, stubFetch(other).fetchFn);
+    expect([res.status, body.reason]).toEqual([403, "unknown_member"]);
+  });
+
   it("creator 401 → 503 creator_token", async () => {
-    const { res, body } = await call({ key: await sign(patron, await ourKey()) }, stubFetch(new Response("", { status: 401 })).fetchFn);
+    const waitUntil = vi.fn();
+    const { res, body } = await call({ key: await sign(patron, await ourKey()) }, stubFetch(new Response("", { status: 401 })).fetchFn, { ctx: { waitUntil } as unknown as ExecutionContext });
     expect([res.status, body.reason]).toEqual([503, "creator_token"]);
+    expect(waitUntil).toHaveBeenCalledTimes(1);
   });
 
   it("missing creator token → 503 creator_token", async () => {
     await env.KEYS.delete("creator");
-    const { res, body } = await call({ key: await sign(patron, await ourKey()) }, stubFetch().fetchFn);
+    const waitUntil = vi.fn();
+    const { res, body } = await call({ key: await sign(patron, await ourKey()) }, stubFetch().fetchFn, { ctx: { waitUntil } as unknown as ExecutionContext });
     expect([res.status, body.reason]).toEqual([503, "creator_token"]);
+    expect(waitUntil).toHaveBeenCalledTimes(1);
   });
 
   it("Patreon outage → 503 patreon_unavailable", async () => {
@@ -135,5 +157,30 @@ describe("renew", () => {
     expect((await call(null, f, { raw: "not json" })).res.status).toBe(400);
     expect((await call({ key: 5 }, f)).res.status).toBe(400);
     expect((await call({ key: "x".repeat(5000) }, f)).body.reason).toBe("bad_request");
+  });
+
+  it("oversized streamed body without Content-Length → 400 without reading it all", async () => {
+    let pulls = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(c) {
+        pulls++;
+        if (pulls > 20) throw new Error("pulled far past the cap");
+        c.enqueue(new Uint8Array(1024).fill(97));
+      },
+    });
+    const req = new Request("https://keys.test/renew", {
+      method: "POST", headers: { "content-type": "application/json" }, body: stream, duplex: "half",
+    } as RequestInit);
+    const res = await renewHandler({ now: () => NOW, limiter: memoryLimiter(5, 60) })(req, env, ctx);
+    expect(res.status).toBe(400);
+    expect(pulls).toBeLessThan(20);
+  });
+
+  it("declared Content-Length over the cap → 400", async () => {
+    const req = new Request("https://keys.test/renew", {
+      method: "POST", headers: { "content-type": "application/json", "content-length": "99999" }, body: "{}",
+    });
+    const res = await renewHandler({ now: () => NOW, limiter: memoryLimiter(5, 60) })(req, env, ctx);
+    expect(res.status).toBe(400);
   });
 });

@@ -1,3 +1,5 @@
+import type { Env } from "./env";
+
 export interface RateLimiter {
   limit(key: string): Promise<{ success: boolean }>;
 }
@@ -24,3 +26,8 @@ export function memoryLimiter(limit: number, periodSeconds: number, now: () => n
     },
   };
 }
+
+const fallback = memoryLimiter(5, 60);
+
+/** The Workers binding when configured, otherwise a shared per-isolate in-memory limiter. */
+export const defaultLimiter = (env: Env): RateLimiter => (env.RATE ? bindingLimiter(env.RATE) : fallback);
