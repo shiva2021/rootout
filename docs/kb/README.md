@@ -12,3 +12,4 @@ Read only what today's task needs.
 | `local-models.md` | Touching the Ollama picker or model catalogue |
 | `qa.md` | Manual QA procedure for real-app removal (created in M2) |
 | `release.md` | Cutting, verifying or repairing a release; tap and token setup |
+| `membership.md` | Touching the gate, issuing or rotating keys, or operating the key service |
