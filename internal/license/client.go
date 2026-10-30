@@ -22,6 +22,10 @@ var ErrTrialUsed = errors.New("license: the trial was already used on this Mac")
 // ErrServiceUnavailable wraps network errors, timeouts, 429 and 5xx answers.
 var ErrServiceUnavailable = errors.New("license: key service unavailable")
 
+// errUnreachable marks failures to reach the service at all (network, timeout),
+// as opposed to the service answering with an error.
+var errUnreachable = errors.New("could not reach the key service")
+
 // DeniedError is a 403 from /renew: the membership is no longer active.
 type DeniedError struct{ Reason string }
 
@@ -105,12 +109,12 @@ func (c Client) post(ctx context.Context, path string, in map[string]string) (in
 	}
 	resp, err := c.httpClient().Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("%w: %w", ErrServiceUnavailable, err)
+		return 0, nil, fmt.Errorf("%w: %w: %w", ErrServiceUnavailable, errUnreachable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
 	if err != nil {
-		return 0, nil, fmt.Errorf("%w: read response: %w", ErrServiceUnavailable, err)
+		return 0, nil, fmt.Errorf("%w: %w: read response: %w", ErrServiceUnavailable, errUnreachable, err)
 	}
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
 		return 0, nil, fmt.Errorf("%w: %s answered %d", ErrServiceUnavailable, path, resp.StatusCode)

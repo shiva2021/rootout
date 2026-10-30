@@ -163,7 +163,7 @@ func TestResolve(t *testing.T) {
 			}
 			f := setup(t, tt.key, svc, tt.down)
 			if tt.stampAge != 0 {
-				if err := f.store.MarkRenew(testNow.Add(-tt.stampAge)); err != nil {
+				if err := f.store.MarkRenew(testNow.Add(-tt.stampAge), ""); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -210,7 +210,7 @@ func TestResolve(t *testing.T) {
 					t.Errorf("key file changed: %q", onDisk)
 				}
 			}
-			last, ok := f.store.LastRenew()
+			last, _, ok := f.store.LastRenew()
 			switch {
 			case tt.stamp && (!ok || !last.Equal(testNow)):
 				t.Errorf("stamp = %v, %v; want %v", last, ok, testNow)
@@ -319,7 +319,7 @@ func TestResolveRenewDeniedWhileActive(t *testing.T) {
 func TestResolveFutureStampDoesNotThrottle(t *testing.T) {
 	key := signKey(t, testPriv, KindPatron, testMID(t), 3*24*time.Hour)
 	f := setup(t, key, newService(t, http.StatusServiceUnavailable, ""), false)
-	if err := f.store.MarkRenew(testNow.Add(48 * time.Hour)); err != nil {
+	if err := f.store.MarkRenew(testNow.Add(48*time.Hour), ""); err != nil {
 		t.Fatal(err)
 	}
 	Resolve(context.Background(), f.deps)
@@ -335,7 +335,7 @@ func TestResolveNilClient(t *testing.T) {
 	if got := Resolve(context.Background(), f.deps); got.Status != StatusGrace {
 		t.Errorf("expired, nil client: %s, want grace", got.Status)
 	}
-	if _, ok := f.store.LastRenew(); ok {
+	if _, _, ok := f.store.LastRenew(); ok {
 		t.Error("stamp written with no client")
 	}
 
@@ -437,34 +437,108 @@ func TestResolveDefaults(t *testing.T) {
 	}
 }
 
-func TestDaysLeft(t *testing.T) {
-	for d, want := range map[time.Duration]int{-time.Hour: 0, 0: 0, time.Minute: 1, 24 * time.Hour: 1, 25 * time.Hour: 2} {
-		if got := daysLeft(testNow.Add(d), testNow); got != want {
-			t.Errorf("daysLeft(%v) = %d, want %d", d, got, want)
-		}
-	}
-}
-
-func TestSummary(t *testing.T) {
-	exp := time.Date(2026, 12, 4, 0, 0, 0, 0, time.UTC)
+func TestResolveDenialPersists(t *testing.T) {
+	mid := testMID(t)
+	day := 24 * time.Hour
 	tests := []struct {
-		s    State
-		want string
+		name    string
+		exp     time.Duration
+		want    Status
+		allowed bool
+		field   func(State) string
 	}{
-		{State{Status: StatusAdmin}, "admin"},
-		{State{Status: StatusMember, Expires: exp}, "member · renews 2026-12-04"},
-		{State{Status: StatusTrial, DaysLeft: 5}, "trial · 5 days left"},
-		{State{Status: StatusTrial, DaysLeft: 1}, "trial · 1 day left"},
-		{State{Status: StatusGrace, Expires: exp}, "grace · expired 2026-12-04"},
-		{State{Status: StatusExpired, Expires: time.Date(2026, 11, 6, 0, 0, 0, 0, time.UTC)}, "expired 2026-11-06"},
-		{State{Status: StatusTrialUsed}, "trial used on this Mac"},
-		{State{Status: StatusNone}, "no key"},
-		{State{Status: StatusInvalid, Reason: "signature mismatch"}, "invalid key: signature mismatch"},
-		{State{Status: StatusNoMachine}, "could not read this Mac's id"},
+		{"ExpiredDenied403Persists", -3 * day, StatusExpired, false, func(s State) string { return s.Reason }},
+		{"ActiveDenied403Persists", 3 * day, StatusMember, true, func(s State) string { return s.Warning }},
 	}
 	for _, tt := range tests {
-		if got := tt.s.Summary(); got != tt.want {
-			t.Errorf("Summary(%s) = %q, want %q", tt.s.Status, got, tt.want)
+		t.Run(tt.name, func(t *testing.T) {
+			key := signKey(t, testPriv, KindPatron, mid, tt.exp)
+			f := setup(t, key, newService(t, http.StatusForbidden, `{"reason":"declined_patron"}`), false)
+			for run := 1; run <= 2; run++ {
+				got := Resolve(context.Background(), f.deps)
+				if got.Status != tt.want || got.Allowed != tt.allowed || !strings.Contains(tt.field(got), "declined_patron") {
+					t.Errorf("run %d: got %+v, want %s naming the 403 reason", run, got, tt.want)
+				}
+				f.svc.srv.Close() // the second run must not need the service
+			}
+			if n := f.svc.calls.Load(); n != 1 {
+				t.Errorf("service calls = %d, want 1", n)
+			}
+		})
+	}
+
+	t.Run("nil client still honours the stamp", func(t *testing.T) {
+		key := signKey(t, testPriv, KindPatron, mid, -3*day)
+		f := setup(t, key, nil, true)
+		if err := f.store.MarkRenew(testNow.Add(-2*day), "membership_ended"); err != nil {
+			t.Fatal(err)
 		}
+		f.deps.Client = nil
+		if got := Resolve(context.Background(), f.deps); got.Status != StatusExpired || !strings.Contains(got.Reason, "membership_ended") {
+			t.Errorf("got %+v, want expired naming the stamped reason", got)
+		}
+	})
+}
+
+func TestResolveFailureWording(t *testing.T) {
+	mid := testMID(t)
+	day := 24 * time.Hour
+	_, otherPriv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name    string
+		exp     time.Duration
+		status  int
+		body    string
+		down    bool
+		want    string
+		wantNot string
+	}{
+		{"network", -3 * day, 0, "", true, "expired 3 days ago and could not be renewed; check your connection", "service"},
+		{"503", -3 * day, 503, "", false, "the key service returned an error", "connection"},
+		{"429", -3 * day, 429, "", false, "the key service returned an error", "connection"},
+		{"bad key", -3 * day, 200, keyBody(signKey(t, otherPriv, KindPatron, mid, 35*day)), false, "the key service returned an error", "connection"},
+		{"one day", -time.Hour, 503, "", false, "expired 1 day ago", "1 days"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var svc *fakeService
+			if !tt.down {
+				svc = newService(t, tt.status, tt.body)
+			}
+			f := setup(t, signKey(t, testPriv, KindPatron, mid, tt.exp), svc, tt.down)
+			got := Resolve(context.Background(), f.deps)
+			if got.Status != StatusGrace || !strings.Contains(got.Warning, tt.want) || strings.Contains(got.Warning, tt.wantNot) {
+				t.Errorf("Warning = %q, want %q and not %q", got.Warning, tt.want, tt.wantNot)
+			}
+		})
+	}
+
+	t.Run("throttled", func(t *testing.T) {
+		f := setup(t, signKey(t, testPriv, KindPatron, mid, -3*day), nil, true)
+		if err := f.store.MarkRenew(testNow.Add(-time.Hour), ""); err != nil {
+			t.Fatal(err)
+		}
+		if got := Resolve(context.Background(), f.deps); !strings.Contains(got.Warning, "once a day") {
+			t.Errorf("Warning = %q, want the retry note", got.Warning)
+		}
+	})
+
+	for _, tt := range []struct {
+		name, body, wantNot string
+		status              int
+	}{
+		{"trial 503", "", "network", 503},
+		{"trial bad key", keyBody(signKey(t, otherPriv, KindTrial, mid, 7*day)), "network", 200},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := setup(t, "", newService(t, tt.status, tt.body), false)
+			got := Resolve(context.Background(), f.deps)
+			if got.Status != StatusNone || !strings.Contains(got.Reason, "the key service returned an error") || strings.Contains(got.Reason, tt.wantNot) {
+				t.Errorf("got %+v, want a service-error reason", got)
+			}
+		})
 	}
 }

@@ -12,30 +12,26 @@ import (
 	"github.com/shiva2021/rootout/internal/run"
 )
 
+// PatronLife and TrialLife are how long issued keys last. The issuer
+// (rootout-keys, the Worker) uses them; nothing in this package does.
 const (
-	patronLife = 35 * 24 * time.Hour // how long the Worker signs patron keys for
-	trialLife  = 7 * 24 * time.Hour  // how long the Worker signs trial keys for
+	PatronLife = 35 * 24 * time.Hour
+	TrialLife  = 7 * 24 * time.Hour
+)
+
+const (
 	renewAhead = 7 * 24 * time.Hour  // renew a patron key this long before it expires
 	grace      = 14 * 24 * time.Hour // a patron key that could not be renewed still works this long
 	renewEvery = 24 * time.Hour      // at most one renewal attempt per this interval
 	iatSkew    = 24 * time.Hour      // tolerated clock difference for a key's issue time
 )
 
-const removeHint = "; run: rootout license remove, then install a new key"
-
-// Status names the outcome of Resolve.
-type Status string
-
 const (
-	StatusAdmin     Status = "admin"
-	StatusMember    Status = "member"
-	StatusTrial     Status = "trial"
-	StatusGrace     Status = "grace"
-	StatusExpired   Status = "expired"
-	StatusTrialUsed Status = "trial-used"
-	StatusNone      Status = "none"
-	StatusInvalid   Status = "invalid"
-	StatusNoMachine Status = "no-machine-id"
+	removeHint   = "; run: rootout license remove, then install a new key"
+	noPubKey     = "this build cannot verify keys (no public key embedded)"
+	hintNetwork  = "check your connection"
+	hintService  = "the key service returned an error; try again later"
+	hintNotTried = "rootout tries again once a day"
 )
 
 // Deps are Resolve's inputs, injectable for tests.
@@ -49,17 +45,11 @@ type Deps struct {
 	StartTrial bool              // may call /trial when no key is installed
 }
 
-// State is the membership outcome for this Mac.
-type State struct {
-	Status   Status    `json:"status"`
-	Allowed  bool      `json:"allowed"`
-	Kind     Kind      `json:"kind,omitempty"`
-	MID      string    `json:"machine_id,omitempty"`
-	Expires  time.Time `json:"expires,omitzero"`
-	DaysLeft int       `json:"days_left"`
-	Warning  string    `json:"warning,omitempty"`
-	Reason   string    `json:"reason,omitempty"`
-	Started  bool      `json:"trial_started,omitempty"` // a trial key was just issued
+// renewal is what a renewal attempt, or the stamp of an earlier one, tells evaluate.
+type renewal struct {
+	denied  *DeniedError // a 403, now or remembered from the stamp
+	hint    string       // why a renewal failed, for the grace warning
+	warning string       // extra warning, e.g. the renewed key could not be saved
 }
 
 // Resolve reads, verifies and when needed renews the installed key, or starts
@@ -91,7 +81,7 @@ func Resolve(ctx context.Context, d Deps) State {
 	case err != nil:
 		return State{Status: StatusInvalid, MID: mid, Reason: err.Error() + removeHint}
 	case pubErr != nil:
-		return State{Status: StatusInvalid, MID: mid, Reason: "this build cannot verify keys (no public key embedded)"}
+		return State{Status: StatusInvalid, MID: mid, Reason: noPubKey}
 	}
 	c, err := verify(key, pub, mid, now)
 	if err != nil {
@@ -100,20 +90,18 @@ func Resolve(ctx context.Context, d Deps) State {
 	if c.Kind == KindAdmin {
 		return State{Status: StatusAdmin, Allowed: true, Kind: KindAdmin, MID: mid}
 	}
-	var warning string
-	var denied *DeniedError
-	if c.Kind == KindPatron && d.Client != nil && dueForRenewal(c, store, now) {
-		c, warning, denied = renew(ctx, *d.Client, store, key, c, pub, mid, now)
+	r := renewal{hint: hintNotTried}
+	if c.Kind == KindPatron {
+		due, remembered := renewalDue(c, store, now)
+		switch {
+		case due && d.Client != nil:
+			c, r = renew(ctx, *d.Client, store, key, c, pub, mid, now)
+		case remembered != "":
+			r.denied = &DeniedError{Reason: remembered}
+		}
 	}
-	s := evaluate(c, now, denied)
+	s := evaluate(c, now, r)
 	s.MID = mid
-	switch {
-	case warning == "":
-	case s.Warning == "":
-		s.Warning = warning
-	default:
-		s.Warning += "; " + warning
-	}
 	return s
 }
 
@@ -132,49 +120,57 @@ func verify(key string, pub ed25519.PublicKey, mid string, now time.Time) (Claim
 	return c, nil
 }
 
-// dueForRenewal reports whether a patron key is near or past expiry and the
-// last attempt is at least renewEvery old. A stamp in the future does not throttle.
-func dueForRenewal(c Claims, store Store, now time.Time) bool {
+// renewalDue reports whether a patron key is near or past expiry and the last
+// attempt is at least renewEvery old (a stamp in the future does not throttle).
+// It also returns the 403 reason the stamp remembers, if any.
+func renewalDue(c Claims, store Store, now time.Time) (bool, string) {
+	last, denied, ok := store.LastRenew()
 	exp, _ := c.Expires()
 	if exp.Sub(now) >= renewAhead {
-		return false
+		return false, denied
 	}
-	if last, ok := store.LastRenew(); ok {
-		if age := now.Sub(last); age >= 0 && age < renewEvery {
-			return false
-		}
+	if age := now.Sub(last); ok && age >= 0 && age < renewEvery {
+		return false, denied
 	}
-	return true
+	return true, denied
 }
 
-// renew calls /renew and returns the claims to evaluate, a warning for the
-// user, and the 403 answer if there was one. Service failures keep c.
-func renew(ctx context.Context, cl Client, store Store, key string, c Claims, pub ed25519.PublicKey, mid string, now time.Time) (Claims, string, *DeniedError) {
-	if err := store.MarkRenew(now); err != nil {
-		slog.Debug("license: renewal stamp", "err", err)
+// renew calls /renew and returns the claims to evaluate and what happened.
+// Every attempt is stamped; a 403 is stamped with its reason. Failures keep c.
+func renew(ctx context.Context, cl Client, store Store, key string, c Claims, pub ed25519.PublicKey, mid string, now time.Time) (Claims, renewal) {
+	mark := func(denied string) {
+		if err := store.MarkRenew(now, denied); err != nil {
+			slog.Debug("license: renewal stamp", "err", err)
+		}
 	}
+	mark("")
 	fresh, err := cl.Renew(ctx, key)
 	var denied *DeniedError
-	if errors.As(err, &denied) {
-		return c, "", denied
-	}
-	if err != nil {
+	switch {
+	case errors.As(err, &denied):
+		mark(denied.Reason)
+		return c, renewal{denied: denied}
+	case errors.Is(err, errUnreachable):
 		slog.Debug("license: renew", "err", err)
-		return c, "", nil
+		return c, renewal{hint: hintNetwork}
+	case err != nil:
+		slog.Debug("license: renew", "err", err)
+		return c, renewal{hint: hintService}
 	}
 	nc, err := verify(fresh, pub, mid, now)
 	if err != nil {
 		slog.Debug("license: renew returned a bad key", "err", err)
-		return c, "", nil
+		return c, renewal{hint: hintService}
 	}
 	if err := store.Save(fresh); err != nil {
-		return nc, "could not save the renewed key: " + err.Error(), nil
+		return nc, renewal{hint: hintService, warning: "could not save the renewed key: " + err.Error()}
 	}
-	return nc, "", nil
+	mark("") // Save cleared the stamp; keep the throttle.
+	return nc, renewal{}
 }
 
 // evaluate turns verified patron or trial claims into a State.
-func evaluate(c Claims, now time.Time, denied *DeniedError) State {
+func evaluate(c Claims, now time.Time, r renewal) State {
 	exp, _ := c.Expires()
 	s := State{Kind: c.Kind, Expires: exp}
 	switch {
@@ -183,22 +179,29 @@ func evaluate(c Claims, now time.Time, denied *DeniedError) State {
 		if c.Kind == KindTrial {
 			s.Status = StatusTrial
 		}
-		if denied != nil {
-			s.Warning = fmt.Sprintf("%v; the key stops working on %s", denied, exp.Format(time.DateOnly))
+		if r.denied != nil {
+			s.Warning = fmt.Sprintf("%v; the key stops working on %s", r.denied, exp.Format(time.DateOnly))
 		}
-	case c.Kind == KindPatron && denied == nil && now.Before(exp.Add(grace)):
+	case c.Kind == KindPatron && r.denied == nil && now.Before(exp.Add(grace)):
 		s.Status, s.Allowed, s.DaysLeft = StatusGrace, true, daysLeft(exp.Add(grace), now)
-		s.Warning = fmt.Sprintf("membership key expired %d days ago and could not be renewed; check your connection",
-			max(1, daysLeft(now, exp)))
+		s.Warning = fmt.Sprintf("membership key expired %s ago and could not be renewed; %s",
+			days(max(1, daysLeft(now, exp))), r.hint)
 	default:
 		s.Status = StatusExpired
 		s.Reason = "membership expired " + exp.Format(time.DateOnly)
 		if c.Kind == KindTrial {
 			s.Reason = "trial ended " + exp.Format(time.DateOnly)
 		}
-		if denied != nil {
-			s.Reason += ": " + denied.Error()
+		if r.denied != nil {
+			s.Reason += ": " + r.denied.Error()
 		}
+	}
+	switch {
+	case r.warning == "":
+	case s.Warning == "":
+		s.Warning = r.warning
+	default:
+		s.Warning += "; " + r.warning
 	}
 	return s
 }
@@ -211,12 +214,17 @@ func startTrial(ctx context.Context, d Deps, store Store, mid string, pub ed2551
 		return none
 	}
 	if pubErr != nil {
-		none.Reason = "this build cannot verify keys (no public key embedded)"
+		none.Reason = noPubKey
 		return none
 	}
 	key, err := d.Client.Trial(ctx, mid)
 	if errors.Is(err, ErrTrialUsed) {
 		return State{Status: StatusTrialUsed, MID: mid, Reason: "the trial was already used on this Mac"}
+	}
+	if errors.Is(err, errUnreachable) {
+		slog.Debug("license: trial", "err", err)
+		none.Reason = "starting the trial needs the network once"
+		return none
 	}
 	var c Claims
 	if err == nil {
@@ -224,48 +232,13 @@ func startTrial(ctx context.Context, d Deps, store Store, mid string, pub ed2551
 	}
 	if err != nil {
 		slog.Debug("license: trial", "err", err)
-		none.Reason = "starting the trial needs the network once"
+		none.Reason = "could not start the trial: " + hintService
 		return none
 	}
-	s := evaluate(c, now, nil)
+	s := evaluate(c, now, renewal{})
 	s.MID, s.Started = mid, true
 	if err := store.Save(key); err != nil {
 		s.Warning = "could not save the trial key: " + err.Error()
 	}
 	return s
-}
-
-// daysLeft is ceil((exp-now)/24h), never negative.
-func daysLeft(exp, now time.Time) int {
-	d := exp.Sub(now)
-	if d <= 0 {
-		return 0
-	}
-	return int((d + 24*time.Hour - 1) / (24 * time.Hour))
-}
-
-// Summary is a one-line status for doctor, the home title and `license status`.
-func (s State) Summary() string {
-	switch s.Status {
-	case StatusAdmin:
-		return "admin"
-	case StatusMember:
-		return "member · renews " + s.Expires.Format(time.DateOnly)
-	case StatusTrial:
-		if s.DaysLeft == 1 {
-			return "trial · 1 day left"
-		}
-		return fmt.Sprintf("trial · %d days left", s.DaysLeft)
-	case StatusGrace:
-		return "grace · expired " + s.Expires.Format(time.DateOnly)
-	case StatusExpired:
-		return "expired " + s.Expires.Format(time.DateOnly)
-	case StatusTrialUsed:
-		return "trial used on this Mac"
-	case StatusNone:
-		return "no key"
-	case StatusInvalid:
-		return "invalid key: " + s.Reason
-	}
-	return "could not read this Mac's id"
 }

@@ -14,6 +14,7 @@ func noEnv(string) string { return "" }
 
 func TestPath(t *testing.T) {
 	env := testutil.FakeHome(t, testutil.Spec{})
+	testutil.RequireSandbox(t, env)
 	if got, want := Path(env, noEnv), env.User(".config", "rootout", "license"); got != want {
 		t.Errorf("default Path = %q, want %q", got, want)
 	}
@@ -31,6 +32,7 @@ func TestPath(t *testing.T) {
 
 func TestStoreSaveLoad(t *testing.T) {
 	env := testutil.FakeHome(t, testutil.Spec{})
+	testutil.RequireSandbox(t, env)
 	s := Store{Path: Path(env, noEnv)}
 
 	if _, err := s.Load(); !errors.Is(err, ErrNoKey) {
@@ -71,6 +73,7 @@ func TestStoreSaveLoad(t *testing.T) {
 
 func TestStoreLoadEmptyFile(t *testing.T) {
 	env := testutil.FakeHome(t, testutil.Spec{Files: map[string]string{"~/.config/rootout/license": " \n"}})
+	testutil.RequireSandbox(t, env)
 	if _, err := (Store{Path: Path(env, noEnv)}).Load(); !errors.Is(err, ErrNoKey) {
 		t.Errorf("Load on blank file = %v, want ErrNoKey", err)
 	}
@@ -78,6 +81,7 @@ func TestStoreLoadEmptyFile(t *testing.T) {
 
 func TestStoreLoadError(t *testing.T) {
 	env := testutil.FakeHome(t, testutil.Spec{Dirs: []string{"~/.config/rootout/license"}})
+	testutil.RequireSandbox(t, env)
 	_, err := (Store{Path: Path(env, noEnv)}).Load()
 	if err == nil || errors.Is(err, ErrNoKey) {
 		t.Errorf("Load on a directory = %v, want a read error", err)
@@ -86,6 +90,7 @@ func TestStoreLoadError(t *testing.T) {
 
 func TestStoreRemove(t *testing.T) {
 	env := testutil.FakeHome(t, testutil.Spec{})
+	testutil.RequireSandbox(t, env)
 	s := Store{Path: Path(env, noEnv)}
 	if err := s.Remove(); err != nil {
 		t.Fatalf("Remove on missing = %v, want nil", err)
@@ -93,7 +98,7 @@ func TestStoreRemove(t *testing.T) {
 	if err := s.Save("ro1.a.b"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.MarkRenew(time.Now()); err != nil {
+	if err := s.MarkRenew(time.Now(), "declined_patron"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Remove(); err != nil {
@@ -102,7 +107,7 @@ func TestStoreRemove(t *testing.T) {
 	if _, err := s.Load(); !errors.Is(err, ErrNoKey) {
 		t.Errorf("Load after Remove = %v, want ErrNoKey", err)
 	}
-	if _, ok := s.LastRenew(); ok {
+	if _, _, ok := s.LastRenew(); ok {
 		t.Error("stamp survived Remove")
 	}
 	if err := s.Remove(); err != nil {
@@ -112,25 +117,50 @@ func TestStoreRemove(t *testing.T) {
 
 func TestStoreLastRenew(t *testing.T) {
 	env := testutil.FakeHome(t, testutil.Spec{})
+	testutil.RequireSandbox(t, env)
 	s := Store{Path: Path(env, noEnv)}
-	if _, ok := s.LastRenew(); ok {
+	if _, _, ok := s.LastRenew(); ok {
 		t.Error("LastRenew ok with no stamp")
 	}
 	when := time.Date(2026, 11, 1, 10, 30, 0, 0, time.UTC)
-	if err := s.MarkRenew(when); err != nil {
-		t.Fatal(err)
-	}
-	got, ok := s.LastRenew()
-	if !ok || !got.Equal(when) {
-		t.Errorf("LastRenew = %v, %v; want %v", got, ok, when)
+	for _, tt := range []struct{ in, want string }{
+		{"", ""},
+		{"declined_patron", "declined_patron"},
+		{" membership\nended ", "membership ended"},
+	} {
+		if err := s.MarkRenew(when, tt.in); err != nil {
+			t.Fatal(err)
+		}
+		got, denied, ok := s.LastRenew()
+		if !ok || !got.Equal(when) || denied != tt.want {
+			t.Errorf("MarkRenew(%q): LastRenew = %v, %q, %v; want %v, %q", tt.in, got, denied, ok, when, tt.want)
+		}
 	}
 	if fi, err := os.Stat(s.Path + ".renew"); err != nil || fi.Mode().Perm() != 0o600 {
 		t.Errorf("stamp stat = %v, %v; want mode 0600", fi, err)
 	}
-	if err := os.WriteFile(s.Path+".renew", []byte("garbage"), 0o600); err != nil {
+	if err := os.WriteFile(s.Path+".renew", []byte("garbage\ndeclined"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := s.LastRenew(); ok {
+	if _, _, ok := s.LastRenew(); ok {
 		t.Error("LastRenew ok with a garbage stamp")
+	}
+}
+
+func TestStoreSaveClearsStamp(t *testing.T) {
+	env := testutil.FakeHome(t, testutil.Spec{})
+	testutil.RequireSandbox(t, env)
+	s := Store{Path: Path(env, noEnv)}
+	if err := s.Save("ro1.old.key"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkRenew(time.Now(), "declined_patron"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save("ro1.new.key"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := s.LastRenew(); ok {
+		t.Error("Save kept the old stamp")
 	}
 }

@@ -44,9 +44,16 @@ func (s Store) Load() (string, error) {
 	return key, nil
 }
 
-// Save writes key with mode 0600, replacing any existing key atomically.
+// Save writes key with mode 0600, replacing any existing key atomically. It
+// clears the renewal stamp: a new key starts fresh.
 func (s Store) Save(key string) error {
-	return writePrivate(s.Path, key+"\n")
+	if err := writePrivate(s.Path, key+"\n"); err != nil {
+		return err
+	}
+	if err := os.Remove(s.stamp()); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("license: remove %s: %w", s.stamp(), err)
+	}
+	return nil
 }
 
 // Remove deletes the key and the renewal stamp. Missing files are not an error.
@@ -59,22 +66,29 @@ func (s Store) Remove() error {
 	return nil
 }
 
-// LastRenew returns when renewal was last attempted; ok is false when unknown.
-func (s Store) LastRenew() (time.Time, bool) {
+// LastRenew returns when renewal was last attempted and, when that attempt was
+// refused with a 403, the service's reason. ok is false when unknown.
+func (s Store) LastRenew() (t time.Time, denied string, ok bool) {
 	b, err := os.ReadFile(s.stamp())
 	if err != nil {
-		return time.Time{}, false
+		return time.Time{}, "", false
 	}
-	t, err := time.Parse(time.RFC3339, strings.TrimSpace(string(b)))
+	first, rest, _ := strings.Cut(string(b), "\n")
+	t, err = time.Parse(time.RFC3339, strings.TrimSpace(first))
 	if err != nil {
-		return time.Time{}, false
+		return time.Time{}, "", false
 	}
-	return t, true
+	return t, strings.TrimSpace(rest), true
 }
 
-// MarkRenew records a renewal attempt at t.
-func (s Store) MarkRenew(t time.Time) error {
-	return writePrivate(s.stamp(), t.UTC().Format(time.RFC3339)+"\n")
+// MarkRenew records a renewal attempt at t; denied is the 403 reason, or "".
+// The stamp holds the RFC3339 time on the first line and the reason on the second.
+func (s Store) MarkRenew(t time.Time, denied string) error {
+	data := t.UTC().Format(time.RFC3339) + "\n"
+	if denied = strings.Join(strings.Fields(denied), " "); denied != "" {
+		data += denied + "\n"
+	}
+	return writePrivate(s.stamp(), data)
 }
 
 // writePrivate writes data to path via a 0600 temp file and a rename, creating
