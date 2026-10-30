@@ -159,6 +159,15 @@ describe("renew", () => {
     expect((await call({ key: "x".repeat(5000) }, f)).body.reason).toBe("bad_request");
   });
 
+  it("client abort mid-body → 400", async () => {
+    const stream = new ReadableStream<Uint8Array>({ pull() { throw new Error("client aborted"); } });
+    const req = new Request("https://keys.test/renew", {
+      method: "POST", headers: { "content-type": "application/json" }, body: stream, duplex: "half",
+    } as RequestInit);
+    const res = await renewHandler({ now: () => NOW, limiter: memoryLimiter(5, 60) })(req, env, ctx);
+    expect(res.status).toBe(400);
+  });
+
   it("oversized streamed body without Content-Length → 400 without reading it all", async () => {
     let pulls = 0;
     const stream = new ReadableStream<Uint8Array>({

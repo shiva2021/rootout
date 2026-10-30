@@ -18,7 +18,15 @@ describe("router", () => {
     }
   });
 
-  it("scheduled is a no-op", async () => {
-    await expect(worker.scheduled({} as ScheduledController, env, ctx)).resolves.toBeUndefined();
+  it("scheduled hands the refresh to waitUntil", async () => {
+    const pending: Promise<unknown>[] = [];
+    const c = { waitUntil: (p: Promise<unknown>) => { pending.push(p); } } as unknown as ExecutionContext;
+    const kv = env.KEYS;
+    const fresh = { access: "a", refresh: "r", updated: Math.floor(Date.now() / 1000) };
+    await kv.put("creator", JSON.stringify(fresh));
+    worker.scheduled({} as ScheduledController, env, c);
+    expect(pending).toHaveLength(1);
+    expect(await pending[0]).toBe("skipped");
+    await kv.delete("creator");
   });
 });

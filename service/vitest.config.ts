@@ -13,6 +13,8 @@ export default defineConfig({
           PATREON_CLIENT_SECRET: "csecret",
           PATREON_CAMPAIGN_ID: "999",
           PUBLIC_ORIGIN: "https://keys.test",
+          ALERT_GITHUB_TOKEN: "ghp_test",
+          ALERT_REPO: "shiva2021/rootout",
         },
       },
     }),

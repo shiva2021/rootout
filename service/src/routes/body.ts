@@ -19,7 +19,13 @@ async function readCapped(req: Request): Promise<Uint8Array | null> {
   const chunks: Uint8Array[] = [];
   let total = 0;
   for (;;) {
-    const { done, value } = await reader.read();
+    let chunk: ReadableStreamReadResult<Uint8Array>;
+    try {
+      chunk = await reader.read();
+    } catch {
+      return null; // client aborted mid-body
+    }
+    const { done, value } = chunk;
     if (done) break;
     total += value.length;
     if (total > MAX_BODY) {

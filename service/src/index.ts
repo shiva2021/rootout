@@ -1,3 +1,4 @@
+import { refreshCreator } from "./cron";
 import type { Env } from "./env";
 import { callbackHandler } from "./routes/callback";
 import { homeHandler, startHandler } from "./routes/home";
@@ -15,5 +16,7 @@ const table = {
 
 export default {
   fetch: (req: Request, env: Env, ctx: ExecutionContext): Promise<Response> => route(req, env, ctx, table),
-  scheduled: async (_event: ScheduledController, _env: Env, _ctx: ExecutionContext): Promise<void> => {},
+  scheduled: (_event: ScheduledController, env: Env, ctx: ExecutionContext): void => {
+    ctx.waitUntil(refreshCreator(env, Math.floor(Date.now() / 1000)));
+  },
 };
