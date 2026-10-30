@@ -424,7 +424,7 @@ Depended on by Task 5 Step 12 (manual check), Task 7 (release) and `m6-service.m
 
 - [ ] **K1.** `go run ./cmd/rootout-keys gen` → writes `~/.config/rootout-keys/private.pem` (0600), prints the public hex and the PKCS8 base64.
 - [ ] **K2.** Store both the PEM file contents and the PKCS8 base64 in the password manager under "rootout signing key" (the runbook names this entry). Confirm the entry opens before continuing.
-- [ ] **K3.** Paste the public hex into `license.PublicKeyHex` in `internal/license/claims.go`; `make test` still green (tests use `Deps.Pub`).
+- [ ] **K3.** Paste the public hex into `license.PublicKeyHex` in `internal/license/codec.go`; `make test` still green (tests use `Deps.Pub`).
 - [ ] **K4.** Commit: `git commit -am "license: embed the production public key (D-034)"`.
 
 ---
