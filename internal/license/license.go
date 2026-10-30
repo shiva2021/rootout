@@ -1,5 +1,5 @@
-// Package license is the seam where subscription checks will live (milestone
-// M6, decision D-008). Until then every check is allowed.
+// Package license holds the membership gate: Ed25519-signed licence keys bound to a
+// Mac (milestone M6). `Check` is a stub removed in a later task.
 package license
 
 import "context"

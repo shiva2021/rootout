@@ -1,0 +1,13 @@
+{
+  "seed_hex": "b8cc412f4857d3aa3ac03b4306aeec7bef2d38cb5013bea9135fd90cf402f83e",
+  "pub_hex": "dc851fe364437ef069b5dd8b05fed5c7793d9c7172b5fc135a16491fd8729fc6",
+  "key": "ro1.eyJ2IjoxLCJraW5kIjoicGF0cm9uIiwic3ViIjoiMTIzNDU2NzgiLCJtaWQiOiIwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZiIsImlhdCI6MTczMDI0NjQwMCwiZXhwIjoxNzMzMjcwNDAwfQ.2wlI_ezId7CEjOfra5k8bD4xetTmBu5XZX1-jE5kuyBTEYaVjUAP2iNAT2oOYEvdbd8HKJlRWyStcOPkJaWfAA",
+  "claims": {
+    "v": 1,
+    "kind": "patron",
+    "sub": "12345678",
+    "mid": "0123456789abcdef0123456789abcdef",
+    "iat": 1730246400,
+    "exp": 1733270400
+  }
+}
