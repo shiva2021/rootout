@@ -4,14 +4,14 @@ package license
 
 import "context"
 
-// Status is the outcome of a license check.
-type Status struct {
+// CheckResult is the outcome of the stub check (renamed so Status can name Resolve outcomes).
+type CheckResult struct {
 	Allowed bool
 	Reason  string
 }
 
 // Check reports whether the current user may use the given feature.
 // Feature names are stable strings such as "remove", "scan", "llm".
-func Check(_ context.Context, _ string) Status {
-	return Status{Allowed: true}
+func Check(_ context.Context, _ string) CheckResult {
+	return CheckResult{Allowed: true}
 }
