@@ -28,6 +28,18 @@ export function memoryLimiter(limit: number, periodSeconds: number, now: () => n
 }
 
 const fallback = memoryLimiter(5, 60);
+let warned = false;
 
-/** The Workers binding when configured, otherwise a shared per-isolate in-memory limiter. */
-export const defaultLimiter = (env: Env): RateLimiter => (env.RATE ? bindingLimiter(env.RATE) : fallback);
+/**
+ * The Workers binding when configured, otherwise a shared per-isolate in-memory
+ * limiter. The fallback is logged once per isolate: in production it means the
+ * `[[ratelimits]]` binding is missing and each isolate counts on its own.
+ */
+export function defaultLimiter(env: Env): RateLimiter {
+  if (env.RATE) return bindingLimiter(env.RATE);
+  if (!warned) {
+    warned = true;
+    console.warn("rootout-keys: no RATE binding; using the per-isolate in-memory rate limiter");
+  }
+  return fallback;
+}

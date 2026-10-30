@@ -261,7 +261,7 @@ func hexOf(pub ed25519.PublicKey) string { return hex.EncodeToString(pub) }
 // saveKey writes der as a PKCS#8 PEM, never replacing an existing file.
 func saveKey(path string, der []byte) error {
 	if path == "" {
-		return badInput{errors.New("no key path: pass --key")}
+		return badInput{errors.New("no key path: pass --out")}
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create key directory: %w", err)

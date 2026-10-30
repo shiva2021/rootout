@@ -166,7 +166,7 @@ func runScan(ctx context.Context, g *globalFlags, f scanFlags) error {
 	}
 
 	if interactive {
-		_, failed, _, err := reviewAndUninstall(ctx, env, shown, assessor, func() bool { return trialOK(env, false) })
+		_, failed, _, _, err := reviewAndUninstall(ctx, env, shown, assessor, func() bool { return trialOK(env, false) })
 		if err != nil {
 			if errors.Is(err, tui.ErrQuit) {
 				return nil
@@ -179,8 +179,11 @@ func runScan(ctx context.Context, g *globalFlags, f scanFlags) error {
 	// Without membership the heuristics still print; the denial is the exit code.
 	var denied error
 	if wantsAI && assessor.Assess != nil {
-		if _, err := gate(ctx, env, false); err != nil {
+		st, err := gate(ctx, env, false)
+		if err != nil {
 			denied = denyExit(err)
+		} else {
+			gateNotice(st, os.Stderr)
 		}
 	}
 	items := make([]scanItem, len(shown))
@@ -254,8 +257,9 @@ func scanReports(ctx context.Context, env fsx.Env, f scanFlags, rep progress.Rep
 // reviewAndUninstall opens the results screen and uninstalls what the user
 // ticked. ok is false when the user backed out or ticked nothing. A keyless
 // user may tick and confirm; startTrial is asked only after that, so looking
-// never spends the trial. A false answer is exit 3, a denial exit 4.
-func reviewAndUninstall(ctx context.Context, env fsx.Env, shown []heur.Report, a tui.Assessor, startTrial func() bool) (done, failed int, ok bool, err error) {
+// never spends the trial. A false answer is exit 3, a denial exit 4. st is
+// the gate's answer when an uninstall ran, for the caller's flash.
+func reviewAndUninstall(ctx context.Context, env fsx.Env, shown []heur.Report, a tui.Assessor, startTrial func() bool) (done, failed int, st license.State, ok bool, err error) {
 	a.Gate = func() error {
 		st, err := gate(ctx, env, false)
 		if err != nil && st.Status != license.StatusNone {
@@ -266,22 +270,22 @@ func reviewAndUninstall(ctx context.Context, env fsx.Env, shown []heur.Report, a
 	var res tui.ScanResult
 	res, ok, err = tui.ReviewScan(ctx, shown, a)
 	if err != nil || !ok || len(res.Uninstall) == 0 {
-		return 0, 0, false, err
+		return 0, 0, license.State{}, false, err
 	}
 	if !startTrial() {
-		return 0, 0, false, &exitErr{code: exitDeclined, msg: "nothing uninstalled"}
+		return 0, 0, license.State{}, false, &exitErr{code: exitDeclined, msg: "nothing uninstalled"}
 	}
-	st, err := gate(ctx, env, true)
+	st, err = gate(ctx, env, true)
 	if err != nil {
-		return 0, 0, false, denyExit(err)
+		return 0, 0, license.State{}, false, denyExit(err)
 	}
-	trialNotice(st, os.Stderr)
+	gateNotice(st, os.Stderr)
 	var targets []ext.Extension
 	for _, r := range res.Uninstall {
 		targets = append(targets, r.Ext)
 	}
 	done, failed = uninstallExtensions(ctx, env, targets)
-	return done, failed, true, nil
+	return done, failed, st, true, nil
 }
 
 // uninstallByID is the scripted path: --uninstall <id>... with the typed

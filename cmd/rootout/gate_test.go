@@ -23,6 +23,7 @@ import (
 	"github.com/shiva2021/rootout/internal/license"
 	"github.com/shiva2021/rootout/internal/plan"
 	"github.com/shiva2021/rootout/internal/testutil"
+	"github.com/shiva2021/rootout/internal/tui"
 )
 
 // The test keypair matches internal/license/testkeys_test.go, which is test-only.
@@ -292,7 +293,9 @@ func TestMembershipErrorMessage(t *testing.T) {
 		{"offline", license.State{Status: license.StatusNone, MID: mid, Reason: "starting the trial needs the network once"}, "no key · starting the trial needs the network once"},
 		{"expired", license.State{Status: license.StatusExpired, MID: mid, Expires: time.Date(2026, 11, 6, 0, 0, 0, 0, time.UTC), Reason: "membership expired 2026-11-06"}, "expired 2026-11-06"},
 		{"expired denied", license.State{Status: license.StatusExpired, MID: mid, Expires: time.Date(2026, 11, 6, 0, 0, 0, 0, time.UTC),
-			Reason: "membership expired 2026-11-06: membership check failed: declined_patron"}, "expired 2026-11-06 · declined_patron"},
+			Reason: "membership expired 2026-11-06: membership check failed: declined_patron"}, "expired 2026-11-06 · your last payment was declined"},
+		{"expired other reason", license.State{Status: license.StatusExpired, MID: mid, Expires: time.Date(2026, 11, 6, 0, 0, 0, 0, time.UTC),
+			Reason: "membership expired 2026-11-06: membership check failed: not_renewable"}, "expired 2026-11-06 · not_renewable"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -371,7 +374,7 @@ func TestLicenseStatusLine(t *testing.T) {
 		{"none", func(*harness) string { return "" }, ""},
 		{"admin", func(h *harness) string { return h.sign(license.KindAdmin, 0) }, "admin"},
 		{"member", func(h *harness) string { return h.sign(license.KindPatron, 30*day) }, "member"},
-		{"grace", func(h *harness) string { return h.sign(license.KindPatron, -2*day) }, "member"},
+		{"grace", func(h *harness) string { return h.sign(license.KindPatron, -2*day) }, "grace: renew soon"},
 		{"trial", func(h *harness) string { return h.sign(license.KindTrial, 5*day) }, "trial: 5 days left"},
 		{"last trial day", func(h *harness) string { return h.sign(license.KindTrial, day) }, "trial: 1 day left"},
 		{"expired trial", func(h *harness) string { return h.sign(license.KindTrial, -day) }, membersOnly},
@@ -615,5 +618,101 @@ func TestScanUninstallAllowed(t *testing.T) {
 	code, _, stderr := runCLI(t, "", "scan", "--uninstall", "evil.stealer", "--yes")
 	if code != 0 || h.uninstalls.Load() != 1 {
 		t.Fatalf("exit %d, uninstalls %d; stderr:\n%s", code, h.uninstalls.Load(), stderr)
+	}
+}
+
+func TestPlainReason(t *testing.T) {
+	for in, want := range map[string]string{
+		"declined_patron": "your last payment was declined",
+		"former_patron":   "your membership has ended",
+		"device_replaced": "this Mac was replaced by a newer one on your account",
+		"free_member":     "a paid tier is needed",
+		"unknown_member":  "unknown_member",
+		"not_renewable":   "not_renewable",
+		"something_new":   "something_new",
+	} {
+		if got := plainReason(in); got != want {
+			t.Errorf("plainReason(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestWarnLine(t *testing.T) {
+	tests := []struct{ name, in, want string }{
+		{"none", "", ""},
+		{"grace", "membership key expired 2 days ago and could not be renewed; check your connection",
+			"membership key expired 2 days ago and could not be renewed; check your connection"},
+		{"denied", "membership check failed: device_replaced; the key stops working on 2026-11-06",
+			"membership check failed: this Mac was replaced by a newer one on your account; the key stops working on 2026-11-06"},
+		{"multi-line", "first\nsecond", "first"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := warnLine(license.State{Warning: tc.in}); got != tc.want {
+				t.Fatalf("warnLine = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNoteFlash(t *testing.T) {
+	base := tui.Flash{Text: "Removed Foo", Err: true}
+	tests := []struct {
+		name string
+		st   license.State
+		want string
+	}{
+		{"plain", license.State{Status: license.StatusMember}, "Removed Foo"},
+		{"trial", license.State{Status: license.StatusTrial, Started: true}, "7-day trial started · Removed Foo"},
+		{"warning", license.State{Status: license.StatusGrace, Warning: "key expired\nmore"}, "Removed Foo · key expired"},
+		{"both", license.State{Status: license.StatusTrial, Started: true, Warning: "could not save the trial key: boom"},
+			"7-day trial started · Removed Foo · could not save the trial key: boom"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := noteFlash(base, tc.st)
+			if got.Text != tc.want || !got.Err {
+				t.Fatalf("noteFlash = %+v, want {%q true}", got, tc.want)
+			}
+		})
+	}
+}
+
+const graceWarning = "membership key expired 2 days ago and could not be renewed; the key service returned an error; try again later"
+
+func TestGateActionPrintsWarning(t *testing.T) {
+	for _, args := range [][]string{
+		{"remove", "Foo", "--yes", "--no-brew"},
+		{"remove", "Foo", "--yes", "--no-brew", "--json"},
+	} {
+		h := newHarness(t, appSpec())
+		h.install(t, h.sign(license.KindPatron, -2*24*time.Hour))
+		code, out, stderr := runCLI(t, "", args...)
+		if code != 0 || h.execs.Load() != 1 {
+			t.Fatalf("%v: exit %d, execs %d; stderr:\n%s", args, code, h.execs.Load(), stderr)
+		}
+		if !strings.Contains(stderr, "rootout: "+graceWarning+"\n") {
+			t.Fatalf("%v: stderr lacks the grace warning:\n%s", args, stderr)
+		}
+		if strings.Contains(out, "could not be renewed") {
+			t.Fatalf("%v: the warning must go to stderr only; stdout:\n%s", args, out)
+		}
+	}
+}
+
+func TestClip(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		n    int
+		want string
+	}{
+		{"short", 10, "short"},
+		{"exactly ten", 11, "exactly ten"},
+		{"membership check failed: x", 12, "membership…"},
+		{"ééééé", 3, "éé…"},
+	} {
+		if got := clip(tc.in, tc.n); got != tc.want {
+			t.Errorf("clip(%q, %d) = %q, want %q", tc.in, tc.n, got, tc.want)
+		}
 	}
 }

@@ -160,6 +160,7 @@ func TestDoctorMembership(t *testing.T) {
 		{"admin", func(h *harness) string { return h.sign(license.KindAdmin, 0) }, false, true, "admin"},
 		{"trial", func(h *harness) string { return h.sign(license.KindTrial, 5*day) }, false, true, "trial · 5 days left"},
 		{"expired", func(h *harness) string { return h.sign(license.KindTrial, -day) }, false, false, "expired 2026-10-31"},
+		{"grace", func(h *harness) string { return h.sign(license.KindPatron, -2*day) }, false, false, "grace · expired 2026-10-30 · membership key expired 2 days ago"},
 		{"invalid", func(*harness) string { return "ro1.x.y" }, false, false, "invalid key: "},
 		{"no machine id", func(*harness) string { return "" }, true, false, "could not read this Mac's id"},
 	}
@@ -201,8 +202,9 @@ func TestBuildAssessorDenied(t *testing.T) {
 	if _, err := a.Assess(ctx, heur.Report{}); !errors.Is(err, ErrMembership) {
 		t.Fatalf("Assess err = %v, want ErrMembership", err)
 	}
-	if h.trial.Load() != 0 || h.ioreg.Load() != 1 {
-		t.Fatalf("/trial %d, Resolve %d; want 0 and 1", h.trial.Load(), h.ioreg.Load())
+	// One offline Resolve for the label, one gated Resolve for the assessment.
+	if h.trial.Load() != 0 || h.ioreg.Load() != 2 {
+		t.Fatalf("/trial %d, Resolve %d; want 0 and 2", h.trial.Load(), h.ioreg.Load())
 	}
 }
 
@@ -279,5 +281,42 @@ func TestLicenseInstallRejectsExpiredAndFutureKeys(t *testing.T) {
 				t.Fatalf("the key was saved: %v", err)
 			}
 		})
+	}
+}
+
+func TestBuildAssessorOpenMakesNoRenewCall(t *testing.T) {
+	h := newHarness(t, testutil.Spec{})
+	h.install(t, h.sign(license.KindPatron, 3*24*time.Hour)) // renewal due
+	c := config.Default()
+	c.LLM.Provider, c.LLM.Ollama.Model, c.LLM.Ollama.BaseURL = "ollama", "llama3.2", "http://127.0.0.1:1"
+	a, err := buildAssessor(context.Background(), h.env, c, "", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Label != "ollama · llama3.2" {
+		t.Fatalf("label = %q", a.Label)
+	}
+	if n := h.renew.Load(); n != 0 {
+		t.Fatalf("opening the scan made %d /renew call(s), want 0", n)
+	}
+	_, _ = a.Assess(context.Background(), heur.Report{})
+	if n := h.renew.Load(); n != 1 {
+		t.Fatalf("the first assessment made %d /renew call(s), want 1", n)
+	}
+}
+
+func TestBuildAssessorLabelCarriesWarning(t *testing.T) {
+	h := newHarness(t, testutil.Spec{})
+	h.install(t, h.sign(license.KindPatron, -2*24*time.Hour))
+	c := config.Default()
+	c.LLM.Provider, c.LLM.Ollama.Model, c.LLM.Ollama.BaseURL = "ollama", "llama3.2", "http://127.0.0.1:1"
+	a, err := buildAssessor(context.Background(), h.env, c, "", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Offline, so no retry hint: the warning fits in labelWarningMax.
+	const want = "ollama · llama3.2 · membership key expired 2 days ago and could not be renewed"
+	if a.Label != want {
+		t.Fatalf("label = %q, want %q", a.Label, want)
 	}
 }

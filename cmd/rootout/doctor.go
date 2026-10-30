@@ -164,12 +164,17 @@ func runChecks(ctx context.Context) []check {
 	return out
 }
 
-// membershipCheck reports the installed key without contacting the key service.
+// membershipCheck reports the installed key without contacting the key
+// service. Grace, or any warning, is a "!" pointing at rootout license.
 func membershipCheck(ctx context.Context, env fsx.Env) check {
 	st := offlineState(ctx, env)
-	c := check{Name: "Membership", OK: st.Allowed || st.Status == license.StatusNone, Detail: st.Summary()}
+	c := check{Name: "Membership", Detail: st.Summary()}
+	c.OK = (st.Allowed && st.Status != license.StatusGrace && st.Warning == "") || st.Status == license.StatusNone
 	if st.Status == license.StatusNone {
 		c.Detail = "no key · 7-day trial available (rootout license)"
+	}
+	if w := warnLine(st); w != "" {
+		c.Detail += " · " + w
 	}
 	if !c.OK {
 		c.Fix = "rootout license"

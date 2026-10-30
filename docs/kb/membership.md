@@ -30,7 +30,7 @@ Admin keys never expire but stay machine bound, so each Mac needs its own.
 
 3. On the target Mac run `rootout license <key>`.
 
-`rootout-keys inspect <key>` shows the claims. `rootout-keys sign --kind patron|trial --sub <id> --mid <code> --days N` issues test keys; a negative `--days` is rejected.
+`rootout-keys inspect <key>` shows the claims. `rootout-keys sign --kind patron|trial --sub <id> --mid <code> --days N` issues test keys; a negative `--days` is rejected. Keys from `sign` never renew: `/renew` needs `devices:<sub>` and `member:<sub>` in KV, which only the keys page writes, so they are for admin use and testing only.
 
 ## Key backup and rotation
 
@@ -69,7 +69,7 @@ The key service is the Cloudflare Worker `rootout-keys` at `rootout-keys.<accoun
 - **Read the device list:** `wrangler kv key get --remote --binding KEYS devices:<userId>`.
 - **Contract test:** start `npm run dev` in `service/` (needs `service/.dev.vars`, git-ignored), then run `make contract`. It checks the Go client against the real Worker, including that issued keys verify with the test public key.
 - **Alerts** arrive as a GitHub issue labelled `rootout-keys` on `shiva2021/rootout`. Fix the cause, then close the issue.
-- **Known limit:** the Workers Free plan allows about 1,000 KV writes a day. Heavy renewal traffic can hit it; the fix is the paid plan. `/renew` and `/trial` are rate-limited to 5 requests per minute per IP (429 `rate_limited`); the CLI treats 429 like a network error.
+- **Known limit:** the Workers Free plan allows about 1,000 KV writes a day. `/renew` writes nothing; the writers are `/trial` (one per new Mac) and `/callback` (the member id on each keys-page visit, the device list when the Mac is new), plus the daily creator-token refresh. A burst of new trials or keys-page visits can hit it; the fix is the paid plan. `/renew` and `/trial` are rate-limited to 5 requests per minute per IP (429 `rate_limited`); the CLI treats 429 like a network error.
 
 ## Support answers
 

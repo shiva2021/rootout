@@ -42,10 +42,49 @@ func (e *membershipError) first() string {
 		}
 	case license.StatusExpired:
 		if _, why, ok := strings.Cut(e.st.Reason, deniedMark); ok && why != "" {
-			detail += " · " + why
+			detail += " · " + plainReason(why)
 		}
 	}
 	return "deletion and AI features are for members (" + detail + ")"
+}
+
+// plainReason puts a /renew 403 reason in the spec's words; an unknown one passes through.
+func plainReason(r string) string {
+	switch r {
+	case "declined_patron":
+		return "your last payment was declined"
+	case "former_patron":
+		return "your membership has ended"
+	case "device_replaced":
+		return "this Mac was replaced by a newer one on your account"
+	case "free_member":
+		return "a paid tier is needed"
+	}
+	return r
+}
+
+// warnLine is st.Warning for a person: its first line, with a 403 reason
+// after deniedMark in plain words. It is "" when there is no warning.
+func warnLine(st license.State) string {
+	line, _, _ := strings.Cut(st.Warning, "\n")
+	head, rest, ok := strings.Cut(line, deniedMark)
+	if !ok {
+		return line
+	}
+	reason, tail, _ := strings.Cut(rest, ";")
+	if tail != "" {
+		tail = ";" + tail
+	}
+	return head + deniedMark + plainReason(strings.TrimSpace(reason)) + tail
+}
+
+// clip cuts s to n runes, marking a cut with an ellipsis.
+func clip(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return strings.TrimSpace(string(r[:n-1])) + "…"
 }
 
 func (e *membershipError) Error() string {
@@ -140,6 +179,27 @@ func trialNotice(st license.State, out io.Writer) {
 // trialPrefix is the home-screen flash prefix for a trial that was just started.
 const trialPrefix = "7-day trial started · "
 
+// gateNotice tells a gated user what the gate learnt: a trial that was just
+// started and any warning (grace, a coming denial, a key that was not saved).
+func gateNotice(st license.State, out io.Writer) {
+	trialNotice(st, out)
+	if w := warnLine(st); w != "" {
+		_, _ = fmt.Fprintln(out, "rootout:", w)
+	}
+}
+
+// noteFlash is gateNotice for the home screen: the trial prefix and the
+// warning's first line on the flash.
+func noteFlash(f tui.Flash, st license.State) tui.Flash {
+	if st.Started {
+		f.Text = trialPrefix + f.Text
+	}
+	if w := warnLine(st); w != "" {
+		f.Text += " · " + w
+	}
+	return f
+}
+
 // offlineDeps is gateDeps without the key service: no renewal, no trial.
 func offlineDeps(env fsx.Env) license.Deps {
 	d := gateDepsFn(env, false)
@@ -152,14 +212,23 @@ func offlineState(ctx context.Context, env fsx.Env) license.State {
 	return license.Resolve(ctx, offlineDeps(env))
 }
 
+// gateOffline is gate's verdict from the installed key alone: one Resolve,
+// no renewal, no trial and no cache. It suits labels shown before any gated
+// work; the work itself goes through gate.
+func gateOffline(ctx context.Context, env fsx.Env) (license.State, error) {
+	return verdict(offlineState(ctx, env))
+}
+
 // licenseStatusLine is the home title suffix. It never reaches the network.
 func licenseStatusLine(ctx context.Context, env fsx.Env) string {
 	st := offlineState(ctx, env)
 	switch st.Status {
 	case license.StatusAdmin:
 		return "admin"
-	case license.StatusMember, license.StatusGrace:
+	case license.StatusMember:
 		return "member"
+	case license.StatusGrace:
+		return "grace: renew soon"
 	case license.StatusTrial:
 		if st.DaysLeft == 1 {
 			return "trial: 1 day left"
@@ -215,7 +284,7 @@ func gateAction(ctx context.Context, env fsx.Env, yes bool, nothing string) erro
 	if err != nil {
 		return denyExit(err)
 	}
-	trialNotice(st, os.Stderr)
+	gateNotice(st, os.Stderr)
 	return nil
 }
 

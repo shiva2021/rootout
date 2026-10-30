@@ -9,6 +9,7 @@ push to `main` and every pull request. Decisions: D-030, D-031, D-032.
 ## Cut a release
 - Move the Unreleased items under a new `## [X.Y.Z] - YYYY-MM-DD` heading in `CHANGELOG.md` and commit.
 - `make release-check NEXT=vX.Y.Z`. It checks the CHANGELOG section first, then runs test, lint and `goreleaser check`. Always run it: the release job does not run the tests.
+- `release-check` also fails first while `internal/license/codec.go` has an empty `PublicKeyHex` or `internal/license/client.go` still has the `CHANGEME` service URL, so a build that rejects every key is never tagged.
 - `git tag -a vX.Y.Z -m "vX.Y.Z: <one line>"`
 - `git push origin main vX.Y.Z`
 - Watch the `Release` workflow: `gh run list --workflow Release --limit 1`, then `gh run watch --exit-status <id>`.

@@ -97,10 +97,15 @@ func assessFunc(p llm.Provider, allowed func() error) tui.AssessFunc {
 	}
 }
 
+// labelWarningMax bounds a membership warning in the scan screen's AI label.
+const labelWarningMax = 60
+
 // buildAssessor is what the scan screen gets: the current provider (if any),
 // its label, and the hooks that let the user pick a local model in place.
-// With a provider it checks membership once (never starting the trial); when
-// denied the label says so and each assessment returns the denial.
+// The label comes from the installed key alone (gateOffline), so opening the
+// screen never reaches the key service; a warning rides on it. Each
+// assessment asks the real gate (which may renew, never starts the trial) and
+// returns its denial.
 func buildAssessor(ctx context.Context, env fsx.Env, c config.Config, provider, model string, interactive bool) (tui.Assessor, error) {
 	p, err := buildProvider(ctx, c, provider, model, interactive)
 	if err != nil {
@@ -111,8 +116,12 @@ func buildAssessor(ctx context.Context, env fsx.Env, c config.Config, provider, 
 		return err
 	}
 	label := func(name string) string {
-		if allowed() != nil {
+		st, err := gateOffline(ctx, env)
+		if err != nil {
 			return aiMembersLabel
+		}
+		if w := warnLine(st); w != "" {
+			name += " · " + clip(w, labelWarningMax)
 		}
 		return name
 	}

@@ -138,8 +138,8 @@ func licenseInstall(ctx context.Context, env fsx.Env, key string, out io.Writer)
 	resetGate()
 	st := license.Resolve(ctx, d)
 	_, _ = fmt.Fprintln(out, st.Summary())
-	if st.Warning != "" {
-		_, _ = fmt.Fprintln(out, "warning:", st.Warning)
+	if w := warnLine(st); w != "" {
+		_, _ = fmt.Fprintln(out, "warning:", w)
 	}
 	return nil
 }
@@ -172,7 +172,7 @@ func licenseShow(ctx context.Context, env fsx.Env, yes bool, in io.Reader, out i
 	if err != nil {
 		return denyExit(err)
 	}
-	trialNotice(st, out)
+	gateNotice(st, out)
 	return nil
 }
 
@@ -200,8 +200,8 @@ func licenseRemove(env fsx.Env, jsonOut bool, out io.Writer) error {
 
 func printState(out io.Writer, st license.State) {
 	_, _ = fmt.Fprintln(out, st.Summary())
-	if st.Warning != "" {
-		_, _ = fmt.Fprintln(out, "warning:", st.Warning)
+	if w := warnLine(st); w != "" {
+		_, _ = fmt.Fprintln(out, "warning:", w)
 	}
 	if st.MID != "" {
 		_, _ = fmt.Fprintln(out, "machine code:", st.MID)

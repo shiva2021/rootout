@@ -165,11 +165,7 @@ func executeConfirmed(ctx context.Context, env fsx.Env, d homeDeps, p *plan.Plan
 	if err != nil && !errors.Is(err, priv.ErrCancelled) {
 		return tui.Flash{}, err
 	}
-	f := removalFlash(subject, p, res, err)
-	if st.Started {
-		f.Text = trialPrefix + f.Text
-	}
-	return f, nil
+	return noteFlash(removalFlash(subject, p, res, err), st), nil
 }
 
 func homeScan(ctx context.Context, env fsx.Env) (tui.Flash, error) {
@@ -199,14 +195,14 @@ func homeScan(ctx context.Context, env fsx.Env) (tui.Flash, error) {
 	if err != nil {
 		return tui.Flash{}, err
 	}
-	done, failed, ok, err := reviewAndUninstall(ctx, env, shown, assessor, func() bool { return true })
+	done, failed, st, ok, err := reviewAndUninstall(ctx, env, shown, assessor, func() bool { return true })
 	if err != nil {
 		return tui.Flash{}, err
 	}
 	if !ok || done+failed == 0 {
 		return tui.Flash{Text: "No changes"}, nil
 	}
-	return scanFlash(done, failed), nil
+	return noteFlash(scanFlash(done, failed), st), nil
 }
 
 func homeModel(ctx context.Context) (tui.Flash, error) {

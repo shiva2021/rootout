@@ -183,3 +183,10 @@ func TestExitCodes(t *testing.T) {
 		})
 	}
 }
+
+func TestGenEmptyPathNamesOutFlag(t *testing.T) {
+	code, _, errs := runCmd(t, "gen", "--out", "")
+	if code != 2 || !strings.Contains(errs, "pass --out") {
+		t.Fatalf("exit %d, stderr %q; want exit 2 naming --out", code, errs)
+	}
+}

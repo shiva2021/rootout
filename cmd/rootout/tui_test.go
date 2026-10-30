@@ -307,3 +307,19 @@ func TestHomeGateFakeDenied(t *testing.T) {
 		t.Fatal("confirm opened after a denial")
 	}
 }
+
+func TestHomeUninstallFlashCarriesWarning(t *testing.T) {
+	h := newHarness(t, appSpec())
+	c := &fakeConfirmer{ok: true}
+	d := testHomeDeps(t, h, c)
+	d.gate = func(context.Context, fsx.Env, bool) (license.State, error) {
+		return license.State{Status: license.StatusGrace, Allowed: true, Warning: graceWarning}, nil
+	}
+	f, err := homeUninstall(context.Background(), h.env, d)
+	if err != nil || !strings.HasSuffix(f.Text, " · "+graceWarning) {
+		t.Fatalf("flash %+v err %v", f, err)
+	}
+	if h.execs.Load() != 1 {
+		t.Fatalf("execs %d, want 1", h.execs.Load())
+	}
+}
