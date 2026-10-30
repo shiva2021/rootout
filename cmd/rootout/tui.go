@@ -55,11 +55,11 @@ func runTUI(ctx context.Context, g *globalFlags) error {
 // homeDeps are the screens, runner, gate and executor the home actions use;
 // tests replace them so nothing opens a terminal, execs or trashes.
 type homeDeps struct {
-	pick    func(context.Context, tui.LoadFunc) (app.App, bool, error)
-	confirm plan.Confirmer
-	run     run.Runner
-	gate    func(context.Context, fsx.Env, bool) (license.State, error)
-	execute func(context.Context, fsx.Env, *plan.Plan, plan.Deps) (*plan.Result, error)
+	pick    func(context.Context, tui.LoadFunc) (app.App, bool, error)                  // app picker screen; tests swap it
+	confirm plan.Confirmer                                                              // review screen; tests swap it
+	run     run.Runner                                                                  // external commands; tests swap it
+	gate    func(context.Context, fsx.Env, bool) (license.State, error)                 // membership gate; tests may swap it
+	execute func(context.Context, fsx.Env, *plan.Plan, plan.Deps) (*plan.Result, error) // removal; tests swap it
 }
 
 func realHomeDeps() homeDeps {

@@ -49,7 +49,7 @@ func keysURL(mid string) string {
 	return license.ServiceURL + "/?m=" + mid
 }
 
-// gateDepsFn builds Resolve's inputs; tests swap it for fakes.
+// gateDepsFn builds Resolve's inputs; tests swap it for a fake Mac, clock and key service.
 var gateDepsFn = gateDeps
 
 // gateDeps is the production wiring: the real Mac, the clock and the key service.

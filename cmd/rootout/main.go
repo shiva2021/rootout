@@ -23,12 +23,11 @@ import (
 // version is set by the linker (see Makefile).
 var version = "dev"
 
-// Test seams: tests point these at a fake home, a fake Runner and a fake
-// executor so no test reads the real home, execs a command or trashes a file.
+// Test seams, defaulted to the real functions here and nowhere else.
 var (
-	realEnv                = fsx.Real
-	cmdRun      run.Runner = run.Default
-	planExecute            = plan.Execute
+	realEnv                = fsx.Real     // the user's home and "/"; tests swap it for a fake home
+	cmdRun      run.Runner = run.Default  // external commands; tests swap it for a fake Runner
+	planExecute            = plan.Execute // removal; tests swap it so nothing is trashed
 )
 
 // Exit codes shared by every subcommand (see docs/kb/conventions.md).
