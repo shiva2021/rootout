@@ -258,3 +258,26 @@ Append-only. Newest at the bottom. Never edit an old entry; add a new one that s
 **Alternatives.** Manual workflow dispatch (rejected: one more step per release, D-028 already tags every merge); GoReleaser commit-based changelog (rejected: noisier, duplicates the curated file); tests inside the release job (rejected: wrong build tags on Ubuntu or 10x minutes on macOS).
 **Consequences.** Tags are never moved; a failed release is repaired with a patch tag. A tag pushed without running `release-check` can publish untested code; the runbook says to always run it.
 **Status.** Accepted
+
+## D-033 · 2026-10-30 · Public releases repo and public tap; plain cask
+
+**Context.** D-031's private tap needs `HOMEBREW_GITHUB_API_TOKEN` at install time, and Shivang does not want new users handling a token.
+**Decision.** Release assets go to a new public repo `shiva2021/rootout-releases`. `shiva2021/homebrew-rootout` becomes public. The cask is a plain `CurlDownloadStrategy` cask. The paywall lives in the binary (D-034), not in access to the download. One fine-grained token, the Actions secret `RELEASE_GITHUB_TOKEN`, covers both repos and replaces `TAP_GITHUB_TOKEN`. This is executed as a separate patch tag after the gated release, because the tap's cask is only rewritten by a release.
+**Alternatives.** Keep the token (rejected: friction for every new user). Make the source repo public (rejected: not yet).
+**Consequences.** Installing is `brew tap shiva2021/rootout && brew trust shiva2021/rootout && brew install --cask rootout`, with no token. Old releases stay on the private repo. Supersedes D-031's cask.
+**Status.** Accepted; executed in v0.5.1 (Part C of `docs/plans/m6-membership.md`). Supersedes D-031's cask.
+
+## D-034 · 2026-10-30 · Membership gate: machine-bound Ed25519 keys from a Patreon-backed key service; 7-day trial; read-only free
+
+**Context.** D-024 fixed the intent (admin unrestricted offline; everyone else needs an active Patreon membership) and left the mechanics to M6. Patreon's token exchange needs the client secret server-side, so a backend is unavoidable.
+**Decision.**
+- **Keys.** `ro1.<b64url payload>.<b64url sig>`, Ed25519 over compact JSON `{v,kind,sub,mid,iat,exp}`. One keypair; the public key is embedded. Every key is bound to `mid`, the first 32 hex of SHA-256("rootout:" + IOPlatformUUID). Admin keys are machine-bound too, minted offline per Mac with `cmd/rootout-keys`; the admin path never touches the network.
+- **Key service.** A Cloudflare Worker (`service/`, its workers.dev hostname baked into the binary as the only URL) issues patron keys after Patreon OAuth (`scope=identity`; `include=memberships` returns only our campaign). It treats the creator token's member record as authoritative (`patron_status == active_patron && (currently_entitled_amount_cents > 0 || is_gifted)`). The device cap is 2 Macs per Patreon user, oldest replaced. `/renew` writes nothing to KV. `/trial` is once per `mid`. Both are rate-limited to 5/min/IP. The creator token is refreshed daily, with GitHub-issue alerts (no Cloudflare zone, so no email).
+- **Renewal and grace.** Patron keys live 35 days and renew silently when under 7 days remain or when expired. The renewal stamp throttles attempts to once per 24 h, or once per hour once the key is past expiry with no remembered denial. A 14-day grace applies only when renewal failed (network, 429, 5xx), never after a 403. A 403 reason is remembered beside the key until a renewal succeeds, a fresh 403 replaces it, or a new key is pasted. The trial lasts 7 days with no grace.
+- **Scope.** `list`, `doctor`, `guide`, every `--dry-run` and heuristic `scan` stay free and make no licence call (doctor and guide read the key file and `ioreg` for the Membership line, never the network). Gated: `remove`, `orphans`, `scan --uninstall`, the review-screen uninstall, and every LLM assessment. The gate sits at the action, which supersedes the single-call-site consequence of D-008 and D-024 (the TUI home loop runs actions in-process). Exit code 4.
+- **Trial start.** From `rootout license`; from a deletion in a subcommand (y/n; `--yes` skips; a "y" spends the trial even if the review is then cancelled); or from a deletion in the TUI (two-phase: after the user confirms, so look-and-cancel never spends it). Never from the LLM path.
+- **Local signing.** Keys signed locally with `rootout-keys sign` never renew (no KV device or member records): admin and testing only.
+
+**Alternatives.** Patreon OAuth from the CLI (rejected: needs the client secret). Keychain for the key (rejected: a machine-bound signed key gains little from secrecy, and a file is testable). Unlimited devices (rejected: trivial sharing). Lemon Squeezy or Paddle (superseded in D-024).
+**Consequences.** The private key is the root of trust: back it up in the password manager; rotation means a second accepted constant for one release cycle. A dead creator token degrades to web re-login and a 503 on renew (grace), alerted via GitHub issue. The Workers Free KV write quota (about 1,000 a day) is consumed by `/trial` and `/callback` only.
+**Status.** Accepted

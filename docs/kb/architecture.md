@@ -4,6 +4,9 @@
 
 ```
 cmd/rootout/main.go            cobra root; bare command -> tui home screen
+cmd/rootout/gate.go            membership gate at each gated action
+cmd/rootout-keys/              offline key tool: keygen, sign (admin and test keys)
+service/                       Cloudflare Worker key service (TypeScript, not part of the Go build)
 internal/
   safety/    protected prefixes, generic-name denylist, Validate(path)  <- every deletion passes here, twice
   fsx/       Env{Home, Root}, size walk, lstat helpers (tests point Env at temp dirs)
@@ -21,7 +24,7 @@ internal/
   llm/ollama/ Detect, ListInstalled, Recommend (catalog.go), Pull, Hardware probe
   keychain/  Get/Set/Delete via zalando/go-keyring behind an interface
   config/    ~/.config/rootout/config.toml: provider, model, defaults (never secrets)
-  license/   Check(ctx) Status — always Allowed until M6
+  license/   Resolve(ctx, Deps) State: key codec, machine id, store, renewal client, trial (D-034)
   progress/  Reporter (Start/Step/Done), Term renderer for stderr, Recorder for tests
   output/    human table + JSON renderers shared by subcommands
   tui/       Bubble Tea models: home screen (action rows + flash of the last outcome), app picker (loads inside the
@@ -59,6 +62,14 @@ Spotlight bundles, launchd, processes) → `plan.New` grouped by owner, nothing 
 **local model picker**: `ollama.Detect` → `ListInstalled` → `Recommend(hardware)` →
 `Pull` with progress → save `llm.ollama.model` in config.
 
+## Membership gate
+
+`license.Resolve` reads the key file, checks the signature and that the key's machine id matches this Mac, then returns a state: admin (offline, always allowed), patron, trial, grace, expired, denied or invalid. It renews a patron key through the Worker when under 7 days remain or when expired, throttled by a stamp beside the key (24 h, or 1 h once expired with no remembered 403). With no key it can start a trial.
+
+The gate sits at the action, in `cmd/rootout/gate.go`, because the TUI home loop runs actions in-process. Gated: `remove`, `orphans`, `scan --uninstall`, the review-screen uninstall and every LLM assessment. Free and licence-call-free: `list`, `doctor`, `guide`, `--dry-run` and heuristic `scan`; doctor and guide only read the key file and `ioreg`. A denial exits 4. The TUI starts a trial only after the user confirms a deletion; a subcommand asks y/n (`--yes` skips); the LLM path never starts one.
+
+The Worker (`service/`) is the only external component and the only URL in the binary. Routes: `GET /` and `GET /start` (key page, Patreon sign-in), `GET /callback` (OAuth, issues a patron key), `POST /renew` (no KV writes) and `POST /trial` (once per machine id). It signs with the private key held as a Worker secret; the binary embeds the public key. `rootout-keys sign` makes keys outside the Worker; they never renew.
+
 ## Data
 
 - No database. State is the filesystem plus `~/.config/rootout/config.toml`.
@@ -71,4 +82,4 @@ Spotlight bundles, launchd, processes) → `plan.New` grouped by owner, nothing 
 - Never touches `/System`, `/usr`, `/bin`, `/sbin`, `/private/var/db`, `/Library/Apple`.
 - Login items are reported, not removed.
 - Marketplace/Open VSX lookups are optional; scoring never depends on them.
-- Licensing is a seam (`license.Check`) until M6.
+- Deletion and LLM features are gated by `license.Resolve` at the action (D-034); read-only features never call the licence service.

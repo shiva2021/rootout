@@ -34,6 +34,19 @@ make install
 
 The binary is not code-signed yet; Homebrew clears the quarantine flag for you.
 
+## Membership
+
+rootout is free to look at and paid to delete with. Every Mac gets a 7-day
+trial of the gated features, started the first time you confirm a deletion or
+run `rootout license`. After that you need an active membership.
+
+- Always free: `list`, `doctor`, `guide`, every `--dry-run` and the heuristic `scan`.
+- Needs a key: `remove`, `orphans`, `scan --uninstall`, the uninstall step in the scan and home screens, and every AI assessment.
+- `rootout license` shows your status, this Mac's machine code and the key page. Paste a key with `rootout license <key>`.
+- A key is tied to one Mac, and an account can use two Macs.
+- Keys renew themselves in the background; if renewal fails (offline or a service error) a key keeps working for 14 days past its expiry.
+- `rootout doctor` shows a Membership line with the same status.
+
 Nothing is uninstalled until you type `delete`. In every screen `?` lists the
 keys; in the scan screen `m` picks a local model without leaving the scan.
 esc goes back one screen; ctrl+x quits from anywhere.

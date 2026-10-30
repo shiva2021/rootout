@@ -29,7 +29,7 @@ Embedded in this plan after checking official docs today (say so if you disagree
 | D-012 | Keychain via `zalando/go-keyring` 0.2.8 (shells out to `/usr/bin/security`, no cgo) | `keybase/go-keychain` needs cgo and a stable codesign identity |
 | D-013 | LLM clients: official **`anthropic-sdk-go` 1.82.0** (structured outputs via `output_config`, GA) and **`openai-go/v3` 3.82.0** (Responses API + strict JSON schema); **Ollama via `net/http`** on native `/api/chat` with a JSON schema in `format` | SDKs track fast-moving APIs; Ollama's Go package pulls in the whole server module |
 | D-014 | Registry enrichment behind `--online`, off by default: VS Code → Marketplace `extensionquery`; Cursor/Windsurf/VSCodium → Open VSX REST | heuristics never depend on network; the forks ship Open VSX |
-| D-015 | Release: GoReleaser 2.18.3 with `homebrew_casks` and quill-based `notarize.macos` | `brews` is hard-deprecated since 2.16; `macos_native` notarize is Pro-only |
+| D-015 | Release: GoReleaser 2.18.3 (2.19.0 since 2026-10-30) with `homebrew_casks` and quill-based `notarize.macos` | `brews` is hard-deprecated since 2.16; `macos_native` notarize is Pro-only |
 | D-016 | Extension dirs resolved from each editor's `product.json` → `dataFolderName`, fallback list `~/.vscode`, `~/.vscode-insiders`, `~/.cursor`, `~/.vscode-oss`, `~/.windsurf` | only VS Code's path is officially documented |
 
 Defaults I'm applying without asking (say so if you disagree):
@@ -197,12 +197,12 @@ Config keys: `llm.ollama.base_url` (default `http://localhost:11434`), `llm.olla
 **M5 Release pipeline** (a CLI release, not a macOS app release; D-024)
 Spec and task plan: `docs/plans/m5-release.md` (D-030…D-032).
 
-**M6 Membership gate (last; gets its own plan; D-024)**
-Intent fixed now, mechanics decided then:
-- Shivang (admin and creator) uses every feature unrestricted, always: an admin credential (e.g. a signed admin token in the Keychain, or an admin build) makes `license.Check` return Allowed for everything, offline.
-- Everyone else uses the CLI only with an active monthly membership paid through Patreon (to be explored when we get there). Mechanics to evaluate at M6: Patreon's API/OAuth to verify an active pledge and tier, versus membership-linked license keys (Ed25519-signed, stdlib `crypto/ed25519`) issued to patrons; which commands are gated (everything vs keeping `list`/`doctor`/dry-runs free); an offline grace period so a lapsed network does not lock a paying user out; what a non-member sees (a clear message with the Patreon link, no dark patterns).
-- Not a standard macOS application distribution: no App Store, no in-app purchase; the gate lives in the CLI and the release pipeline (M5) stays a plain binary + Homebrew tap.
-- `license.Check` is already called once from the Cobra root (D-008), so M6 needs no restructuring.
+**M6 Membership gate** Shipped 2026-10-30 (D-033, D-034). Plan and task log: `docs/plans/m6-membership.md`.
+- Machine-bound Ed25519 keys (`internal/license`); admin keys signed offline with `cmd/rootout-keys`.
+- A Cloudflare Worker (`service/`) issues and renews patron keys from Patreon, and starts the 7-day trial.
+- The gate sits at the action (`remove`, `orphans`, `scan --uninstall`, review-screen uninstall, LLM assessment); exit code 4.
+- `rootout license`, a Membership line in `doctor`, and home-screen status; `list`, `doctor`, `guide`, dry runs and heuristic scans stay free.
+- Public releases repo and public tap with a plain cask (D-033), executed as a patch tag after the gated release.
 
 ## Libraries (verified against official docs on 2026-10-20)
 
@@ -218,7 +218,7 @@ Intent fixed now, mechanics decided then:
 | OpenAI | `github.com/openai/openai-go/v3` | 3.82.0 (needs Go ≥ 1.26) |
 | Ollama | stdlib `net/http` against `localhost:11434` | — |
 | TOML | `github.com/BurntSushi/toml` | latest |
-| Release | GoReleaser | 2.18.3 |
+| Release | GoReleaser | 2.19.0 |
 
 Each is re-checked against its docs when the task that uses it starts; versions recorded in `docs/kb/setup.md`.
 

@@ -4,6 +4,18 @@ All notable changes to rootout. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added
+- Membership gate (D-034): `rootout license`, a 7-day trial, machine-bound keys, a Membership line in `doctor` and the home-screen status. `remove`, `orphans`, `scan --uninstall` and LLM assessments need a trial or an active membership; `list`, `doctor`, `guide`, dry runs and heuristic scans stay free.
+- `cmd/rootout-keys`: offline signing tool for admin and test keys.
+- `service/`: the Cloudflare Worker key service that issues and renews patron keys.
+
+### Changed
+- GoReleaser 2.19.0 with the `install_steps` cask hook.
+- Exit code 4 now means a membership denial.
+
+### Removed
+- The root-level licence check stub.
+
 ## [0.4.1] - 2026-10-22
 
 ### Fixed

@@ -4,7 +4,7 @@ Pushing a `v*` tag publishes rootout. The `Release` workflow runs GoReleaser,
 builds darwin arm64 and amd64, attaches the archives and `checksums.txt` to a
 GitHub Release whose notes come from `CHANGELOG.md`, and updates the private
 tap `shiva2021/homebrew-rootout`. The `CI` workflow runs test and lint on every
-push to `main` and every pull request. Decisions: D-030, D-031, D-032.
+push to `main` and every pull request, plus the key service tests (the Worker job). Decisions: D-030, D-031, D-032.
 
 ## Cut a release
 - Move the Unreleased items under a new `## [X.Y.Z] - YYYY-MM-DD` heading in `CHANGELOG.md` and commit.
