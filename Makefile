@@ -2,7 +2,7 @@ BIN := bin/rootout
 PKG := ./...
 export CGO_ENABLED = 0
 
-.PHONY: build test lint fmt clean install release-check snapshot
+.PHONY: build test lint fmt clean install release-check snapshot contract
 
 build:
 	go build -trimpath -ldflags "-s -w -X main.version=$$(git describe --tags --always --dirty 2>/dev/null || echo dev)" -o $(BIN) ./cmd/rootout
@@ -39,3 +39,8 @@ release-check:
 # snapshot builds both archives and the cask into dist/ without publishing.
 snapshot:
 	goreleaser release --snapshot --clean --skip=publish
+
+# contract runs the licence client against a key service started with
+# `npm run dev` in service/ (see docs/kb/membership.md).
+contract:
+	ROOTOUT_SERVICE_URL=$${ROOTOUT_SERVICE_URL:-http://127.0.0.1:8787} go test -tags contract ./internal/license/ -run TestContract -v
