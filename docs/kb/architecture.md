@@ -64,11 +64,11 @@ Spotlight bundles, launchd, processes) → `plan.New` grouped by owner, nothing 
 
 ## Membership gate
 
-`license.Resolve` reads the key file, checks the signature and that the key's machine id matches this Mac, then returns a state: admin (offline, always allowed), patron, trial, grace, expired, denied or invalid. It renews a patron key through the Worker when under 7 days remain or when expired, throttled by a stamp beside the key (24 h, or 1 h once expired with no remembered 403). With no key it can start a trial.
+`license.Resolve` reads the key file, checks the signature and that the key's machine id matches this Mac, then returns a state: admin (offline, always allowed), member, trial, grace, expired, trial-used, none, invalid or no-machine-id; a 403 from the Worker surfaces as expired with its reason. It renews a patron key through the Worker when under 7 days remain or when expired, throttled by a stamp beside the key (24 h, or 1 h once expired with no remembered 403). With no key it can start a trial.
 
 The gate sits at the action, in `cmd/rootout/gate.go`, because the TUI home loop runs actions in-process. Gated: `remove`, `orphans`, `scan --uninstall`, the review-screen uninstall and every LLM assessment. Free and licence-call-free: `list`, `doctor`, `guide`, `--dry-run` and heuristic `scan`; doctor and guide only read the key file and `ioreg`. A denial exits 4. The TUI starts a trial only after the user confirms a deletion; a subcommand asks y/n (`--yes` skips); the LLM path never starts one.
 
-The Worker (`service/`) is the only external component and the only URL in the binary. Routes: `GET /` and `GET /start` (key page, Patreon sign-in), `GET /callback` (OAuth, issues a patron key), `POST /renew` (no KV writes) and `POST /trial` (once per machine id). It signs with the private key held as a Worker secret; the binary embeds the public key. `rootout-keys sign` makes keys outside the Worker; they never renew.
+The Worker (`service/`) is the only external component and the only licence-related URL in the binary. Routes: `GET /` and `GET /start` (key page, Patreon sign-in), `GET /callback` (OAuth, issues a patron key), `POST /renew` (no KV writes) and `POST /trial` (once per machine id). It signs with the private key held as a Worker secret; the binary embeds the public key. `rootout-keys sign` makes keys outside the Worker; they never renew.
 
 ## Data
 
