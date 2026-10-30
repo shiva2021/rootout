@@ -12,6 +12,7 @@ import (
 	"github.com/shiva2021/rootout/internal/ext"
 	"github.com/shiva2021/rootout/internal/fsx"
 	"github.com/shiva2021/rootout/internal/keychain"
+	"github.com/shiva2021/rootout/internal/license"
 	"github.com/shiva2021/rootout/internal/llm/ollama"
 	"github.com/shiva2021/rootout/internal/output"
 	"github.com/shiva2021/rootout/internal/run"
@@ -33,7 +34,7 @@ func newDoctorCmd(g *globalFlags) *cobra.Command {
 		Short: "Check the environment rootout depends on",
 		Long: `Check what rootout can use on this Mac: the installed rootout version, the macOS version, how files reach
 the Trash, Full Disk Access for this terminal, Homebrew, the VS Code-family editors and their command-line tools,
-the config file, stored API keys and Ollama with this Mac's chip and RAM.
+the config file, this Mac's membership, stored API keys and Ollama with this Mac's chip and RAM.
 
 Each line is a check mark or a "!" with a fix. Doctor only reads; it changes
 nothing and installs nothing.
@@ -86,7 +87,7 @@ func runChecks(ctx context.Context) []check {
 		trash.BackendFinder: "Finder (asks for Automation permission once)",
 	}[backend]})
 
-	env, err := fsx.Real()
+	env, err := realEnv()
 	if err == nil {
 		term := tcc.TerminalApp(os.Getenv)
 		switch tcc.FullDiskAccess(env) {
@@ -128,6 +129,10 @@ func runChecks(ctx context.Context) []check {
 		add(check{Name: "Config", OK: true, Detail: path + " · provider " + prov})
 	}
 
+	if err == nil {
+		add(membershipCheck(ctx, env))
+	}
+
 	store := keychain.New()
 	for _, p := range hostedProviders {
 		k, src, err := keychain.Resolve(store, p, os.Getenv)
@@ -157,4 +162,17 @@ func runChecks(ctx context.Context) []check {
 		add(check{Name: "Ollama", OK: c.LLM.Provider != "ollama", Detail: "not installed (optional, for local models); " + tier, Fix: "rootout config models --pick"})
 	}
 	return out
+}
+
+// membershipCheck reports the installed key without contacting the key service.
+func membershipCheck(ctx context.Context, env fsx.Env) check {
+	st := offlineState(ctx, env)
+	c := check{Name: "Membership", OK: st.Allowed || st.Status == license.StatusNone, Detail: st.Summary()}
+	if st.Status == license.StatusNone {
+		c.Detail = "no key · 7-day trial available (rootout license)"
+	}
+	if !c.OK {
+		c.Fix = "rootout license"
+	}
+	return c
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/shiva2021/rootout/internal/config"
+	"github.com/shiva2021/rootout/internal/fsx"
 	"github.com/shiva2021/rootout/internal/heur"
 	"github.com/shiva2021/rootout/internal/keychain"
 	"github.com/shiva2021/rootout/internal/llm"
@@ -71,12 +72,21 @@ func buildProvider(ctx context.Context, c config.Config, provider, model string,
 	}
 }
 
-// assessFunc wraps a provider with a per-call timeout.
-func assessFunc(p llm.Provider) tui.AssessFunc {
+// aiMembersLabel is the scan screen's AI label when membership is missing.
+const aiMembersLabel = "AI: members · rootout license"
+
+// assessFunc wraps a provider with a per-call timeout. Each call first asks
+// allowed (the membership gate) and returns its error instead of calling the model.
+func assessFunc(p llm.Provider, allowed func() error) tui.AssessFunc {
 	if p == nil {
 		return nil
 	}
 	return func(ctx context.Context, r heur.Report) (llm.Assessment, error) {
+		if allowed != nil {
+			if err := allowed(); err != nil {
+				return llm.Assessment{}, err
+			}
+		}
 		ctx, cancel := context.WithTimeout(ctx, assessTimeout)
 		defer cancel()
 		a, err := p.Assess(ctx, r)
@@ -89,14 +99,26 @@ func assessFunc(p llm.Provider) tui.AssessFunc {
 
 // buildAssessor is what the scan screen gets: the current provider (if any),
 // its label, and the hooks that let the user pick a local model in place.
-func buildAssessor(ctx context.Context, c config.Config, provider, model string, interactive bool) (tui.Assessor, error) {
+// With a provider it checks membership once (never starting the trial); when
+// denied the label says so and each assessment returns the denial.
+func buildAssessor(ctx context.Context, env fsx.Env, c config.Config, provider, model string, interactive bool) (tui.Assessor, error) {
 	p, err := buildProvider(ctx, c, provider, model, interactive)
 	if err != nil {
 		return tui.Assessor{}, err
 	}
-	a := tui.Assessor{Assess: assessFunc(p)}
+	allowed := func() error {
+		_, err := gate(ctx, env, false)
+		return err
+	}
+	label := func(name string) string {
+		if allowed() != nil {
+			return aiMembersLabel
+		}
+		return name
+	}
+	a := tui.Assessor{Assess: assessFunc(p, allowed)}
 	if p != nil {
-		a.Label = p.Name() + " · " + p.Model()
+		a.Label = label(p.Name() + " · " + p.Model())
 	}
 	if interactive {
 		deps, err := modelDeps(ctx, c)
@@ -113,7 +135,7 @@ func buildAssessor(ctx context.Context, c config.Config, provider, model string,
 			if err != nil {
 				return tui.Assessor{}, err
 			}
-			return tui.Assessor{Label: "ollama · " + m, Assess: assessFunc(np), Models: a.Models}, nil
+			return tui.Assessor{Label: label("ollama · " + m), Assess: assessFunc(np, allowed), Models: a.Models}, nil
 		}
 	}
 	return a, nil

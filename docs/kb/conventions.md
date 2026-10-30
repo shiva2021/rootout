@@ -17,7 +17,7 @@ Follow these so every module reads as if one person wrote it.
 ## Errors and logging
 - Wrap with context: `fmt.Errorf("leftover: read %s: %w", path, err)`. Never swallow errors; never `panic` outside `main`.
 - No logging to stdout. `--json` output is the only stdout in subcommands. Diagnostics go to stderr via `log/slog`, enabled by `--verbose`.
-- Exit codes: 0 ok, 1 error, 2 ambiguous/invalid input, 3 user declined.
+- Exit codes: 0 ok, 1 error, 2 ambiguous/invalid input, 3 user declined, 4 membership required.
 
 ## Testing
 - Stdlib `testing`, table-driven, `t.Run` subtests. No assertion library.

@@ -23,6 +23,9 @@ var homeKeys = []keyHelp{
 	{"?", "this help"},
 }
 
+// StatusMembersOnly is the home-title status that marks the gated rows "(members)".
+const StatusMembersOnly = "members only after trial"
+
 // Flash is the one-line outcome of the previous action shown on the home screen.
 type Flash struct {
 	Text string
@@ -55,11 +58,14 @@ var homeRows = []homeRow{
 	{ActionQuit, "Quit", "leave rootout (ctrl+x works on every screen)"},
 }
 
-// PickAction shows the home screen (titled with version, e.g. "v0.3.0")
-// and returns the chosen action. It returns ErrQuit when the user quits
-// (ctrl+x, ctrl+c or the Quit row).
-func PickAction(ctx context.Context, version string, flash Flash) (Action, error) {
-	h := NewHome(version, flash)
+// gatedAction reports whether a home action needs membership after the trial.
+func gatedAction(a Action) bool { return a == ActionUninstall || a == ActionOrphans }
+
+// PickAction shows the home screen (titled with version, e.g. "v0.3.0", and
+// the membership status) and returns the chosen action. It returns ErrQuit
+// when the user quits (ctrl+x, ctrl+c or the Quit row).
+func PickAction(ctx context.Context, version, status string, flash Flash) (Action, error) {
+	h := NewHome(version, status, flash)
 	if _, err := tea.NewProgram(h, tea.WithContext(ctx)).Run(); err != nil {
 		return ActionNone, runErr(err, "home")
 	}
@@ -75,6 +81,7 @@ type Home struct {
 	rows          []homeRow
 	styles        styles
 	version       string
+	status        string
 	width, height int
 	cursor        int
 	flash         Flash
@@ -84,13 +91,25 @@ type Home struct {
 	quitAll       bool
 }
 
-// NewHome builds the home screen showing flash under the list. version is
-// appended to the title when not empty.
-func NewHome(version string, flash Flash) *Home {
+// NewHome builds the home screen showing flash under the list. version and
+// status are appended to the title when not empty. When status is
+// StatusMembersOnly the gated rows say "(members)".
+func NewHome(version, status string, flash Flash) *Home {
+	rows := homeRows
+	if status == StatusMembersOnly {
+		rows = make([]homeRow, len(homeRows))
+		copy(rows, homeRows)
+		for i := range rows {
+			if gatedAction(rows[i].action) {
+				rows[i].blurb += " (members)"
+			}
+		}
+	}
 	return &Home{
-		rows:    homeRows,
+		rows:    rows,
 		styles:  defaultStyles(),
 		version: version,
+		status:  status,
 		width:   defaultWidth,
 		height:  defaultHeight,
 		flash:   flash,
@@ -172,6 +191,9 @@ func (h *Home) render() string {
 	title := "rootout"
 	if h.version != "" {
 		title += " " + h.version
+	}
+	if h.status != "" {
+		title += " · " + h.status
 	}
 	b.WriteString(h.styles.title.Render(title))
 	b.WriteString("\n\n")

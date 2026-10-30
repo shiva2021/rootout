@@ -460,3 +460,47 @@ func TestScanViewPickModelCancelWhenNotInstalled(t *testing.T) {
 		t.Fatal("second esc should quit")
 	}
 }
+
+func TestReviewScanGateBlocksEnter(t *testing.T) {
+	calls := 0
+	gate := func() error {
+		calls++
+		return errors.New("deletion and AI features are for members (trial used on this Mac).\n  Already a member? ...")
+	}
+	v := newTestScan(t, Assessor{Gate: gate})
+	pressS(v, keyEnter)
+	if calls != 0 {
+		t.Fatal("the gate must not run with nothing ticked")
+	}
+	pressS(v, keySpace, keyEnter)
+	if calls != 1 || v.confirm != nil {
+		t.Fatalf("gate calls %d, typed box open %v", calls, v.confirm != nil)
+	}
+	view := viewS(v)
+	if !strings.Contains(view, "deletion and AI features are for members (trial used on this Mac).") || strings.Contains(view, "Already a member") {
+		t.Fatalf("want the first line of the denial on the flash row:\n%s", view)
+	}
+	if _, ok := v.Result(); ok {
+		t.Fatal("a denied enter must not accept")
+	}
+}
+
+func TestReviewScanGateNilAllows(t *testing.T) {
+	for name, gate := range map[string]func() error{"nil": nil, "allowed": func() error { return nil }} {
+		v := newTestScan(t, Assessor{Gate: gate})
+		pressS(v, keySpace, keyEnter)
+		if v.confirm == nil {
+			t.Fatalf("%s gate: typed box should open", name)
+		}
+	}
+}
+
+func TestReviewScanGateSurvivesModelPick(t *testing.T) {
+	gate := func() error { return errors.New("denied") }
+	v := newTestScan(t, Assessor{Gate: gate})
+	v.Update(assessorMsg{a: Assessor{Label: "ollama · x"}})
+	pressS(v, keySpace, keyEnter)
+	if v.confirm != nil {
+		t.Fatal("the gate was lost when the model changed")
+	}
+}

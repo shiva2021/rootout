@@ -13,6 +13,7 @@ import (
 	"github.com/shiva2021/rootout/internal/ext"
 	"github.com/shiva2021/rootout/internal/fsx"
 	"github.com/shiva2021/rootout/internal/heur"
+	"github.com/shiva2021/rootout/internal/license"
 	"github.com/shiva2021/rootout/internal/llm"
 	"github.com/shiva2021/rootout/internal/output"
 	"github.com/shiva2021/rootout/internal/progress"
@@ -97,7 +98,7 @@ func runScan(ctx context.Context, g *globalFlags, f scanFlags) error {
 		files, exts := heur.Rules()
 		return w.Emit(map[string][]string{"file_rules": files, "extension_rules": exts})
 	}
-	env, err := fsx.Real()
+	env, err := realEnv()
 	if err != nil {
 		return err
 	}
@@ -157,7 +158,7 @@ func runScan(ctx context.Context, g *globalFlags, f scanFlags) error {
 		// In the review screen the model is asked on demand; only build it
 		// eagerly when --llm was requested or a provider is configured.
 		if wantsAI || c.LLM.Provider != "" || interactive {
-			assessor, err = buildAssessor(ctx, c, f.provider, f.model, interactive)
+			assessor, err = buildAssessor(ctx, env, c, f.provider, f.model, interactive)
 			if err != nil {
 				return declinedOnQuit(err, "no model chosen")
 			}
@@ -165,7 +166,7 @@ func runScan(ctx context.Context, g *globalFlags, f scanFlags) error {
 	}
 
 	if interactive {
-		_, failed, _, err := reviewAndUninstall(ctx, env, shown, assessor)
+		_, failed, _, err := reviewAndUninstall(ctx, env, shown, assessor, func() bool { return trialOK(env, false) })
 		if err != nil {
 			if errors.Is(err, tui.ErrQuit) {
 				return nil
@@ -175,10 +176,17 @@ func runScan(ctx context.Context, g *globalFlags, f scanFlags) error {
 		return uninstallErr(failed)
 	}
 
+	// Without membership the heuristics still print; the denial is the exit code.
+	var denied error
+	if wantsAI && assessor.Assess != nil {
+		if _, err := gate(ctx, env, false); err != nil {
+			denied = denyExit(err)
+		}
+	}
 	items := make([]scanItem, len(shown))
 	for i, r := range shown {
 		items[i].Report = r
-		if assessor.Assess != nil && wantsAI {
+		if assessor.Assess != nil && wantsAI && denied == nil {
 			fmt.Fprintf(os.Stderr, "rootout: asking the model about %s...\n", r.Ext.ID)
 			a, err := assessor.Assess(ctx, r)
 			if err != nil {
@@ -188,7 +196,10 @@ func runScan(ctx context.Context, g *globalFlags, f scanFlags) error {
 			}
 		}
 	}
-	return printReports(w, items, total, min)
+	if err := printReports(w, items, total, min); err != nil {
+		return err
+	}
+	return denied
 }
 
 // enumerateExts lists installed extensions, limited to --editor when set.
@@ -241,13 +252,30 @@ func scanReports(ctx context.Context, env fsx.Env, f scanFlags, rep progress.Rep
 }
 
 // reviewAndUninstall opens the results screen and uninstalls what the user
-// ticked. ok is false when the user backed out or ticked nothing.
-func reviewAndUninstall(ctx context.Context, env fsx.Env, shown []heur.Report, a tui.Assessor) (done, failed int, ok bool, err error) {
+// ticked. ok is false when the user backed out or ticked nothing. A keyless
+// user may tick and confirm; startTrial is asked only after that, so looking
+// never spends the trial. A false answer is exit 3, a denial exit 4.
+func reviewAndUninstall(ctx context.Context, env fsx.Env, shown []heur.Report, a tui.Assessor, startTrial func() bool) (done, failed int, ok bool, err error) {
+	a.Gate = func() error {
+		st, err := gate(ctx, env, false)
+		if err != nil && st.Status != license.StatusNone {
+			return err
+		}
+		return nil
+	}
 	var res tui.ScanResult
 	res, ok, err = tui.ReviewScan(ctx, shown, a)
 	if err != nil || !ok || len(res.Uninstall) == 0 {
 		return 0, 0, false, err
 	}
+	if !startTrial() {
+		return 0, 0, false, &exitErr{code: exitDeclined, msg: "nothing uninstalled"}
+	}
+	st, err := gate(ctx, env, true)
+	if err != nil {
+		return 0, 0, false, denyExit(err)
+	}
+	trialNotice(st, os.Stderr)
 	var targets []ext.Extension
 	for _, r := range res.Uninstall {
 		targets = append(targets, r.Ext)
@@ -271,6 +299,9 @@ func uninstallByID(ctx context.Context, env fsx.Env, exts []ext.Extension, f sca
 		if !found {
 			return &exitErr{code: exitBadInput, msg: fmt.Sprintf("no installed extension %q", id)}
 		}
+	}
+	if err := gateAction(ctx, env, f.yes, "nothing uninstalled"); err != nil {
+		return err
 	}
 	if f.yes {
 		yesBanner(false)

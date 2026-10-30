@@ -35,6 +35,8 @@ extensions, add an AI second opinion, find leftovers of apps you already
 deleted, and script rootout. The steps reflect this Mac: the tour runs the
 same checks as "rootout doctor" and names an app that is really installed.
 
+Deletion and AI assessment need a membership after a 7-day trial; ` + "`rootout license`" + ` explains.
+
 The guide only reads. It never removes anything and never changes settings;
 every command it shows is for you to run yourself.
 

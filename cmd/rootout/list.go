@@ -7,7 +7,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/shiva2021/rootout/internal/app"
-	"github.com/shiva2021/rootout/internal/fsx"
 	"github.com/shiva2021/rootout/internal/output"
 )
 
@@ -32,7 +31,7 @@ reference only and can never be removed. Listing only reads; nothing changes.
   rootout list --json               # as JSON, for scripts`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			env, err := fsx.Real()
+			env, err := realEnv()
 			if err != nil {
 				return err
 			}

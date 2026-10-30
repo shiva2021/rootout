@@ -15,12 +15,21 @@ import (
 
 	"github.com/shiva2021/rootout/internal/config"
 	"github.com/shiva2021/rootout/internal/fsx"
-	"github.com/shiva2021/rootout/internal/license"
+	"github.com/shiva2021/rootout/internal/plan"
 	"github.com/shiva2021/rootout/internal/progress"
+	"github.com/shiva2021/rootout/internal/run"
 )
 
 // version is set by the linker (see Makefile).
 var version = "dev"
+
+// Test seams: tests point these at a fake home, a fake Runner and a fake
+// executor so no test reads the real home, execs a command or trashes a file.
+var (
+	realEnv                = fsx.Real
+	cmdRun      run.Runner = run.Default
+	planExecute            = plan.Execute
+)
 
 // Exit codes shared by every subcommand (see docs/kb/conventions.md).
 const (
@@ -66,6 +75,8 @@ static: extension code is never executed.
 
 Every subcommand takes --json and then prints only JSON on stdout.
 
+Deletion and AI assessment need a membership after a 7-day trial; ` + "`rootout license`" + ` explains.
+
 Getting started
   rootout doctor                 check what rootout can use on this Mac
   rootout                        open the home screen
@@ -86,9 +97,6 @@ Getting started
 				lvl = slog.LevelDebug
 			}
 			slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lvl})))
-			if st := license.Check(cmd.Context(), cmd.Name()); !st.Allowed {
-				return &exitErr{code: exitLicensing, msg: "license: " + st.Reason}
-			}
 			firstRunHint(cmd, &g)
 			return nil
 		},
@@ -107,6 +115,7 @@ Getting started
 		newDoctorCmd(&g),
 		newOrphansCmd(&g),
 		newGuideCmd(&g),
+		newLicenseCmd(&g),
 	)
 
 	root.SetArgs(args)
@@ -129,7 +138,7 @@ Getting started
 func firstRunHint(cmd *cobra.Command, g *globalFlags) {
 	for c := cmd; c != nil; c = c.Parent() {
 		switch c.Name() {
-		case "guide", "help", "completion", cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
+		case "guide", "help", "completion", "license", cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
 			return
 		}
 	}

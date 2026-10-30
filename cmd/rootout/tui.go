@@ -9,6 +9,7 @@ import (
 
 	"github.com/shiva2021/rootout/internal/app"
 	"github.com/shiva2021/rootout/internal/fsx"
+	"github.com/shiva2021/rootout/internal/license"
 	"github.com/shiva2021/rootout/internal/output"
 	"github.com/shiva2021/rootout/internal/plan"
 	"github.com/shiva2021/rootout/internal/priv"
@@ -23,13 +24,13 @@ func runTUI(ctx context.Context, g *globalFlags) error {
 	if g.json {
 		return &exitErr{code: exitBadInput, msg: "--json needs a subcommand (list, remove, scan, orphans); the TUI is interactive"}
 	}
-	env, err := fsx.Real()
+	env, err := realEnv()
 	if err != nil {
 		return err
 	}
 	var flash tui.Flash
 	for {
-		a, err := tui.PickAction(ctx, version, flash)
+		a, err := tui.PickAction(ctx, version, licenseStatusLine(ctx, env), flash)
 		if errors.Is(err, tui.ErrQuit) {
 			return nil
 		}
@@ -51,13 +52,27 @@ func runTUI(ctx context.Context, g *globalFlags) error {
 	}
 }
 
+// homeDeps are the screens, runner, gate and executor the home actions use;
+// tests replace them so nothing opens a terminal, execs or trashes.
+type homeDeps struct {
+	pick    func(context.Context, tui.LoadFunc) (app.App, bool, error)
+	confirm plan.Confirmer
+	run     run.Runner
+	gate    func(context.Context, fsx.Env, bool) (license.State, error)
+	execute func(context.Context, fsx.Env, *plan.Plan, plan.Deps) (*plan.Result, error)
+}
+
+func realHomeDeps() homeDeps {
+	return homeDeps{pick: tui.PickAppLoad, confirm: tui.Confirmer{}, run: cmdRun, gate: gate, execute: planExecute}
+}
+
 // runAction runs one home-screen action and returns what to show on the flash.
 func runAction(ctx context.Context, env fsx.Env, a tui.Action) (tui.Flash, error) {
 	switch a {
 	case tui.ActionUninstall:
-		return homeUninstall(ctx, env)
+		return homeUninstall(ctx, env, realHomeDeps())
 	case tui.ActionOrphans:
-		return homeOrphans(ctx, env)
+		return homeOrphans(ctx, env, realHomeDeps())
 	case tui.ActionScan:
 		return homeScan(ctx, env)
 	case tui.ActionModel:
@@ -66,7 +81,21 @@ func runAction(ctx context.Context, env fsx.Env, a tui.Action) (tui.Flash, error
 	return tui.Flash{}, nil
 }
 
-func homeUninstall(ctx context.Context, env fsx.Env) (tui.Flash, error) {
+// gateFirst is the first phase of a home-screen gate: it stops a user whose
+// membership is over before any screen opens. A keyless user (trial still
+// possible) passes; the trial starts only after they confirm (gateConfirmed).
+func gateFirst(ctx context.Context, env fsx.Env, d homeDeps) (tui.Flash, bool) {
+	st, err := d.gate(ctx, env, false)
+	if err != nil && st.Status != license.StatusNone {
+		return errorFlash(err), false
+	}
+	return tui.Flash{}, true
+}
+
+func homeUninstall(ctx context.Context, env fsx.Env, d homeDeps) (tui.Flash, error) {
+	if f, ok := gateFirst(ctx, env, d); !ok {
+		return f, nil
+	}
 	// Discovery and removal run between screens, so the terminal is in
 	// normal mode and the stderr progress line is visible.
 	rep := progress.Term(os.Stderr)
@@ -74,40 +103,36 @@ func homeUninstall(ctx context.Context, env fsx.Env) (tui.Flash, error) {
 		return app.DiscoverWith(env, app.Options{Progress: r})
 	}
 	for {
-		a, ok, err := tui.PickAppLoad(ctx, load)
+		a, ok, err := d.pick(ctx, load)
 		if err != nil {
 			return tui.Flash{}, err
 		}
 		if !ok {
 			return tui.Flash{}, nil
 		}
-		p, err := plan.Build(ctx, env, a, plan.Options{Mode: plan.Trash, CrashReports: true, Run: run.Default, Progress: rep})
+		p, err := plan.Build(ctx, env, a, plan.Options{Mode: plan.Trash, CrashReports: true, Run: d.run, Progress: rep})
 		if err != nil {
 			f := errorFlash(err)
 			f.Text = "could not plan " + a.Name + ": " + f.Text
 			return f, nil
 		}
-		ok, err = tui.Confirmer{}.Confirm(ctx, p)
+		ok, err = d.confirm.Confirm(ctx, p)
 		if err != nil {
 			return tui.Flash{}, err
 		}
 		if !ok {
 			continue
 		}
-		res, err := plan.Execute(ctx, env, p, plan.Deps{Priv: priv.Options{}, Progress: rep})
-		if res != nil {
-			report(res)
-		}
-		if err != nil && !errors.Is(err, priv.ErrCancelled) {
-			return tui.Flash{}, err
-		}
-		return removalFlash(a.Name, p, res, err), nil
+		return executeConfirmed(ctx, env, d, p, a.Name, rep)
 	}
 }
 
-func homeOrphans(ctx context.Context, env fsx.Env) (tui.Flash, error) {
+func homeOrphans(ctx context.Context, env fsx.Env, d homeDeps) (tui.Flash, error) {
+	if f, ok := gateFirst(ctx, env, d); !ok {
+		return f, nil
+	}
 	rep := progress.Term(os.Stderr)
-	orphans, err := findOrphans(ctx, env, orphanFlags{}, rep)
+	orphans, err := findOrphans(ctx, env, orphanFlags{}, rep, d.run)
 	if err != nil {
 		return tui.Flash{}, err
 	}
@@ -116,21 +141,35 @@ func homeOrphans(ctx context.Context, env fsx.Env) (tui.Flash, error) {
 	if len(p.Items) == 0 {
 		return tui.Flash{Text: "No orphaned leftovers found"}, nil
 	}
-	ok, err := tui.Confirmer{}.Confirm(ctx, p)
+	ok, err := d.confirm.Confirm(ctx, p)
 	if err != nil {
 		return tui.Flash{}, err
 	}
 	if !ok || len(p.Selected()) == 0 {
 		return tui.Flash{Text: "Nothing removed"}, nil
 	}
-	res, err := plan.Execute(ctx, env, p, plan.Deps{Priv: priv.Options{}, Progress: rep})
+	return executeConfirmed(ctx, env, d, p, "orphaned leftovers", rep)
+}
+
+// executeConfirmed is the second phase of a home-screen gate: the user has
+// confirmed, so the trial may start now; then the plan runs.
+func executeConfirmed(ctx context.Context, env fsx.Env, d homeDeps, p *plan.Plan, subject string, rep progress.Reporter) (tui.Flash, error) {
+	st, err := d.gate(ctx, env, true)
+	if err != nil {
+		return errorFlash(err), nil
+	}
+	res, err := d.execute(ctx, env, p, plan.Deps{Priv: priv.Options{}, Progress: rep})
 	if res != nil {
 		report(res)
 	}
 	if err != nil && !errors.Is(err, priv.ErrCancelled) {
 		return tui.Flash{}, err
 	}
-	return removalFlash("orphaned leftovers", p, res, err), nil
+	f := removalFlash(subject, p, res, err)
+	if st.Started {
+		f.Text = trialPrefix + f.Text
+	}
+	return f, nil
 }
 
 func homeScan(ctx context.Context, env fsx.Env) (tui.Flash, error) {
@@ -150,7 +189,7 @@ func homeScan(ctx context.Context, env fsx.Env) (tui.Flash, error) {
 	if err != nil {
 		return tui.Flash{}, err
 	}
-	assessor, err := buildAssessor(ctx, c, "", "", true)
+	assessor, err := buildAssessor(ctx, env, c, "", "", true)
 	if errors.Is(err, tui.ErrQuit) {
 		return tui.Flash{}, err
 	}
@@ -160,7 +199,7 @@ func homeScan(ctx context.Context, env fsx.Env) (tui.Flash, error) {
 	if err != nil {
 		return tui.Flash{}, err
 	}
-	done, failed, ok, err := reviewAndUninstall(ctx, env, shown, assessor)
+	done, failed, ok, err := reviewAndUninstall(ctx, env, shown, assessor, func() bool { return true })
 	if err != nil {
 		return tui.Flash{}, err
 	}

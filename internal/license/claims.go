@@ -1,3 +1,5 @@
+// Package license holds the membership gate: Ed25519-signed licence keys bound
+// to a Mac (milestone M6). Resolve decides whether gated features are allowed.
 package license
 
 import (

@@ -9,11 +9,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/shiva2021/rootout/internal/app"
-	"github.com/shiva2021/rootout/internal/fsx"
 	"github.com/shiva2021/rootout/internal/output"
 	"github.com/shiva2021/rootout/internal/plan"
 	"github.com/shiva2021/rootout/internal/priv"
-	"github.com/shiva2021/rootout/internal/run"
 )
 
 type removeFlags struct {
@@ -65,7 +63,7 @@ plain confirmation instead of the review screen.`,
 }
 
 func runRemove(ctx context.Context, g *globalFlags, f removeFlags, arg string) error {
-	env, err := fsx.Real()
+	env, err := realEnv()
 	if err != nil {
 		return err
 	}
@@ -99,7 +97,7 @@ func runRemove(ctx context.Context, g *globalFlags, f removeFlags, arg string) e
 		Dotfiles:     f.dotfiles,
 		CrashReports: !f.noCrash,
 		Also:         f.also,
-		Run:          run.Default,
+		Run:          cmdRun,
 		Progress:     rep,
 	})
 	if err != nil {
@@ -118,6 +116,9 @@ func runRemove(ctx context.Context, g *globalFlags, f removeFlags, arg string) e
 		return nil
 	}
 
+	if err := gateAction(ctx, env, f.yes, "nothing removed"); err != nil {
+		return err
+	}
 	if f.yes {
 		yesBanner(f.permanent)
 	}
@@ -129,7 +130,7 @@ func runRemove(ctx context.Context, g *globalFlags, f removeFlags, arg string) e
 		return &exitErr{code: exitDeclined, msg: "nothing removed"}
 	}
 
-	res, err := plan.Execute(ctx, env, p, plan.Deps{
+	res, err := planExecute(ctx, env, p, plan.Deps{
 		Priv:     priv.Options{UseSudo: f.sudo, Dotfiles: f.dotfiles},
 		Dotfiles: f.dotfiles,
 		Progress: rep,

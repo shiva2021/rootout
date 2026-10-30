@@ -9,13 +9,13 @@ import (
 
 func newTestHome(t *testing.T, flash Flash) *Home {
 	t.Helper()
-	h := NewHome("", flash)
+	h := NewHome("", "", flash)
 	h.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	return h
 }
 
 func TestHomeTitleVersion(t *testing.T) {
-	h := NewHome("v0.3.0", Flash{})
+	h := NewHome("v0.3.0", "", Flash{})
 	h.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	if first := strings.SplitN(viewH(h), "\n", 2)[0]; strings.TrimSpace(first) != "rootout v0.3.0" {
 		t.Errorf("title = %q, want %q", first, "rootout v0.3.0")
@@ -194,5 +194,37 @@ func TestHomeHelpOverlay(t *testing.T) {
 	assertQuit(t, pressH(h, keyCtrlX))
 	if !h.quitAll {
 		t.Error("ctrl+x while help is open should quit rootout")
+	}
+}
+
+func TestHomeTitleStatus(t *testing.T) {
+	h := NewHome("v0.5.0", "trial: 5 days left", Flash{})
+	h.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	if first := strings.TrimSpace(strings.SplitN(viewH(h), "\n", 2)[0]); first != "rootout v0.5.0 · trial: 5 days left" {
+		t.Errorf("title = %q", first)
+	}
+}
+
+func TestHomeBlurbsMembers(t *testing.T) {
+	gated := map[Action]bool{ActionUninstall: true, ActionOrphans: true}
+	for _, status := range []string{StatusMembersOnly, "admin", ""} {
+		h := NewHome("", status, Flash{})
+		h.Update(tea.WindowSizeMsg{Width: 200, Height: 30})
+		v := viewH(h)
+		for _, r := range homeRows {
+			want := r.blurb
+			if status == StatusMembersOnly && gated[r.action] {
+				want += " (members)"
+			}
+			line := ""
+			for _, l := range strings.Split(v, "\n") {
+				if strings.Contains(l, r.title) {
+					line = strings.TrimSpace(l)
+				}
+			}
+			if !strings.HasSuffix(line, want) {
+				t.Errorf("status %q, row %q: line %q, want suffix %q", status, r.title, line, want)
+			}
+		}
 	}
 }

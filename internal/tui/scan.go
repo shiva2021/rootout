@@ -40,6 +40,10 @@ type Assessor struct {
 	Label  string     // "ollama · qwen3.5:4b", "anthropic · claude-sonnet-5-5"; "" = none configured
 	Assess AssessFunc // nil = none
 	Models *ModelDeps // nil = local model picking unavailable
+	// Gate is asked when the user presses enter with extensions ticked; an
+	// error keeps the typed box closed and shows its first line. nil = allowed.
+	// It survives a model pick.
+	Gate func() error
 	// OnModel is called after the user picks a local model and returns the
 	// replacement Assessor (Label, Assess and Models are taken from it).
 	OnModel func(ctx context.Context, model string) (Assessor, error)
@@ -289,6 +293,12 @@ func (v *ScanView) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if n == 0 {
 			v.flash = nothingTicked
 			return v, nil
+		}
+		if v.assessor.Gate != nil {
+			if err := v.assessor.Gate(); err != nil {
+				v.errLine, _, _ = strings.Cut(err.Error(), "\n")
+				return v, nil
+			}
 		}
 		tc, cmd := newTypedConfirm(plan.ConfirmWord, fmt.Sprintf("Type %s to uninstall %d extensions", plan.ConfirmWord, n), false)
 		v.confirm = &tc

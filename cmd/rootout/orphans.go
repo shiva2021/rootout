@@ -66,7 +66,7 @@ are reported but not removed in this version.`,
 }
 
 func runOrphans(ctx context.Context, g *globalFlags, f orphanFlags) error {
-	env, err := fsx.Real()
+	env, err := realEnv()
 	if err != nil {
 		return err
 	}
@@ -75,7 +75,7 @@ func runOrphans(ctx context.Context, g *globalFlags, f orphanFlags) error {
 	}
 	interactive := !g.json && isTerminal(os.Stdin) && isTerminal(os.Stdout)
 	rep := stderrProgress(g)
-	orphans, err := findOrphans(ctx, env, f, rep)
+	orphans, err := findOrphans(ctx, env, f, rep, cmdRun)
 	if err != nil {
 		return err
 	}
@@ -92,12 +92,18 @@ func runOrphans(ctx context.Context, g *globalFlags, f orphanFlags) error {
 		return nil
 	}
 
-	var ok bool
-	switch {
-	case len(f.remove) > 0:
+	if len(f.remove) > 0 {
 		if err := selectOwners(p, orphans, f.remove); err != nil {
 			return err
 		}
+	}
+	if err := gateAction(ctx, env, f.yes, "nothing removed"); err != nil {
+		return err
+	}
+
+	var ok bool
+	switch {
+	case len(f.remove) > 0:
 		if f.yes {
 			yesBanner(f.permanent)
 			ok = true
@@ -114,7 +120,7 @@ func runOrphans(ctx context.Context, g *globalFlags, f orphanFlags) error {
 		return &exitErr{code: exitDeclined, msg: "nothing removed"}
 	}
 
-	res, err := plan.Execute(ctx, env, p, plan.Deps{
+	res, err := planExecute(ctx, env, p, plan.Deps{
 		Priv:     priv.Options{UseSudo: f.sudo},
 		Progress: rep,
 	})
@@ -138,7 +144,7 @@ func runOrphans(ctx context.Context, g *globalFlags, f orphanFlags) error {
 }
 
 // findOrphans discovers the installed apps and the leftovers none of them own.
-func findOrphans(ctx context.Context, env fsx.Env, f orphanFlags, rep progress.Reporter) ([]leftover.Orphan, error) {
+func findOrphans(ctx context.Context, env fsx.Env, f orphanFlags, rep progress.Reporter, r run.Runner) ([]leftover.Orphan, error) {
 	if f.minAge == 0 {
 		f.minAge = 30 * 24 * time.Hour
 	}
@@ -149,7 +155,7 @@ func findOrphans(ctx context.Context, env fsx.Env, f orphanFlags, rep progress.R
 	return leftover.FindOrphans(ctx, env, leftover.OrphanOptions{
 		Installed:    installed,
 		RecentWindow: f.minAge,
-		Run:          run.Default,
+		Run:          r,
 		Progress:     rep,
 	})
 }
