@@ -141,4 +141,14 @@ describe("callback", () => {
     const { res } = await call(fetchFn);
     expect(res.status).toBe(502);
   });
+
+  it("signing failure leaves devices and member unset", async () => {
+    const { fetchFn } = stubFetch(tokens(), identity("active_patron"), member("active_patron"));
+    const state = await signState(env, { mid, nonce: "n", exp: NOW + 600 });
+    const broken = { ...env, SIGNING_KEY: "not-a-key" } as typeof env;
+    const req = new Request(`https://keys.test/callback?code=abc&state=${encodeURIComponent(state)}`);
+    await expect(callbackHandler({ fetchFn, now: () => NOW })(req, broken, ctx)).rejects.toThrow();
+    expect(await env.KEYS.get("devices:u1")).toBeNull();
+    expect(await env.KEYS.get("member:u1")).toBeNull();
+  });
 });

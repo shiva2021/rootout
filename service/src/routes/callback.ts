@@ -6,19 +6,9 @@ import {
   PatreonAuthError, PatreonError, exchangeCode, identityMembership, isActive, memberById, type Membership,
 } from "../patreon";
 import type { Handler } from "../router";
-import { PATRON_LIFE, importPrivateKey, sign } from "../sign";
+import { signingKey } from "../keys";
+import { PATRON_LIFE, sign } from "../sign";
 import { verifyState } from "../state";
-
-// One imported key per isolate, re-imported only if SIGNING_KEY changes.
-let cached: { source: string; key: Promise<CryptoKey> } | null = null;
-function signingKey(env: Env): Promise<CryptoKey> {
-  if (cached?.source !== env.SIGNING_KEY) {
-    const key = importPrivateKey(env.SIGNING_KEY);
-    cached = { source: env.SIGNING_KEY, key };
-    key.catch(() => { if (cached?.key === key) cached = null; });
-  }
-  return cached!.key;
-}
 
 const REASONS: Record<string, string> = {
   declined_patron: "your last payment was declined",
@@ -63,12 +53,13 @@ export function callbackHandler(deps: { fetchFn?: typeof fetch; now?: () => numb
 
       if (!isActive(m)) return html(200, deniedPage(reasonText(m.patronStatus ?? "free_member"), env.PATREON_URL));
 
-      const { devices } = await addDevice(env.KEYS, m.userId, mid, t);
-      await putMember(env.KEYS, m.userId, m.memberId!);
+      // Sign first so a signing failure leaves KV untouched.
       const key = await sign(
         { v: 1, kind: "patron", sub: m.userId, mid, iat: t, exp: t + PATRON_LIFE },
         await signingKey(env),
       );
+      const { devices } = await addDevice(env.KEYS, m.userId, mid, t);
+      await putMember(env.KEYS, m.userId, m.memberId!);
       return html(200, keyPage(key, devices, mid));
     } catch (e) {
       if (e instanceof PatreonError) return html(502, errorPage("Patreon is not responding; try again in a minute."));

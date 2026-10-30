@@ -12,9 +12,9 @@ describe("router", () => {
     expect((await call("GET", "/renew")).status).toBe(404);
   });
 
-  it("unimplemented routes return 501", async () => {
+  it("renew and trial are wired and reject a non-JSON body", async () => {
     for (const [m, p] of [["POST", "/renew"], ["POST", "/trial"]]) {
-      expect((await call(m, p)).status, `${m} ${p}`).toBe(501);
+      expect((await call(m, p)).status, `${m} ${p}`).toBe(400);
     }
   });
 

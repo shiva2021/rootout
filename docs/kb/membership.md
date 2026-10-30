@@ -68,7 +68,7 @@ The key service is the Cloudflare Worker `rootout-keys` at `rootout-keys.<accoun
 
 - **Read the device list:** `wrangler kv key get --remote --binding KEYS devices:<userId>`.
 - **Alerts** arrive as a GitHub issue labelled `rootout-keys` on `shiva2021/rootout`. Fix the cause, then close the issue.
-- **Known limit:** the Workers Free plan allows about 1,000 KV writes a day. Heavy renewal traffic can hit it; the fix is the paid plan.
+- **Known limit:** the Workers Free plan allows about 1,000 KV writes a day. Heavy renewal traffic can hit it; the fix is the paid plan. `/renew` and `/trial` are rate-limited to 5 requests per minute per IP (429 `rate_limited`); the CLI treats 429 like a network error.
 
 ## Support answers
 
