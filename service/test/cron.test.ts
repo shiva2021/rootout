@@ -16,13 +16,6 @@ beforeEach(async () => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-// refreshCreator takes one fetch for Patreon and alert uses the global fetch; route both through a single stub.
-function withGlobalFetch(...responses: Response[]) {
-  const s = stubFetch(...responses);
-  vi.stubGlobal("fetch", s.fetchFn);
-  return s;
-}
-
 describe("cron", () => {
   it("refreshes after 20 days and stores the new pair with prev kept", async () => {
     await kv.put("creator", JSON.stringify(old));
@@ -47,13 +40,12 @@ describe("cron", () => {
 
   it("Patreon error alerts and keeps the pair", async () => {
     await kv.put("creator", JSON.stringify(old));
-    const g = withGlobalFetch(...issuesFor("x"));
-    const { fetchFn, calls } = stubFetch(new Response("{}", { status: 400 }));
-    expect(await refreshCreator(env, NOW, fetchFn)).toBe("failed");
-    expect(calls).toHaveLength(1);
-    expect(g.calls).toHaveLength(2);
-    expect(g.calls[1].url).toBe("https://api.github.com/repos/shiva2021/rootout/issues");
-    const posted = JSON.parse(g.calls[1].init.body as string);
+    const g = stubFetch(new Response("{}", { status: 400 }), ...issuesFor("x"));
+    expect(await refreshCreator(env, NOW, g.fetchFn)).toBe("failed");
+    expect(g.calls).toHaveLength(3);
+    expect(g.calls[0].url).toBe("https://www.patreon.com/api/oauth2/token");
+    expect(g.calls[2].url).toBe("https://api.github.com/repos/shiva2021/rootout/issues");
+    const posted = JSON.parse(g.calls[2].init.body as string);
     expect(posted.title).toBe("creator token refresh failed");
     expect(posted.body).toContain(new Date(NOW * 1000).toISOString());
     expect(posted.body).toContain("keys.test");
@@ -62,25 +54,24 @@ describe("cron", () => {
 
   it("KV put failure keeps the previous pair", async () => {
     await kv.put("creator", JSON.stringify(old));
-    const g = withGlobalFetch(...issuesFor("x"));
+    const g = stubFetch(tokenOk(), ...issuesFor("x"));
     const realPut = kv.put.bind(kv);
     vi.spyOn(kv, "put").mockImplementation(((key: string, value: string) => {
       if (key === "creator") throw new Error("kv down");
       return realPut(key, value);
     }) as typeof kv.put);
-    const { fetchFn } = stubFetch(tokenOk());
-    expect(await refreshCreator(env, NOW, fetchFn)).toBe("failed");
-    expect(JSON.parse(g.calls[1].init.body as string).body).toContain("kv down");
+    expect(await refreshCreator(env, NOW, g.fetchFn)).toBe("failed");
+    expect(JSON.parse(g.calls[2].init.body as string).body).toContain("kv down");
     vi.restoreAllMocks();
     expect(await getCreator(kv)).toEqual(old);
     expect(JSON.parse((await kv.get("creator_prev"))!)).toEqual(old);
   });
 
   it("missing pair alerts and returns failed", async () => {
-    const g = withGlobalFetch(...issuesFor("x"));
-    const { fetchFn, calls } = stubFetch();
-    expect(await refreshCreator(env, NOW, fetchFn)).toBe("failed");
-    expect(calls).toHaveLength(0);
+    const g = stubFetch(...issuesFor("x"));
+    expect(await refreshCreator(env, NOW, g.fetchFn)).toBe("failed");
+    expect(g.calls).toHaveLength(2);
+    expect(g.calls[0].url).toContain("/issues?labels=rootout-keys");
     expect(JSON.parse(g.calls[1].init.body as string).title).toBe("creator token missing");
   });
 });

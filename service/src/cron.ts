@@ -18,7 +18,7 @@ export async function refreshCreator(
   try {
     const pair = await getCreator(env.KEYS);
     if (!pair) {
-      await alert(env, "creator token missing", detail(env, now, "No creator token pair is stored. Re-authorise the creator account."));
+      await alert(env, "creator token missing", detail(env, now, "No creator token pair is stored. Re-authorise the creator account."), fetchFn);
       return "failed";
     }
     if (now - pair.updated < REFRESH_AFTER) return "skipped";
@@ -26,7 +26,7 @@ export async function refreshCreator(
     await putCreator(env.KEYS, { access: next.access, refresh: next.refresh, updated: now });
     return "refreshed";
   } catch (e) {
-    await alert(env, "creator token refresh failed", detail(env, now, e instanceof Error ? e.message : String(e)));
+    await alert(env, "creator token refresh failed", detail(env, now, e instanceof Error ? e.message : String(e)), fetchFn);
     return "failed";
   }
 }

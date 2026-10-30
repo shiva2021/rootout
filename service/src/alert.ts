@@ -21,6 +21,7 @@ export async function alert(
     "User-Agent": "rootout-keys",
   };
   try {
+    // per_page=50 scans only the first 50 open rootout-keys issues; a duplicate may be created past that (acceptable).
     const list = await fetchFn(`${base}?labels=${LABEL}&state=open&per_page=50`, { headers });
     if (!list.ok) throw new Error(`list issues: HTTP ${list.status}`);
     const issues = (await list.json()) as { number: number; title: string }[];
