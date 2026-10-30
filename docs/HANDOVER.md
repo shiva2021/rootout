@@ -1,13 +1,30 @@
 # Handover
 
-_Updated: 2026-10-30 · Session: M6 membership gate brainstormed, researched and planned; nothing implemented yet_
+_Updated: 2026-10-30 · Session: M6 membership gate built end to end on branch `m6/membership` (not merged, not released); human checkpoints remain_
 
 ## Status
-**M6 is planned, not started.** Spec and task plans are committed on branch `m6/membership` (`cad25a1`): `docs/plans/m6-membership.md` (design, Part A Go CLI tasks 1–7, Part C public flip) and `docs/plans/m6-service.md` (Cloudflare Worker tasks S1–S6). Shivang approved the design on 2026-10-30; the implementation plans await his review and a choice of execution method (subagent-driven vs native). Work happens on `m6/membership` and merges to `main` for the v0.5.0 tag. Summary of the design: patrons paste a machine-bound Ed25519 licence key issued by a Worker after Patreon login; 7-day trial once per Mac; `list`/`doctor`/`guide`/`--dry-run`/heuristic `scan` stay free; deletion and AI need a key; admin keys are minted offline per Mac with `cmd/rootout-keys`; keys live 35 days, renew silently, 14-day grace only when renewal fails; two Macs per account; Worker on workers.dev; alerts via GitHub issue. GoReleaser 2.19.0 is stable now (released 2026-10-22, has `install_steps`) and is Task 1. Patreon research (2026-10-30) is summarised in the spec; the decisive fact is that Patreon's token exchange needs the client secret server-side, so a backend is unavoidable.
+**M6 is implemented and reviewed, not shipped.** Branch `m6/membership` (31 commits on top of `main` at `b7dbb2e`) carries the whole gate: `internal/license` (Ed25519 machine-bound keys, key file + renewal stamp, service client, `Resolve` state machine), the gates in `cmd/rootout` (remove, orphans, scan uninstall, review screen, LLM, TUI home loop), the `rootout license` command, doctor and home-title status, `cmd/rootout-keys` (local signing tool), the Cloudflare Worker in `service/` (key page, `/start`, Patreon OAuth `/callback` with a 2-Mac device cap, `/renew`, `/trial`, per-IP rate limit, daily creator-token refresh, GitHub-issue alerts), the GoReleaser 2.19.0 bump with the `install_steps` cask hook, a Worker CI job, `docs/kb/membership.md`, D-033/D-034, README Membership section, `LICENSE`. Every task had a fresh implementer, a task review and fix rounds; a whole-branch review ended "merge with fixes" and the fix wave was re-reviewed clean. `make test`, `make lint`, `go test -race` (cmd, license, tui), `cd service && npm test` (84) and `npm run typecheck` are green. `make release-check` **fails on purpose** until Checkpoint K fills `license.PublicKeyHex` and the real `ServiceURL` host replaces `CHANGEME` (`internal/license/client.go`).
 
-M5 is done. Pushing a `v*` tag now builds, publishes a GitHub Release with CHANGELOG notes and updates the private tap. **v0.4.1** is the first complete release: two archives, checksums, notes, and `Casks/rootout.rb` in `shiva2021/homebrew-rootout` with matching sha256s. Installed on this Mac from the tap (`/opt/homebrew/bin/rootout`, `v0.4.1`, no quarantine attribute, `doctor` runs); the old `~/.local/bin/rootout` (v0.3.1) is removed. v0.4.0 is on GitHub Releases without a cask (first token lacked tap access) and its notes were backfilled by hand. CI green on macOS. Spec and plan: `docs/plans/m5-release.md`; runbook: `docs/kb/release.md`.
+This session ran on a different Mac from the handover's M1 (M4 Pro, 48 GB; Go 1.27.3, golangci-lint 2.15.0, GoReleaser 2.19.0 installed via Homebrew; no rootout installed from the tap here). Spec and plans: `docs/plans/m6-membership.md` (design, Part A Go tasks, Part C public flip) and `docs/plans/m6-service.md` (Worker). The SDD ledger with every ruling lives in `.superpowers/sdd/m6-membership/progress.md` (git-ignored; also summarised in the session's final message).
 
-## Done this session (M5, D-030…D-032)
+## Next steps (in order; the first four need Shivang at the keyboard)
+1. **Checkpoint K** (`docs/plans/m6-membership.md`): `go run ./cmd/rootout-keys gen`; store the PEM and the PKCS8 base64 in the password manager as "rootout signing key"; paste the public hex into `PublicKeyHex` in `internal/license/codec.go`; commit `license: embed the production public key (D-034)`. Then Task 5 Step 12 (manual check on a Mac: `rootout license`, `remove X --dry-run` free, admin key → `doctor` shows `admin`).
+2. **S6** (`docs/plans/m6-service.md`): Cloudflare account, `wrangler login`, `wrangler kv namespace create KEYS` → id into `wrangler.toml`; Patreon campaign + v2 client with redirect `https://rootout-keys.<account>.workers.dev/callback`; `wrangler secret put` × 6; seed the creator token pair (`--remote`); set `PATREON_URL`/`PUBLIC_ORIGIN`; `npm run deploy`; smoke `/trial` twice (200 then 409) and delete the trial key; paste the host into `license.ServiceURL` and `docs/kb/membership.md`. S6.6 (first real pledge from a second account) verifies the `identity` scope assumption and the gifted/declined semantics.
+3. **Task 7 release**: merge `m6/membership` into `main` (Shivang's call; the branch is review-clean), move the `## [Unreleased]` changelog content under `## [0.5.0] - <date>`, `make release-check NEXT=v0.5.0`, tag, push; `HOMEBREW_GITHUB_API_TOKEN=$(gh auth token) brew upgrade --cask rootout` and `doctor | grep Membership`.
+4. **Part C** (public releases repo, D-033) as a separate patch tag v0.5.1; then a token-free `brew install --cask rootout` in a clean shell; then rewrite this handover.
+5. Deferred minors from the reviews, none blocking (full list in the ledger): a scan AI label computed offline shows "AI: members" for a past-exp key until the first assessment renews it; `StatusNoMachine` cached as final for a TUI session; memory rate limiter unpruned when the Worker binding is absent; alerts not debounced; a wrong `PATREON_CAMPAIGN_ID` fails silently ("not a member" for everyone); `/callback` and `/start` have no rate limit; `license <key>` refuses a just-expired patron key (the key page always issues fresh ones); `Client.Renew` reports a 400 as "service unavailable"; D-015 and `docs/PLAN.md` library rows still name GoReleaser 2.18.3 in places.
+6. Earlier manual checks still open (see "Done before this session"): model grid and home loop in a real terminal; Full Disk Access denied path; v0.2 interactive flows; M2 QA on a throwaway account; live `scan --llm`. Optional later: signing and notarisation (D-030).
+
+## Done this session (M6 build, 2026-10-30)
+- Brainstormed and researched the design (Patreon API v2 facts are in the spec); builder-checked; two reviewer passes on the plan.
+- Tasks 1–6 (Go), S1–S5 (Worker), 7a (docs) implemented by fresh subagents with per-task reviews; final whole-branch review + one fix wave. Key behaviours decided in the fix loops: a `/renew` 403 is remembered beside the key until a renewal succeeds or a fresh 403 replaces it; the renewal throttle is 24 h, or 1 h once past expiry with no remembered denial; a `StatusNone` (no key, trial not started) is never cached, so an offline trial start retries; warnings (grace, upcoming denial, unsaved key) print on gated paths, in flashes, in the AI label, in doctor (`!`) and the home title ("grace: renew soon"); denial reasons are shown in plain words.
+- Worker tooling: `@cloudflare/vitest-plugin` 1.4.11 + vitest 4.1.12 (the plan's `vitest-pool-workers` is deprecated and rejects the 2026 compatibility date); stable `[[ratelimits]]` binding; `wrangler kv key …` needs `--remote` on Wrangler 4.
+- `make contract` runs `internal/license/contract_test.go` (build tag `contract`) against `npm run dev` with `service/.dev.vars` holding the **test** signing key (local-only file, git-ignored; contents in `docs/plans/m6-membership.md` Task 6 dispatch / recreate from the seed in `service/test/sign.test.ts`).
+- Commit trailers on implementer commits credit "Claude Opus 5.5" (the subagents' model); controller commits credit Fable 5.1.
+
+## Done before this session
+
+### M5 release pipeline (D-030…D-032), 2026-10-22
 - First releases: v0.4.0 published but the tap update got 404 (token lacked access to `homebrew-rootout`) and its body was empty; v0.4.1 fixed both. Empty body cause: in GoReleaser 2.18.3 `changelog.disable` skips the pipe that loads `--release-notes`, so the setting is gone (D-032 wording updated).
 - Tap install verified with `HOMEBREW_GITHUB_API_TOKEN=$(gh auth token)`. Newer Homebrew needs `brew trust shiva2021/rootout` before it loads the cask; README and runbook updated.
 - Decisions logged first: D-030 signing deferred (cask clears quarantine), D-031 private repo + private tap with GoReleaser's token download strategy, D-032 release on every `v*` tag with CHANGELOG notes and `make release-check` as the test gate.
@@ -16,15 +33,7 @@ M5 is done. Pushing a `v*` tag now builds, publishes a GitHub Release with CHANG
 - `make snapshot` verified: two archives, `checksums.txt`, arm64 binary prints `rootout version v0.3.2-next`, amd64 is x86_64 Mach-O, `dist/homebrew/Casks/rootout.rb` passes `ruby -c`.
 - Workflows pass `actionlint`. GoReleaser (2.19.0 since 2026-10-30) and actionlint installed locally via Homebrew.
 
-## Next steps
-0. **M6**: Shivang reviews `docs/plans/m6-membership.md` and `m6-service.md`, picks the execution method, then execute Part A Task 1 onwards on `m6/membership`. Task 4 and S6 need Shivang at the keyboard (keypair generation and backup, Cloudflare and Patreon accounts, secrets). The public flip (Part C) is a separate patch tag after v0.5.0.
-1. `make install` now puts a second `rootout` in `~/.local/bin`, which comes first on `PATH` and hides the brew copy. Use it only for testing a branch and remove it afterwards (`docs/kb/release.md`, "Which binary am I running").
-2. Earlier manual checks still open: model grid and home loop in a real terminal; Full Disk Access denied path; v0.2 interactive flows; M2 QA on a throwaway account; live `scan --llm`.
-3. M6 membership gate: write its plan (D-024). It decides how members get the binary, since the tap and releases are private. **Agreed on 2026-10-22, deferred to M6:** drop the token requirement by publishing to a public releases repo; recipe below ("Public releases repo").
-4. Optional later: signing and notarization (D-030 / D-015 quill flow).
-5. GoReleaser 2.19.0 bump and cask `install_steps` hook: done this session (v2.19.0). Cut a patch release to publish it.
-
-## Public releases repo (planned 2026-10-22, execute at M6)
+### Public releases repo (planned 2026-10-22, execute at M6)
 **Why.** `brew install --cask rootout` fails without `HOMEBREW_GITHUB_API_TOKEN` because `shiva2021/rootout` is private and GitHub will not serve its release assets anonymously (D-031). Shivang does not want new users to deal with a token. Until then, reinstalling on this Mac is `HOMEBREW_GITHUB_API_TOKEN=$(gh auth token) brew install --cask rootout`.
 
 **Design (Shivang approved the defaults).** Source stays private. Release assets go to a new **public** repo `shiva2021/rootout-releases`; the tap `shiva2021/homebrew-rootout` keeps its name and becomes public. The cask is then a plain `CurlDownloadStrategy` cask: no token, no custom Ruby class, no Homebrew internals. The paywall lives in the binary (M6 gate, D-024). Not done now because a public binary before the gate is a free rootout, and building it while the repos are private would 404 every `brew install/upgrade`. Log it as D-033 when executing.
@@ -43,7 +52,6 @@ M5 is done. Pushing a `v*` tag now builds, publishes a GitHub Release with CHANG
 5. Docs: README install block becomes `brew tap shiva2021/rootout && brew trust shiva2021/rootout && brew install --cask rootout`; rewrite "Install from the tap", "Tokens", "Known limits" in `docs/kb/release.md`; D-033 in `docs/DECISIONS.md` (supersedes D-031's cask).
 6. Verify: `make snapshot` → `dist/homebrew/Casks/rootout.rb` has a plain `url` and no custom class; cut a patch tag; `gh release view --repo shiva2021/rootout-releases`; in a shell with **no** `HOMEBREW_GITHUB_API_TOKEN`: `brew untap shiva2021/rootout`, tap, trust, install, `rootout --version`. Old releases v0.4.0/v0.4.1 stay on the private repo.
 
-## Done before this session
 ### Model picker grid (D-029), tagged v0.3.1
 - Shivang found the "Recommended for this Mac" table cluttered. The picker (`internal/tui/models.go`) and `rootout config models` now share one grid: MODEL · SIZE · FIT · NOTES with a header row; too-large models sit under "Need more memory than this Mac has"; the picker shows the selected model's description on a detail line above the flash line (plain output keeps it as a WHY column).
 - New row kinds `mrSubheading`/`mrColumns` and `modelRowKind.selectable()`; scrolling up keeps the headings above the cursor visible.
@@ -97,14 +105,20 @@ M5 is done. Pushing a `v*` tag now builds, publishes a GitHub Release with CHANG
 - AI: Anthropic and OpenAI via official SDKs with structured JSON, Ollama via HTTP (`think:false`); keys in Keychain; `config` command; Ollama picker that detects, installs, starts, recommends by RAM tier and pulls with progress.
 - `doctor`.
 
-## Real-machine results (this Mac: M1, 8 GB, 47 user apps, 12 VS Code extensions)
+
+## Real-machine results
+
+_The M6 session ran on an M4 Pro (48 GB) with no rootout installed; nothing below was re-run there._
+
 - `rootout remove Spotify -n`: bundle + 7 leftovers, 3.8 GB; `Mail` refused.
 - `rootout scan --all`: scores 5–30. The 30 is `ms-python.vscode-python-envs`, which pipes the official uv installer from astral.sh into `sh` (true finding, Medium).
 - Review screen and app picker verified under a pseudo-terminal (render + quit). Live removal and live LLM calls have not been run.
 
 ## Blockers and open questions
+- `license.PublicKeyHex` is empty and `ServiceURL` is a placeholder: every real key fails closed and no trial can start until Checkpoint K and S6; `make release-check` enforces this.
+- The Patreon `identity` scope returning our campaign's membership, and the gifted/declined field semantics, are verified from docs and forum posts only; S6.6 is the real test.
+- `TAP_GITHUB_TOKEN` is replaced by `RELEASE_GITHUB_TOKEN` in Part C; until then the private-tap token story from M5 still applies.
 - Unsigned binary relies on the cask's quarantine-clearing hook (D-030); a future macOS may block it. Signing via the D-015 quill flow is the fix.
-- `TAP_GITHUB_TOKEN` expires after a year; rotation steps in `docs/kb/release.md`.
 - Intel Macs: `ollama.Recommend` caps them at the 8 GB tier, so bigger tiers are marked too large and now sit under "Need more memory than this Mac has", which is wrong for a large-RAM Intel Mac. Pre-existing semantics, not changed by D-029.
 - `Group Containers` is not probed or tagged by D-026; nobody has checked whether its entries carry the same TCC protection as `~/Library/Containers`. Test only with a throwaway entry and the Finder GUI as fallback.
 - `docs/research/vscode-extension-audit/` names Shivang's LeetCode username; remove it before the repo ever goes public.
@@ -112,16 +126,24 @@ M5 is done. Pushing a `v*` tag now builds, publishes a GitHub Release with CHANG
 - `sfltool dumpbtm` blocks without Full Disk Access; login items probe has a 3 s timeout and is otherwise skipped.
 - The VSIX signature file name is unverified; `unsigned_gallery` is Low for that reason (all 12 local extensions have `.vsixmanifest` but none of the guessed signature files).
 
+
 ## How to verify
 ```bash
 make build && make test && make lint && scripts/toolchain_check.sh
-make release-check NEXT=v0.4.0 && make snapshot
-./bin/rootout doctor
+go test -race ./cmd/... ./internal/license/ ./internal/tui/
+(cd service && npm test && npm run typecheck)
+(cd service && npm run dev) &   # then: make contract
+./bin/rootout doctor | grep Membership
+./bin/rootout license
 ./bin/rootout remove Spotify --dry-run
-./bin/rootout scan --all --no-tui
 ```
 
 ## Gotchas
+- Worker tests: `cloudflare:test` has no type declarations in this setup, so tests call the worker's `fetch` directly and inject `fetchFn`; `fetchMock` is not exported by the plugin.
+- Never run `git add -A` from the repo root with `service/node_modules` present; stage explicit paths.
+- `ed25519.Verify` panics on a wrong-length public key: `Decode` checks the length first and an empty `PublicKeyHex` fails closed.
+- Go's `json.Marshal` HTML-escapes `<>&`; the key codec uses `json.Encoder` with `SetEscapeHTML(false)` so payload bytes equal `JSON.stringify` in the Worker.
+- The SDD review-package and task-brief scripts write to `.superpowers/sdd/<plan>/`; the brief script does not parse "Task S1" headings (extract with awk).
 - Scan speed: never run a regex over a whole bundle; use `FileCtx.FindAround` with the pattern's mandatory literals and avoid `{200,}`-style repetitions (docs/kb/heuristics.md, Performance). Profile with the throwaway timing test described there.
 - ctrl+x/ctrl+c must be checked before the `?` overlay close and before delegating to the typed box / embedded picker, or the quit key gets eaten.
 - pty testing: keys sent before the alternate screen opens are buffered and `ESC ESC q` then parses as Alt-combinations; wait for the screen before sending keys.
