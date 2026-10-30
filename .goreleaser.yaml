@@ -101,8 +101,7 @@ homebrew_casks:
       end
     hooks:
       post:
-        # GoReleaser 2.18.3 form (docs at that tag); newer docs use install_steps.
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/rootout"]
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/rootout"]
           end

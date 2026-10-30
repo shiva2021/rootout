@@ -46,6 +46,5 @@ brew upgrade --cask rootout   # later, for a new version (token still exported)
 
 ## Known limits
 - The binary is not code-signed or notarized (D-030). The cask clears the quarantine flag after install; a direct download needs `xattr -d com.apple.quarantine rootout`. A future macOS may block this; signing is the fix.
-- Homebrew 7 warns that the cask's `postflight` block is deprecated. Harmless for now; the fix is GoReleaser 2.19's `install_steps` (HANDOVER Next steps).
 - The tap is private, so `brew tap` needs git credentials. Over HTTPS it prompts; the SSH URL avoids that.
 - The cask's download strategy calls Homebrew's internal `GitHub.get_release` (works as of v0.4.1), which may change. Fallback: fetch `https://api.github.com/repos/<owner>/<repo>/releases/tags/<tag>` in the same class and pick the asset id from that (D-031).

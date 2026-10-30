@@ -22,7 +22,7 @@ M5 is done. Pushing a `v*` tag now builds, publishes a GitHub Release with CHANG
 2. Earlier manual checks still open: model grid and home loop in a real terminal; Full Disk Access denied path; v0.2 interactive flows; M2 QA on a throwaway account; live `scan --llm`.
 3. M6 membership gate: write its plan (D-024). It decides how members get the binary, since the tap and releases are private. **Agreed on 2026-10-22, deferred to M6:** drop the token requirement by publishing to a public releases repo; recipe below ("Public releases repo").
 4. Optional later: signing and notarization (D-030 / D-015 quill flow).
-5. When GoReleaser 2.19 is released as stable (only nightlies on 2026-10-22): bump the pin in `.github/workflows/release.yml` (`version: v2.19.x`) and locally (`brew upgrade goreleaser`, `docs/kb/setup.md`); in `.goreleaser.yaml` replace `hooks.post.install` with `install_steps` (`on_macos do run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/rootout"] end`); `make snapshot` and check the cask has `postflight_steps`; cut a patch release. Why: Homebrew 7.0.10 warns "Calling `postflight` is deprecated! Use `postflight_steps` instead." on every command that loads the cask. Install still works; Homebrew will eventually remove `postflight`. Shivang chose to wait for 2.19 over hand-writing the block in `custom_block` or using a nightly.
+5. GoReleaser 2.19.0 bump and cask `install_steps` hook: done this session (v2.19.0). Cut a patch release to publish it.
 
 ## Public releases repo (planned 2026-10-22, execute at M6)
 **Why.** `brew install --cask rootout` fails without `HOMEBREW_GITHUB_API_TOKEN` because `shiva2021/rootout` is private and GitHub will not serve its release assets anonymously (D-031). Shivang does not want new users to deal with a token. Until then, reinstalling on this Mac is `HOMEBREW_GITHUB_API_TOKEN=$(gh auth token) brew install --cask rootout`.
@@ -105,7 +105,6 @@ M5 is done. Pushing a `v*` tag now builds, publishes a GitHub Release with CHANG
 ## Blockers and open questions
 - Unsigned binary relies on the cask's quarantine-clearing hook (D-030); a future macOS may block it. Signing via the D-015 quill flow is the fix.
 - `TAP_GITHUB_TOKEN` expires after a year; rotation steps in `docs/kb/release.md`.
-- The cask uses the deprecated `postflight` block (GoReleaser 2.18.3 cannot write `postflight_steps`); see Next steps 5.
 - Intel Macs: `ollama.Recommend` caps them at the 8 GB tier, so bigger tiers are marked too large and now sit under "Need more memory than this Mac has", which is wrong for a large-RAM Intel Mac. Pre-existing semantics, not changed by D-029.
 - `Group Containers` is not probed or tagged by D-026; nobody has checked whether its entries carry the same TCC protection as `~/Library/Containers`. Test only with a throwaway entry and the Finder GUI as fallback.
 - `docs/research/vscode-extension-audit/` names Shivang's LeetCode username; remove it before the repo ever goes public.
