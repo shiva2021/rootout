@@ -332,8 +332,9 @@ func TestResolveNilClient(t *testing.T) {
 	expired := signKey(t, testPriv, KindPatron, testMID(t), -3*24*time.Hour)
 	f := setup(t, expired, nil, false)
 	f.deps.Client = nil
-	if got := Resolve(context.Background(), f.deps); got.Status != StatusGrace {
-		t.Errorf("expired, nil client: %s, want grace", got.Status)
+	if got := Resolve(context.Background(), f.deps); got.Status != StatusGrace || strings.Contains(got.Warning, "once a day") ||
+		!strings.HasSuffix(got.Warning, "could not be renewed") {
+		t.Errorf("expired, nil client: %+v, want grace with no retry hint", got)
 	}
 	if _, _, ok := f.store.LastRenew(); ok {
 		t.Error("stamp written with no client")
@@ -480,6 +481,53 @@ func TestResolveDenialPersists(t *testing.T) {
 	})
 }
 
+func TestResolveDeniedThenRetryFails(t *testing.T) {
+	mid := testMID(t)
+	for _, tt := range []struct {
+		name      string
+		closeThen bool // close the server after the 403; otherwise it answers 503
+		calls     int32
+	}{
+		{"server closed", true, 1},
+		{"503", false, 2},
+	} {
+		t.Run("DeniedThenRetryFails/"+tt.name, func(t *testing.T) {
+			var calls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if calls.Add(1) == 1 {
+					w.WriteHeader(http.StatusForbidden)
+					_, _ = w.Write([]byte(`{"reason":"declined_patron"}`))
+					return
+				}
+				w.WriteHeader(http.StatusServiceUnavailable)
+			}))
+			t.Cleanup(srv.Close)
+			f := setup(t, signKey(t, testPriv, KindPatron, mid, -3*24*time.Hour), nil, false)
+			f.deps.Client = &Client{BaseURL: srv.URL, HTTP: &http.Client{Timeout: time.Second}}
+
+			first := Resolve(context.Background(), f.deps)
+			if first.Status != StatusExpired {
+				t.Fatalf("day 0: %+v, want expired", first)
+			}
+			if tt.closeThen {
+				srv.Close()
+			}
+			later := testNow.Add(25 * time.Hour)
+			f.deps.Now = func() time.Time { return later }
+			got := Resolve(context.Background(), f.deps)
+			if got.Status != StatusExpired || got.Allowed || !strings.Contains(got.Reason, "declined_patron") {
+				t.Errorf("day 1: %+v, want expired naming the original reason", got)
+			}
+			if n := calls.Load(); n != tt.calls {
+				t.Errorf("service calls = %d, want %d", n, tt.calls)
+			}
+			if last, denied, ok := f.store.LastRenew(); !ok || !last.Equal(later) || denied != "declined_patron" {
+				t.Errorf("stamp = %v, %q, %v; want the retry time and the kept reason", last, denied, ok)
+			}
+		})
+	}
+}
+
 func TestResolveFailureWording(t *testing.T) {
 	mid := testMID(t)
 	day := 24 * time.Hour
@@ -540,5 +588,21 @@ func TestResolveFailureWording(t *testing.T) {
 				t.Errorf("got %+v, want a service-error reason", got)
 			}
 		})
+	}
+}
+
+func TestResolveRenewClearsRememberedDenial(t *testing.T) {
+	mid := testMID(t)
+	renewed := signKey(t, testPriv, KindPatron, mid, 35*24*time.Hour)
+	f := setup(t, signKey(t, testPriv, KindPatron, mid, -3*24*time.Hour), newService(t, http.StatusOK, keyBody(renewed)), false)
+	if err := f.store.MarkRenew(testNow.Add(-25*time.Hour), "declined_patron"); err != nil {
+		t.Fatal(err)
+	}
+	got := Resolve(context.Background(), f.deps)
+	if got.Status != StatusMember || !got.Allowed || got.Warning != "" {
+		t.Errorf("got %+v, want member with no warning", got)
+	}
+	if last, denied, ok := f.store.LastRenew(); !ok || !last.Equal(testNow) || denied != "" {
+		t.Errorf("stamp = %v, %q, %v; want testNow with no reason", last, denied, ok)
 	}
 }

@@ -90,12 +90,15 @@ func Resolve(ctx context.Context, d Deps) State {
 	if c.Kind == KindAdmin {
 		return State{Status: StatusAdmin, Allowed: true, Kind: KindAdmin, MID: mid}
 	}
-	r := renewal{hint: hintNotTried}
+	var r renewal
+	if d.Client != nil {
+		r.hint = hintNotTried
+	}
 	if c.Kind == KindPatron {
 		due, remembered := renewalDue(c, store, now)
 		switch {
 		case due && d.Client != nil:
-			c, r = renew(ctx, *d.Client, store, key, c, pub, mid, now)
+			c, r = renew(ctx, *d.Client, store, key, c, pub, mid, remembered, now)
 		case remembered != "":
 			r.denied = &DeniedError{Reason: remembered}
 		}
@@ -136,14 +139,23 @@ func renewalDue(c Claims, store Store, now time.Time) (bool, string) {
 }
 
 // renew calls /renew and returns the claims to evaluate and what happened.
-// Every attempt is stamped; a 403 is stamped with its reason. Failures keep c.
-func renew(ctx context.Context, cl Client, store Store, key string, c Claims, pub ed25519.PublicKey, mid string, now time.Time) (Claims, renewal) {
+// Every attempt is stamped. A remembered 403 reason survives every failed
+// retry; a fresh 403 replaces it and only a successful renewal clears it.
+// Failures keep c.
+func renew(ctx context.Context, cl Client, store Store, key string, c Claims, pub ed25519.PublicKey, mid, remembered string, now time.Time) (Claims, renewal) {
 	mark := func(denied string) {
 		if err := store.MarkRenew(now, denied); err != nil {
 			slog.Debug("license: renewal stamp", "err", err)
 		}
 	}
-	mark("")
+	failed := func(hint string) (Claims, renewal) {
+		r := renewal{hint: hint}
+		if remembered != "" {
+			r.denied = &DeniedError{Reason: remembered}
+		}
+		return c, r
+	}
+	mark(remembered)
 	fresh, err := cl.Renew(ctx, key)
 	var denied *DeniedError
 	switch {
@@ -152,21 +164,23 @@ func renew(ctx context.Context, cl Client, store Store, key string, c Claims, pu
 		return c, renewal{denied: denied}
 	case errors.Is(err, errUnreachable):
 		slog.Debug("license: renew", "err", err)
-		return c, renewal{hint: hintNetwork}
+		return failed(hintNetwork)
 	case err != nil:
 		slog.Debug("license: renew", "err", err)
-		return c, renewal{hint: hintService}
+		return failed(hintService)
 	}
 	nc, err := verify(fresh, pub, mid, now)
 	if err != nil {
 		slog.Debug("license: renew returned a bad key", "err", err)
-		return c, renewal{hint: hintService}
+		return failed(hintService)
 	}
+	// The service renewed the key: any remembered denial is over.
+	var r renewal
 	if err := store.Save(fresh); err != nil {
-		return nc, renewal{hint: hintService, warning: "could not save the renewed key: " + err.Error()}
+		r.warning = "could not save the renewed key: " + err.Error()
 	}
 	mark("") // Save cleared the stamp; keep the throttle.
-	return nc, renewal{}
+	return nc, r
 }
 
 // evaluate turns verified patron or trial claims into a State.
@@ -184,8 +198,11 @@ func evaluate(c Claims, now time.Time, r renewal) State {
 		}
 	case c.Kind == KindPatron && r.denied == nil && now.Before(exp.Add(grace)):
 		s.Status, s.Allowed, s.DaysLeft = StatusGrace, true, daysLeft(exp.Add(grace), now)
-		s.Warning = fmt.Sprintf("membership key expired %s ago and could not be renewed; %s",
-			days(max(1, daysLeft(now, exp))), r.hint)
+		s.Warning = fmt.Sprintf("membership key expired %s ago and could not be renewed",
+			days(max(1, int(now.Sub(exp)/(24*time.Hour)))))
+		if r.hint != "" {
+			s.Warning += "; " + r.hint
+		}
 	default:
 		s.Status = StatusExpired
 		s.Reason = "membership expired " + exp.Format(time.DateOnly)
