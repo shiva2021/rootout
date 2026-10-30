@@ -42,9 +42,13 @@ function b64urlDecode(s: string): Uint8Array | null {
 }
 
 export async function importPrivateKey(pkcs8b64: string): Promise<CryptoKey> {
-  const bin = atob(pkcs8b64);
-  const der = Uint8Array.from(bin, (ch) => ch.charCodeAt(0));
-  return crypto.subtle.importKey("pkcs8", der, { name: "Ed25519" }, false, ["sign"]);
+  try {
+    const bin = atob(pkcs8b64);
+    const der = Uint8Array.from(bin, (ch) => ch.charCodeAt(0));
+    return await crypto.subtle.importKey("pkcs8", der, { name: "Ed25519" }, false, ["sign"]);
+  } catch {
+    throw new Error("SIGNING_KEY is not valid base64 PKCS#8");
+  }
 }
 
 export async function importPublicKey(rawHex: string): Promise<CryptoKey> {

@@ -69,3 +69,9 @@ describe("sign", () => {
     expect(await verify(key, pub)).toEqual(admin);
   });
 });
+
+describe("sign key import errors", () => {
+  it("a bad SIGNING_KEY fails with a clear message", async () => {
+    await expect(importPrivateKey("!!!not base64!!!")).rejects.toThrow("SIGNING_KEY is not valid base64 PKCS#8");
+  });
+});
