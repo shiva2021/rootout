@@ -1,13 +1,15 @@
 import type { Env } from "./env";
+import { callbackHandler } from "./routes/callback";
+import { homeHandler, startHandler } from "./routes/home";
 import { type Handler, json, route } from "./router";
 
 // Stubs until the handlers land in later tasks.
 const notImplemented: Handler = async () => json(501, { reason: "not_implemented" });
 
 const table = {
-  "GET /": notImplemented,
-  "GET /start": notImplemented,
-  "GET /callback": notImplemented,
+  "GET /": homeHandler,
+  "GET /start": startHandler(),
+  "GET /callback": callbackHandler(),
   "POST /renew": notImplemented,
   "POST /trial": notImplemented,
 };

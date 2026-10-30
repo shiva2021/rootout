@@ -12,8 +12,8 @@ describe("router", () => {
     expect((await call("GET", "/renew")).status).toBe(404);
   });
 
-  it("known routes return 501 until implemented", async () => {
-    for (const [m, p] of [["GET", "/"], ["GET", "/start"], ["GET", "/callback"], ["POST", "/renew"], ["POST", "/trial"]]) {
+  it("unimplemented routes return 501", async () => {
+    for (const [m, p] of [["POST", "/renew"], ["POST", "/trial"]]) {
       expect((await call(m, p)).status, `${m} ${p}`).toBe(501);
     }
   });
