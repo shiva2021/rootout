@@ -1,0 +1,16 @@
+name = "rootout-keys"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+[[kv_namespaces]]
+binding = "KEYS"
+# Placeholder: create the namespace with `wrangler kv namespace create KEYS` and paste its id at deploy time.
+id = "REPLACE_AT_DEPLOY"
+
+[triggers]
+crons = ["17 3 * * *"]
+
+[vars]
+PATREON_URL = "https://www.patreon.com/REPLACE_AT_DEPLOY"
+ALERT_REPO = "shiva2021/rootout"
+PUBLIC_ORIGIN = "https://REPLACE_AT_DEPLOY"

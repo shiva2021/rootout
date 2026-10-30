@@ -21,3 +21,13 @@ jobs:
       - uses: golangci/golangci-lint-action@v9.3.0
         with:
           version: v2.15.0
+  service:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: service } }
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with: { node-version: 24, cache: npm, cache-dependency-path: service/package-lock.json }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
