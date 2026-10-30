@@ -243,3 +243,18 @@ func quietStderr(t *testing.T) {
 	os.Stderr = f
 	t.Cleanup(func() { os.Stderr = old; _ = f.Close() })
 }
+
+func TestLicenseJSONOnlyJSON(t *testing.T) {
+	h := newHarness(t, testutil.Spec{})
+	key := h.sign(license.KindAdmin, 0)
+	for _, args := range [][]string{{"license", "--json"}, {"license", key, "--json"}} {
+		code, out, stderr := runCLI(t, "y\n", args...)
+		var st map[string]any
+		if code != 0 || json.Unmarshal([]byte(out), &st) != nil || strings.Contains(out+stderr, "Start your free") {
+			t.Fatalf("%v: exit %d, stdout %q, stderr %q", args[1:], code, out, stderr)
+		}
+	}
+	if h.trial.Load() != 0 {
+		t.Fatal("--json must never start the trial")
+	}
+}
