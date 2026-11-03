@@ -11,6 +11,7 @@ import (
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/shiva2021/rootout/internal/ext"
 	"github.com/shiva2021/rootout/internal/heur"
@@ -767,5 +768,98 @@ func TestScanViewModelSwapMidQueue(t *testing.T) {
 	feedAssess(v, feedAssess(v, cmd))
 	if len(*firstIDs) != 2 || len(*secondIDs) != 1 || (*secondIDs)[0] != "good.theme" {
 		t.Fatalf("queued item should use the new model: first %v second %v", *firstIDs, *secondIDs)
+	}
+}
+
+func TestVerdictIcon(t *testing.T) {
+	tests := []struct {
+		name   string
+		result *llm.Assessment
+		err    error
+		want   string
+	}{
+		{"benign confident", &llm.Assessment{Verdict: llm.Benign, Confidence: 0.9}, nil, iconBenign},
+		{"benign at threshold", &llm.Assessment{Verdict: llm.Benign, Confidence: 0.70}, nil, iconBenign},
+		{"benign unsure", &llm.Assessment{Verdict: llm.Benign, Confidence: 0.5}, nil, iconUnsure},
+		{"malicious confident", &llm.Assessment{Verdict: llm.Malicious, Confidence: 0.70}, nil, iconMalicious},
+		{"malicious unsure", &llm.Assessment{Verdict: llm.Malicious, Confidence: 0.69}, nil, iconUnsure},
+		{"suspicious", &llm.Assessment{Verdict: llm.Suspicious, Confidence: 0.99}, nil, iconUnsure},
+		{"unknown", &llm.Assessment{Verdict: llm.Unknown, Confidence: 0.99}, nil, iconUnsure},
+		{"error", nil, errors.New("boom"), iconError},
+		{"none", nil, nil, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := newTestScan(t, Assessor{})
+			if tt.result != nil {
+				v.results[0] = *tt.result
+			}
+			if tt.err != nil {
+				v.errs[0] = tt.err
+			}
+			if got, _ := v.verdictIcon(0); got != tt.want {
+				t.Errorf("icon = %q, want %q", got, tt.want)
+			}
+		})
+	}
+	v := newTestScan(t, Assessor{})
+	v.pending[0] = true
+	if got, _ := v.verdictIcon(0); got == "" || got == iconUnsure {
+		t.Errorf("pending should show the spinner, got %q", got)
+	}
+}
+
+func TestScanViewRowIconRendered(t *testing.T) {
+	v := newTestScan(t, Assessor{})
+	v.results[0] = llm.Assessment{Verdict: llm.Malicious, Confidence: 0.92}
+	v.results[2] = llm.Assessment{Verdict: llm.Benign, Confidence: 0.95}
+	v.errs[1] = errors.New("boom")
+	leftW, _ := v.columns()
+	row := func(i int) string { return strings.TrimRight(plain(v.renderRow(i, false, leftW)), " ") }
+	if got := row(0); !strings.HasSuffix(got, "[vscode] "+iconMalicious) {
+		t.Errorf("evil row = %q, want it to end with the editor tag and %s", got, iconMalicious)
+	}
+	if got := row(1); !strings.HasSuffix(got, "[cursor] "+iconError) {
+		t.Errorf("mid row = %q, want %s", got, iconError)
+	}
+	if got := row(2); !strings.HasSuffix(got, "[vscode] "+iconBenign) {
+		t.Errorf("good row = %q, want %s", got, iconBenign)
+	}
+	// The legend appears once something has been assessed.
+	out := viewS(v)
+	if !strings.Contains(out, iconBenign+" benign") || !strings.Contains(out, iconMalicious+" malicious") || !strings.Contains(out, iconUnsure+" unsure") {
+		t.Errorf("legend missing:\n%s", out)
+	}
+	if strings.Contains(viewS(newTestScan(t, Assessor{})), iconBenign+" benign") {
+		t.Error("legend should be hidden before any assessment")
+	}
+}
+
+func TestScanViewRowsExactWidth(t *testing.T) {
+	for _, w := range []int{40, 80, 140} {
+		for _, withIcons := range []bool{false, true} {
+			v := NewScanView(scanFixture(), Assessor{})
+			if withIcons {
+				v.results[0] = llm.Assessment{Verdict: llm.Malicious, Confidence: 0.92}
+				v.results[1] = llm.Assessment{Verdict: llm.Suspicious, Confidence: 0.5}
+				v.errs[2] = errors.New("boom")
+			}
+			v.Update(tea.WindowSizeMsg{Width: w, Height: 12})
+			leftW, _ := v.columns()
+			lines := strings.Split(plain(v.renderList(leftW, v.paneRows())), "\n")
+			for i, l := range lines {
+				if got := lipgloss.Width(l); got != leftW {
+					t.Errorf("width %d icons %v: list line %d is %d cells, want %d: %q", w, withIcons, i, got, leftW, l)
+				}
+			}
+		}
+	}
+}
+
+func TestScanViewIconLegendInHelp(t *testing.T) {
+	v := newTestScan(t, Assessor{})
+	pressS(v, runeKey('?'))
+	if out := viewS(v); !strings.Contains(out, iconBenign+" "+iconMalicious+" "+iconUnsure) || !strings.Contains(out, "70") {
+		t.Fatalf("help should explain the icons and the threshold:\n%s", out)
 	}
 }

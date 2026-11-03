@@ -9,6 +9,12 @@ How rootout asks a model about an extension, from the scan screen and from `scan
 - **Esc / quit.** `ReviewScan` cancels the context, which stops in-flight calls; the queue is dropped with the screen.
 - **Testing.** `recordingAssess()` and `feedAssess(v, cmd)` in `scan_test.go` drive the queue deterministically (`runCmd` runs batch members in order, so call order is the ask order).
 
+## Reading the list (D-037)
+
+- `verdictIcon(ri)` in `scan.go` maps a row's state to a glyph and style: pending → spinner, error → `!`, benign/malicious with `Confident()` → `✓`/`✗` in `styles.verdict`, any other assessment → `⚠`, none → blank. `llm.ConfidenceThreshold` (0.70) is the only threshold.
+- `renderRow` reserves `iconW` (2) cells after the editor tag and pads by `lipgloss.Width`; when the pane is too narrow for the tag the tag is dropped first. `TestScanViewRowsExactWidth` checks every list line is exactly the pane width at 40/80/140 columns with and without icons.
+- The legend (`iconLegend`) joins the header's AI line once `results` or `errs` is non-empty; the `?` overlay carries the full explanation.
+
 ## Choosing a hosted model (D-035)
 
 - **Where the list comes from.** `anthropic.ListModels` and `openai.ListModels` call each provider's models endpoint with no retries; `Verify` is the same call without the result. Anthropic pages up to five times and drops `retired` models; OpenAI returns everything in one page, so `chatCapable` keeps `gpt-*` and `o<N>*` ids without the words `embedding, tts, whisper, dall-e, realtime, audio, image, transcribe, moderation, search, instruct`; the rule is "usable through the Responses API with a strict JSON schema" (D-013), which the search previews and legacy completions models are not. Judge future catalogue or SDK changes against that. Both sort newest first and flag deprecated models (Anthropic `lifecycle`, OpenAI `shutdown_date`). `providers.ListModels` dispatches by provider name.

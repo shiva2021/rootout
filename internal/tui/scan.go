@@ -32,6 +32,14 @@ const (
 	assessWorkers       = 2
 	nothingTickedAssess = "tick rows with space, then l"
 	summaryHidden       = "(hidden)"
+
+	// Verdict icons shown after the editor tag; iconW is the slot width
+	// (⚠ is drawn 1 or 2 cells wide depending on the terminal).
+	iconBenign    = "✓"
+	iconMalicious = "✗"
+	iconUnsure    = "⚠"
+	iconError     = "!"
+	iconW         = 2
 )
 
 // ScanResult is what the user decided.
@@ -639,6 +647,7 @@ func (v *ScanView) helpKeys() []keyHelp {
 		{"f", "hide / show extensions scoring under " + fmt.Sprint(lowScore)},
 		{"l", "ask the configured AI about every ticked extension, " + fmt.Sprint(assessWorkers) + " at a time; rows already answered are skipped, errors are retried"},
 		{"m", "pick a model: the provider's hosted list (Claude, OpenAI) or a local Ollama model"},
+		{iconBenign + " " + iconMalicious + " " + iconUnsure + " " + iconError, fmt.Sprintf("AI verdict: benign · malicious (both at %.0f%% confidence or more) · suspicious, unknown or unsure · error", llm.ConfidenceThreshold*100)},
 		{"enter", "uninstall the ticked extensions (asks you to type " + plan.ConfirmWord + ")"},
 		{"esc", "back without changes"},
 		{"ctrl+x", "quit rootout"},
@@ -659,6 +668,9 @@ func (v *ScanView) renderHeader() string {
 	case v.assessor.Models != nil:
 		ai = scanNoAIPick
 	}
+	if len(v.results)+len(v.errs) > 0 {
+		ai += labelSep + iconLegend()
+	}
 	return v.styles.title.Render(s) + "\n" + v.styles.dim.Render(output.Truncate(ai, v.width))
 }
 
@@ -677,7 +689,8 @@ func (v *ScanView) renderList(width, rows int) string {
 	return strings.Join(lines, "\n")
 }
 
-// renderRow draws marker, score badge, checkbox, extension id and editor tag.
+// renderRow draws marker, score badge, checkbox, extension id, editor tag
+// and the AI verdict icon in a fixed slot.
 func (v *ScanView) renderRow(ri int, selected bool, width int) string {
 	r := v.reports[ri]
 	base, dim := lipgloss.NewStyle(), v.styles.dim
@@ -695,15 +708,57 @@ func (v *ScanView) renderRow(ri int, selected bool, width int) string {
 	band := v.band(r.Score).Inherit(base)
 	tag := "[" + r.Ext.Editor + "]"
 	prefix := marker + strings.Repeat(" ", scoreWidth+1) + checkbox(v.ticked[ri])
-	avail := max(width-lipgloss.Width(prefix)-len(tag)-1, 4)
-	id := output.Truncate(r.Ext.ID, avail)
+	// The id gets what is left after the prefix, the icon slot and the tag;
+	// in a pane too narrow for the tag, the tag goes before the id does.
+	avail := width - lipgloss.Width(prefix) - 1 - iconW
+	if avail-lipgloss.Width(tag)-1 >= 4 {
+		avail -= lipgloss.Width(tag) + 1
+	} else {
+		tag = ""
+	}
+	id := output.Truncate(r.Ext.ID, max(avail, 1))
+	icon, iconStyle := v.verdictIcon(ri)
 
 	var b strings.Builder
 	b.WriteString(base.Render(marker))
 	b.WriteString(band.Render(fmt.Sprintf("%*d", scoreWidth, r.Score)))
-	b.WriteString(base.Render(" " + checkbox(v.ticked[ri]) + id + " "))
-	b.WriteString(dim.Render(tag))
+	b.WriteString(base.Render(" " + checkbox(v.ticked[ri]) + id))
+	if tag != "" {
+		b.WriteString(base.Render(" ") + dim.Render(tag))
+	}
+	b.WriteString(base.Render(" "))
+	b.WriteString(iconStyle.Inherit(base).Render(icon))
 	return padWith(b.String(), width, base)
+}
+
+// verdictIcon is the list icon for a report's AI state: a tick for benign
+// and a cross for malicious at or above llm.ConfidenceThreshold, the
+// warning sign for anything else assessed, "!" for an error, the spinner
+// while asking, and nothing when not asked.
+func (v *ScanView) verdictIcon(ri int) (string, lipgloss.Style) {
+	s := v.styles
+	switch {
+	case v.pending[ri]:
+		return v.spin.View(), s.dim
+	case v.errs[ri] != nil:
+		return iconError, s.dim
+	}
+	a, ok := v.results[ri]
+	if !ok {
+		return "", s.dim
+	}
+	switch {
+	case a.Verdict == llm.Benign && a.Confident():
+		return iconBenign, s.verdict[llm.Benign]
+	case a.Verdict == llm.Malicious && a.Confident():
+		return iconMalicious, s.verdict[llm.Malicious]
+	}
+	return iconUnsure, s.verdict[llm.Suspicious]
+}
+
+// iconLegend explains the icons; shown once something has been assessed.
+func iconLegend() string {
+	return iconBenign + " benign " + iconMalicious + " malicious " + iconUnsure + " unsure"
 }
 
 // band returns the score colour: red ≥ 70, yellow 30–69, dim below.
