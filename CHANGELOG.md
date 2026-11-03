@@ -4,6 +4,14 @@ All notable changes to rootout. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added
+- First-launch setup screen and `rootout setup`: choose a local Ollama model, paste a Claude or OpenAI key (checked with one free request, then stored in the Keychain; retry, go back or save anyway on failure), or skip. AI stays optional (D-034).
+- The home screen shows a one-line AI status under the title.
+
+### Changed
+- The home row "Choose local AI model" is now "Set up AI" and opens the setup screen; the local model picker stays available from `rootout config models --pick` and `m` in the scan screen.
+- The first-run hint on subcommands names `rootout setup`; the scan screen's "AI: none" line mentions it.
+
 ## [0.5.1] - 2026-11-03
 
 ### Changed

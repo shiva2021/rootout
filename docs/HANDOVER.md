@@ -1,25 +1,30 @@
 # Handover
 
-_Updated: 2026-11-03 · Session: open-source release (D-033) shipped as v0.5.0: MIT, public tap, token-free install; membership gate dropped_
+_Updated: 2026-11-03 · Session: onboarding (D-034): first-run setup screen, `rootout setup`, AI status on the home screen_
 
 ## Status
-**v0.5.0 is released and verified.** rootout is open source under MIT, the tap `shiva2021/homebrew-rootout` is public, and the cask is a plain download: in a shell with no `HOMEBREW_GITHUB_API_TOKEN`, `brew tap shiva2021/rootout && brew trust shiva2021/rootout && brew install --cask rootout` installed `/opt/homebrew/bin/rootout` v0.5.0 with no quarantine attribute, and `doctor` runs (2026-11-03). PR #2 merged, Release workflow green, release has two archives + `checksums.txt` + CHANGELOG notes, tap cask has the plain URL and `postflight_steps`, tap README carries the install steps, GitHub shows "MIT License", private vulnerability reporting is on. The membership gate is **dropped for good**: PR #1 (`m6/membership`) is closed, branch kept as an archive; its `service/` leftovers are in `../rootout-m6-service.bak`, outside the repo.
+**Onboarding (D-034) is built and verified on branch `feat/onboarding`.** The PR, merge and `v0.6.0` tag happen at the end of this session; the session's final message records whether they landed. A Mac without a config file now gets a one-screen setup before the home screen (Local model via Ollama · Claude · OpenAI · Not now); `rootout setup` reopens it; the home row "Set up AI" replaces "Choose local AI model"; the home screen shows `AI: …` under the title. Hosted keys are checked with one free models-list request (`internal/llm/{anthropic,openai}.Verify`, `providers.Verify`; no retries, 20 s per check) before being stored; retry / save anyway / back on failure. Skipping a first run writes an empty config file. `make test` and `make lint` are green. Verified through a pty on a fresh `ROOTOUT_CONFIG`: wizard → esc → empty file → home screen with the AI line; `rootout setup` → Claude → bad key → real 401 from Anthropic with `r retry · s save anyway · esc back` → esc → ctrl+x writes nothing. `setup --json` and `setup < /dev/null` exit 2 with hints.
 
-## Done this session (2026-11-03)
-- Shipped v0.5.0 and verified the token-free install (see Status). The tap went public only after the release had rewritten its cask.
-- Found the repo already public with no licence; the handover on `main` (2026-10-22) and the branch handover (2026-10-30) were both written for a private repo with a paywall. Shivang chose: keep public, MIT, drop the gate, park the branch, scrub the LeetCode login at HEAD only.
-- D-033 logged (supersedes D-008, D-024, D-031). The parked branch has its own D-033/D-034 drafts; `main` takes the number.
-- `.goreleaser.yaml`: no `url`/`custom_block`; GoReleaser's default release URL; `install_steps` hook; LICENSE in archives; new caveats. Workflow pin `v2.19.0`. Verified: `goreleaser check`, snapshot cask passes `ruby -c`, `actionlint` clean.
-- `internal/license` deleted with its call site and `exitLicensing`; exit codes are 0–3 (`docs/kb/conventions.md` unchanged, it never listed 4).
-- `docs/research/vscode-extension-audit/REPORT.md:47`: login replaced by "redacted". It stays in history since `90ba3fb` (Shivang's call: no rewrite).
-- `.gitignore`: `/service/`, `/.idea/`. Repo topics and homepage set on GitHub.
+Earlier today (D-033): v0.5.0/v0.5.1 shipped; rootout is open source under MIT, the tap `shiva2021/homebrew-rootout` is public, token-free `brew install --cask rootout` verified on this Mac. The membership gate is dropped; PR #1 (`m6/membership`) is closed, branch kept; its `service/` leftovers are in `../rootout-m6-service.bak`.
+
+## Done this session (onboarding, 2026-11-03)
+- Brainstormed with Shivang: TUI wizard + `rootout setup`; status line + "Set up AI" row; live key check with save-anyway. Plan reviewed by a Plan agent and the advisor; findings folded in: key paste trimming, `CharLimit = 0`, input blurred in the error state, per-call timeout, Keychain read once per launch, empty file on skip.
+- TDD throughout: `internal/llm/{anthropic,openai}/verify_test.go`, `providers_test.go`, `internal/tui/setup_test.go` (16 cases incl. the embedded picker), `home_test.go` (AI line, 30-line view), `cmd/rootout/setup_test.go` (`applySetup`, `needsSetup`, `keyVerifier`, `existingKey`, `aiStatus` with a map-backed `keychain.Store`), `config_test.go` (empty file = defaults).
+- `cmd/rootout/setup.go` persists; `tui.go` runs the wizard when `needsSetup(path)` and recomputes the AI status after the setup action; `main.go` adds `setup`, skips the first-run hint for the bare command (the wizard covers it) and for `setup`; the hint and the guide's AI step name `rootout setup`; scan's "AI: none" line mentions it.
+- Not run: the real-key path on this Mac (`rootout setup` → Claude → enter keeps the stored key → live check) and the Ollama path with a real download. One-screen manual checks (Next steps 1).
+
+## Done earlier today (open-source release, D-033)
+- Shipped v0.5.0 and v0.5.1; token-free install verified. The tap went public only after the release had rewritten its cask.
+- D-033 logged (supersedes D-008, D-024, D-031). `.goreleaser.yaml`: plain cask, `install_steps`, LICENSE in archives; workflow pin `v2.19.0`. `internal/license` deleted; exit codes 0–3.
+- `REPORT.md:47` login scrubbed at HEAD (stays in history since `90ba3fb`, Shivang's call). `.gitignore`: `/service/`, `/.idea/`. Repo topics, private vulnerability reporting on.
 
 ## Next steps
-1. `~/.local/bin/rootout` (a `make install` build, `v0.4.1-3-gb7dbb2e`) is still on this Mac and may shadow the brew copy depending on `PATH` order: `rm ~/.local/bin/rootout` (`docs/kb/release.md`, "Which binary am I running").
-2. Earlier manual checks still open: model grid and home loop in a real terminal; Full Disk Access denied path; v0.2 interactive flows; M2 QA on a throwaway account; live `scan --llm`.
-3. Optional: signing and notarisation (D-030 / D-015 quill flow); homebrew-cask submission once the project meets Homebrew's notability bar (own tap until then).
-4. One-time history scan: `brew install gitleaks && gitleaks git .` (grep for token patterns found only test values).
-5. Dependabot will open its first PRs for Go modules and Actions; review and tag patch releases as they merge.
+1. Manual on this Mac: `rootout setup` → Claude → enter (keeps the stored key, live check) → home shows `AI: Claude · claude-sonnet-5-5`; then the Ollama path with an installed model; then a scan with `l`.
+2. `~/.local/bin/rootout` (an old `make install` build) is still on this Mac and may shadow the brew copy: `rm ~/.local/bin/rootout` (`docs/kb/release.md`, "Which binary am I running").
+3. Earlier manual checks still open: model grid and home loop in a real terminal; Full Disk Access denied path; v0.2 interactive flows; M2 QA on a throwaway account; live `scan --llm`.
+4. Optional: signing and notarisation (D-030 / D-015 quill flow); homebrew-cask submission once the project meets Homebrew's notability bar.
+5. One-time history scan: `brew install gitleaks && gitleaks git .`.
+6. Dependabot PRs #3–#5 (anthropic-sdk-go, openai-go, bubbletea) are open; review, merge and tag patch releases.
 
 ## Done before this session
 ### M5 release pipeline (D-030…D-032), 2026-10-22
@@ -69,6 +74,7 @@ ruby -c dist/homebrew/Casks/rootout.rb
 ```
 
 ## Gotchas
+- Driving the TUI from a script: fork a pty, wait for a screen string, then send keys (keys sent before the alternate screen opens are eaten; `ESC` arriving with the next byte parses as Alt). A throwaway `drive.py` did this for the setup screen.
 - `goreleaser check` on 2.19 rejects the old `hooks.post.install` syntax, so `make release-check` was red on `main` before this PR; `archives.files` hard-fails when LICENSE is missing.
 - The snapshot cask names the last tag in its URL (`v0.4.1` → 404 if installed by hand); only a real release writes a working cask.
 - Scan speed: never run a regex over a whole bundle; use `FileCtx.FindAround` (docs/kb/heuristics.md, Performance).
