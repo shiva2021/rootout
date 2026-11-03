@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/shiva2021/rootout/internal/heur"
 )
@@ -31,6 +32,16 @@ type Assessment struct {
 }
 
 // Provider is one model backend.
+// ModelInfo is one entry of a hosted provider's model list, as shown by the
+// model picker. Deprecated models are still callable but headed for
+// retirement; retired ones are never listed.
+type ModelInfo struct {
+	ID          string    `json:"id"`
+	DisplayName string    `json:"display_name,omitempty"`
+	Created     time.Time `json:"created,omitempty"`
+	Deprecated  bool      `json:"deprecated,omitempty"`
+}
+
 type Provider interface {
 	Name() string  // "anthropic" | "openai" | "ollama" | "fake"
 	Model() string // model id in use
