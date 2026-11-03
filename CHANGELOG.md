@@ -4,6 +4,8 @@ All notable changes to rootout. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-04
+
 ### Fixed
 - Update check: screens print the parsed `vX.Y.Z`, never the raw release tag; a tag that does not parse makes doctor say so instead of "up to date (latest latest)"; the "released" date is local time; a fetch cut short because rootout itself was quitting is no longer recorded as a check; the releases-page hint comes from one constant beside the API URL. D-039 notes that a read-only cache directory means a fetch per launch.
 
