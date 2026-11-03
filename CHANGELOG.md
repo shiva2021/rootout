@@ -4,6 +4,9 @@ All notable changes to rootout. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Changed
+- Docs: README gains a "Releases" section with a diagram of the release flow (release branch, `make release-check`, tag, Release workflow, GitHub Release and cask); no code changes.
+
 ## [0.7.0] - 2026-11-04
 
 ### Added

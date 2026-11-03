@@ -1,8 +1,11 @@
 # Handover
 
-_Updated: 2026-11-04 · Session: scan/LLM enhancements (D-035…D-038) merged as PRs #10–#13 and released as v0.7.0_
+_Updated: 2026-11-04 · Session: README release diagram (branch `docs/release-diagram`), after the v0.7.0 release_
 
 ## Status
+**README now has a "Releases" section** with a mermaid diagram of the release flow as the git history shows it: feature PRs → `release/X.Y.Z` branch with the CHANGELOG move → `make release-check` → release PR merged → tag on `main` → Release workflow (notes from CHANGELOG, GoReleaser) → GitHub Release and cask → `brew upgrade`. CHANGELOG Unreleased has the line. Docs only; `make test`/`make lint` green. Noted but not changed (Shivang's call: README only): `docs/kb/release.md` "Cut a release" still says commit and `git push origin main`, which the PR-only ruleset blocks, and names `postflight_steps` where `.goreleaser.yaml` uses `install_steps`.
+
+## Previous session (v0.7.0)
 **v0.7.0 covers all four scan/LLM enhancements** (D-035…D-038), merged into `main` in order as PRs #10 (hosted model choice), #11 (`l` on ticked rows, bounded queue, summary pane), #12 (verdict icons), #13 (saved assessments, `L`, `--no-cache`, `config cache clear`). One tag instead of the four the plan assumed, because all four landed together; the CHANGELOG `0.7.0` section carries the five lines. Both review passes (one per stack half) are fully folded in, minors included. `make test`/`make lint` and CI on `main` green.
 
 - **D-035**: `anthropic/openai.ListModels` (`Verify` wraps them), `providers.ListModels`, `tui.HostedPicker` + `embeddedPicker`, the wizard's model step after a verified key, `m` for hosted providers, `config models --provider anthropic|openai [--pick]`, generic `saveModel` (silent; CLI paths announce), home AI line refreshed after a scan. OpenAI ids filtered to Responses-API-capable ones.

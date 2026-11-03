@@ -72,6 +72,41 @@ Issues and pull requests are welcome. Branch from `main`, keep `make test` and
 deletion goes through `internal/safety.Validate`, and no test may touch the
 real home directory. Security reports: see `SECURITY.md`.
 
+## Releases
+
+Pushing a `v*` tag publishes rootout. The maintainer steps are manual up to the
+tag; everything after it is the `Release` workflow. The full runbook is in
+`docs/kb/release.md`.
+
+```mermaid
+flowchart TD
+    subgraph dev["Maintainer (manual)"]
+        A["Feature PRs merge to main<br/>CI runs test and lint"]
+        B["Cut release/X.Y.Z<br/>CHANGELOG: Unreleased becomes [X.Y.Z]"]
+        C["make release-check NEXT=vX.Y.Z<br/>changelog, test, lint, goreleaser check"]
+        D["Release PR merged to main"]
+        E["git tag -a vX.Y.Z, then push the tag"]
+        A --> B --> C --> D --> E
+    end
+    subgraph ci["GitHub Actions: Release workflow, on every v* tag"]
+        F["Notes from the CHANGELOG section<br/>job fails if it is missing"]
+        G["GoReleaser builds darwin arm64 and amd64"]
+        F --> G
+    end
+    subgraph out["Published"]
+        H["GitHub Release<br/>two archives, checksums.txt"]
+        I["Cask in shiva2021/homebrew-rootout"]
+        J["brew update, brew upgrade --cask rootout"]
+        I --> J
+    end
+    E --> F
+    G --> H
+    G --> I
+```
+
+The `Release` job runs no tests, so `make release-check` before tagging is the
+gate (D-032).
+
 ## Licence
 
 MIT, see `LICENSE`.
