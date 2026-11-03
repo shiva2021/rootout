@@ -9,7 +9,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/shiva2021/rootout/internal/assesscache"
 	"github.com/shiva2021/rootout/internal/config"
+	"github.com/shiva2021/rootout/internal/fsx"
 	"github.com/shiva2021/rootout/internal/heur"
 	"github.com/shiva2021/rootout/internal/keychain"
 	"github.com/shiva2021/rootout/internal/llm"
@@ -85,33 +87,86 @@ func hostedLister(provider, key string) func(context.Context) ([]llm.ModelInfo, 
 	}
 }
 
-// assessFunc wraps a provider with a per-call timeout.
-func assessFunc(p llm.Provider) tui.AssessFunc {
+// openCache returns the saved-assessments cache for a hosted provider, or
+// nil when there is nothing to save (Ollama, --no-cache, no provider) or
+// the file cannot be read (a warning; the scan goes on without it).
+func openCache(provider string, noCache bool) *assesscache.Cache {
+	if noCache || (provider != "anthropic" && provider != "openai") {
+		return nil
+	}
+	env, err := fsx.Real()
+	if err != nil {
+		return nil
+	}
+	c, err := assesscache.Open(assesscache.Path(env, os.Getenv))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "rootout: saved assessments unavailable:", err)
+		return nil
+	}
+	return c
+}
+
+// assessFunc wraps a provider with a per-call timeout and, when cache is
+// set, answers from it first (unless force) and stores every answer. A
+// failed store is a warning; the answer is still returned.
+func assessFunc(p llm.Provider, cache *assesscache.Cache, force bool) tui.AssessFunc {
 	if p == nil {
 		return nil
 	}
 	return func(ctx context.Context, r heur.Report) (llm.Assessment, error) {
+		id := assesscache.IDFor(r, p.Name(), p.Model())
+		if cache != nil && !force {
+			if a, ok := cache.Lookup(id); ok {
+				return a, nil
+			}
+		}
 		ctx, cancel := context.WithTimeout(ctx, assessTimeout)
 		defer cancel()
 		a, err := p.Assess(ctx, r)
 		if err != nil {
 			return a, err
 		}
-		return llm.Normalize(a, p.Name(), p.Model()), nil
+		a = llm.Normalize(a, p.Name(), p.Model())
+		if cache != nil {
+			if err := cache.Store(id, a); err != nil {
+				fmt.Fprintln(os.Stderr, "rootout: could not save the assessment:", err)
+			}
+		}
+		return a, nil
 	}
+}
+
+// cachedFunc is the scan screen's Cached: a saved answer for the report
+// under p's name and model; nil when there is no cache.
+func cachedFunc(p llm.Provider, cache *assesscache.Cache) func(heur.Report) (llm.Assessment, bool) {
+	if p == nil || cache == nil {
+		return nil
+	}
+	return func(r heur.Report) (llm.Assessment, bool) {
+		return cache.Lookup(assesscache.IDFor(r, p.Name(), p.Model()))
+	}
+}
+
+// withCache fills an Assessor's model-calling fields for p.
+func withCache(a tui.Assessor, p llm.Provider, cache *assesscache.Cache) tui.Assessor {
+	a.Assess = assessFunc(p, cache, false)
+	a.Reassess = assessFunc(p, cache, true)
+	a.Cached = cachedFunc(p, cache)
+	return a
 }
 
 // buildAssessor is what the scan screen gets: the current provider (if any),
 // its label, and the hooks that let the user pick a model in place: the
 // hosted provider's list when a key is at hand, the Ollama picker otherwise.
-func buildAssessor(ctx context.Context, c config.Config, provider, model string, interactive bool) (tui.Assessor, error) {
+func buildAssessor(ctx context.Context, c config.Config, provider, model string, interactive, noCache bool) (tui.Assessor, error) {
 	p, key, err := buildProvider(ctx, c, provider, model, interactive)
 	if err != nil {
 		return tui.Assessor{}, err
 	}
-	a := tui.Assessor{Assess: assessFunc(p)}
+	var a tui.Assessor
 	if p != nil {
 		a.Provider, a.Label = p.Name(), p.Name()+" · "+p.Model()
+		a = withCache(a, p, openCache(p.Name(), noCache))
 	}
 	if !interactive {
 		return a, nil
@@ -131,13 +186,12 @@ func buildAssessor(ctx context.Context, c config.Config, provider, model string,
 		if err != nil {
 			return tui.Assessor{}, err
 		}
-		return tui.Assessor{
+		return withCache(tui.Assessor{
 			Provider:     provider,
 			Label:        provider + " · " + m,
-			Assess:       assessFunc(np),
 			Models:       a.Models,
 			HostedModels: hostedLister(provider, key),
-		}, nil
+		}, np, openCache(provider, noCache)), nil
 	}
 	return a, nil
 }

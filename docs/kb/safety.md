@@ -14,6 +14,10 @@ Everything that deletes goes through `internal/safety`. Read this before touchin
 9. Tests inject `fsx.Env`; `testutil.RequireSandbox` fails any test pointed at the real home.
 10. LLM prompts contain findings and snippets only; `--json` output never includes keys.
 
+## Files rootout writes
+
+Only the config file (`internal/config.Save`) and the saved-assessments file (`internal/assesscache`, `~/.cache/rootout/assessments.json`), both atomically via temp file + rename, 0600 in a 0700 directory. Neither path is ever a deletion target: nothing under `~/.cache/rootout` or `~/.config/rootout` matches a leftover rule, and `config cache clear` is the only remover (it removes exactly that file).
+
 ## Leftover rules (B = bundle id, B* = `B.` prefix, T.B = TeamID-prefixed, N = guarded name)
 | Location | Key |
 |---|---|

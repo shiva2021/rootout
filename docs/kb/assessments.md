@@ -9,6 +9,14 @@ How rootout asks a model about an extension, from the scan screen and from `scan
 - **Esc / quit.** `ReviewScan` cancels the context, which stops in-flight calls; the queue is dropped with the screen.
 - **Testing.** `recordingAssess()` and `feedAssess(v, cmd)` in `scan_test.go` drive the queue deterministically (`runCmd` runs batch members in order, so call order is the ask order).
 
+## Saved answers (D-038)
+
+- **Package.** `internal/assesscache`: `Path(env, getenv)`, `IDFor(report, provider, model)` → `EntryID` (`String()` is the map key), `Open(path)` (missing → empty; corrupt or other `version` → empty with a `slog.Warn`, replaced on the next `Store`), `Lookup` (copy with `Cached=true`), `Store` (write-through, atomic), `Len`, `Clear`. Never create the file on `Open`.
+- **Wiring** (`cmd/rootout/assess.go`): `openCache(provider, noCache)` returns nil for Ollama, `--no-cache`, no provider or a read error; `withCache(a, p, cache)` fills `Assess` (lookup → call → store), `Reassess` (call → store) and `Cached` (lookup only). `OnModel` reopens the cache for the new provider. `scan --no-tui` checks `Cached` first and prints `using the saved assessment` to stderr on a hit.
+- **Screen** (`internal/tui/scan.go`): `preload()` on open and after `assessorMsg` (which first drops results with `Cached`); `L` → `enqueueAssess(force=true)` marks rows in `force` so `startNext` uses `Reassess`; `savedTag` after the model name in the verdict box and the summary cell; `L re-ask` in the footer and `?`.
+- **Invalidation.** `llm.PromptVersion` + `llm.Fingerprint(report)`. When editing `prompt.go`, run the tests: `TestPromptVersionBumped` prints the new fingerprint to pin and reminds you to bump the version.
+- **Testing.** `testutil.FakeHome` for the file (`assesscache_test.go`, run with `-race`); `cmd/rootout/assess_test.go` with `llm.Fake` and a temp `ROOTOUT_CACHE`; `cachedFor(id, assessment)` in `scan_test.go` for the screen.
+
 ## Reading the list (D-037)
 
 - `verdictIcon(ri)` in `scan.go` maps a row's state to a glyph and style: pending → spinner, error → `!`, benign/malicious with `Confident()` → `✓`/`✗` in `styles.verdict`, any other assessment → `⚠`, none → blank. `llm.ConfidenceThreshold` (0.70) is the only threshold.

@@ -17,7 +17,8 @@ internal/
   ext/       Enumerate() extensions for 5 editors, parse package.json + extensions.json + .obsolete, Uninstall()
   registry/  optional --online enrichment: Marketplace extensionquery + Open VSX
   heur/      walker with size caps, rule registry (pure funcs), Finding, Report{Score 0-100}
-  llm/       Provider interface, Assessment, ModelInfo, BuildPrompt, fake + anthropic/openai/ollama adapters (ListModels/Verify per hosted adapter)
+  llm/       Provider interface, Assessment, ModelInfo, BuildPrompt, PromptVersion/Fingerprint, fake + anthropic/openai/ollama adapters (ListModels/Verify per hosted adapter)
+  assesscache/ saved hosted-model answers (JSON under ~/.cache/rootout), used only by cmd/ (D-038)
   llm/ollama/ Detect, ListInstalled, Recommend (catalog.go), Pull, Hardware probe
   keychain/  Get/Set/Delete via zalando/go-keyring behind an interface
   config/    ~/.config/rootout/config.toml: provider, model, defaults (never secrets)
@@ -64,7 +65,8 @@ Spotlight bundles, launchd, processes) → `plan.New` grouped by owner, nothing 
 
 ## Data
 
-- No database. State is the filesystem plus `~/.config/rootout/config.toml`.
+- No database. State is the filesystem plus `~/.config/rootout/config.toml` and the
+  disposable `~/.cache/rootout/assessments.json` (saved hosted-model answers, D-038).
 - Secrets only in Keychain (service `rootout`, account = provider name).
 - Key types live in the package that owns them: `app.App`, `leftover.Leftover`,
   `plan.RemovalPlan`, `ext.Extension`, `heur.Finding/Report`, `llm.Assessment/Provider`.

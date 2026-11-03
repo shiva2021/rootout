@@ -167,7 +167,7 @@ func homeScan(ctx context.Context, env fsx.Env) (tui.Flash, error) {
 	if err != nil {
 		return tui.Flash{}, err
 	}
-	assessor, err := buildAssessor(ctx, c, "", "", true)
+	assessor, err := buildAssessor(ctx, c, "", "", true, false)
 	if errors.Is(err, tui.ErrQuit) {
 		return tui.Flash{}, err
 	}

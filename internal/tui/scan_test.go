@@ -863,3 +863,105 @@ func TestScanViewIconLegendInHelp(t *testing.T) {
 		t.Fatalf("help should explain the icons and the threshold:\n%s", out)
 	}
 }
+
+// cachedFor is a Cached func answering only the given extension id.
+func cachedFor(id string, a llm.Assessment) func(heur.Report) (llm.Assessment, bool) {
+	a.Cached = true
+	return func(r heur.Report) (llm.Assessment, bool) {
+		if r.Ext.ID == id {
+			return a, true
+		}
+		return llm.Assessment{}, false
+	}
+}
+
+func TestScanViewPreloadsCached(t *testing.T) {
+	assess, ids := recordingAssess()
+	a := Assessor{Assess: assess, Cached: cachedFor("evil.stealer", llm.Assessment{Verdict: llm.Malicious, Confidence: 0.92, Reasoning: "Steals keys.", Model: "claude-x"})}
+	v := newTestScan(t, a)
+	if got, ok := v.results[0]; !ok || !got.Cached || len(v.results) != 1 {
+		t.Fatalf("results = %+v", v.results)
+	}
+	out := viewS(v)
+	if !strings.Contains(out, "MALICIOUS") || !strings.Contains(out, "claude-x · saved") || !strings.Contains(out, iconMalicious) {
+		t.Fatalf("cached result should show with the saved tag and the icon:\n%s", out)
+	}
+	if len(*ids) != 0 {
+		t.Fatal("preloading must not call the model")
+	}
+	// l skips it.
+	pressS(v, keySpace)
+	if cmd := pressS(v, runeKey('l')); cmd != nil || !strings.Contains(viewS(v), "1 already answered") {
+		t.Fatalf("l should skip the saved answer:\n%s", viewS(v))
+	}
+}
+
+func TestScanViewLReasksCached(t *testing.T) {
+	assess, ids := recordingAssess()
+	reassess, reIDs := recordingAssess()
+	a := Assessor{Assess: assess, Reassess: reassess, Cached: cachedFor("evil.stealer", llm.Assessment{Verdict: llm.Malicious, Confidence: 0.92})}
+	v := newTestScan(t, a)
+	if !strings.Contains(viewS(v), "L re-ask") {
+		t.Fatalf("footer should offer L:\n%s", viewS(v))
+	}
+	pressS(v, keySpace)
+	cmd := pressS(v, runeKey('L'))
+	if cmd == nil || !strings.Contains(viewS(v), "asking 1") {
+		t.Fatalf("L should ask again:\n%s", viewS(v))
+	}
+	feedAssess(v, cmd)
+	if len(*ids) != 0 || len(*reIDs) != 1 || (*reIDs)[0] != "evil.stealer" {
+		t.Fatalf("L should use Reassess: assess %v reassess %v", *ids, *reIDs)
+	}
+	if got := v.results[0]; got.Cached || got.Verdict != llm.Benign {
+		t.Fatalf("fresh answer should replace the saved one: %+v", got)
+	}
+	if strings.Contains(viewS(v), "saved") {
+		t.Fatal("saved tag should be gone")
+	}
+	// L with nothing ticked is the same hint as l.
+	pressS(v, keySpace)
+	if cmd := pressS(v, runeKey('L')); cmd != nil || !strings.Contains(viewS(v), nothingTickedAssess) {
+		t.Fatal("L with nothing ticked should hint")
+	}
+}
+
+func TestScanViewLFallsBackToAssess(t *testing.T) {
+	assess, ids := recordingAssess()
+	v := newTestScan(t, Assessor{Assess: assess})
+	v.results[0] = llm.Assessment{Verdict: llm.Malicious, Confidence: 0.9}
+	pressS(v, keySpace)
+	feedAssess(v, pressS(v, runeKey('L')))
+	if len(*ids) != 1 || v.results[0].Verdict != llm.Benign {
+		t.Fatalf("L without Reassess should use Assess and replace the answer: %v %+v", *ids, v.results[0])
+	}
+}
+
+func TestScanViewModelSwapDropsCached(t *testing.T) {
+	assess, _ := recordingAssess()
+	a := Assessor{Assess: assess, Cached: cachedFor("evil.stealer", llm.Assessment{Verdict: llm.Malicious, Confidence: 0.9})}
+	v := newTestScan(t, a)
+	v.results[1] = llm.Assessment{Verdict: llm.Benign, Confidence: 0.9} // a fresh answer stays
+	v.Update(assessorMsg{a: Assessor{Label: "anthropic · other", Assess: assess, Cached: cachedFor("good.theme", llm.Assessment{Verdict: llm.Benign, Confidence: 0.8})}})
+	if _, ok := v.results[0]; ok {
+		t.Error("the old model's saved answer should be dropped")
+	}
+	if _, ok := v.results[1]; !ok {
+		t.Error("a fresh answer from this screen stays")
+	}
+	if got, ok := v.results[2]; !ok || !got.Cached {
+		t.Error("the new model's saved answers should be preloaded")
+	}
+	v.Update(assessorMsg{a: Assessor{Label: "ollama · x", Assess: assess}})
+	if _, ok := v.results[2]; ok {
+		t.Error("a provider without a cache drops the saved answers")
+	}
+}
+
+func TestScanViewHelpListsL(t *testing.T) {
+	v := newTestScan(t, Assessor{})
+	pressS(v, runeKey('?'))
+	if out := viewS(v); !strings.Contains(out, "ignoring saved answers") {
+		t.Fatalf("help should explain L:\n%s", out)
+	}
+}

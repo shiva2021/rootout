@@ -22,6 +22,7 @@ scripts/toolchain_check.sh
 | `ANTHROPIC_API_KEY` | Overrides the Keychain entry for the Anthropic provider | console.anthropic.com |
 | `OPENAI_API_KEY` | Overrides the Keychain entry for the OpenAI provider | platform.openai.com |
 | `ROOTOUT_CONFIG` | Alternate config file path (default `~/.config/rootout/config.toml`) | — |
+| `ROOTOUT_CACHE` | Alternate saved-assessments file (default `~/.cache/rootout/assessments.json`) | — |
 | `GOTOOLCHAIN` | Leave at `auto` so the pinned toolchain is used | — |
 
 Keys are normally stored with `rootout config set-key <provider>` (Keychain service `rootout`).

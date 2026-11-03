@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/shiva2021/rootout/internal/assesscache"
 	"github.com/shiva2021/rootout/internal/config"
 	"github.com/shiva2021/rootout/internal/fsx"
 	"github.com/shiva2021/rootout/internal/keychain"
@@ -129,6 +130,7 @@ ANTHROPIC_API_KEY or OPENAI_API_KEY environment variable is not affected.`,
 			},
 		},
 		newModelsCmd(g),
+		newCacheCmd(),
 		&cobra.Command{
 			Use: "pull <model>", Short: "Download a local Ollama model and make it the default", Args: cobra.ExactArgs(1),
 			Long: `Download a model through the running Ollama server, with progress on stderr,
@@ -174,9 +176,18 @@ func configShow(g *globalFlags) error {
 			return err
 		}
 	}
+	env, err := fsx.Real()
+	if err != nil {
+		return err
+	}
+	cachePath := assesscache.Path(env, os.Getenv)
+	cacheN := 0
+	if cc, err := assesscache.Open(cachePath); err == nil {
+		cacheN = cc.Len()
+	}
 	w := output.New(os.Stdout, g.json)
 	if g.json {
-		return w.Emit(map[string]any{"path": path, "config": c, "keys": keys})
+		return w.Emit(map[string]any{"path": path, "config": c, "keys": keys, "cache": map[string]any{"path": cachePath, "entries": cacheN}})
 	}
 	fmt.Printf("config file: %s\n\n", path)
 	for _, k := range config.Keys() {
@@ -191,6 +202,51 @@ func configShow(g *globalFlags) error {
 			fmt.Printf("  %-10s %s (from %s)\n", k.Provider, k.Masked, k.Source)
 		}
 	}
+	fmt.Printf("\nsaved assessments: %s (%d entries; rootout config cache clear forgets them)\n", cachePath, cacheN)
+	return nil
+}
+
+// newCacheCmd is "config cache" with its one action, clear.
+func newCacheCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "cache",
+		Short: "Manage the saved AI assessments",
+		Long: `Answers from Claude or OpenAI are saved under ~/.cache/rootout (override the
+path with ROOTOUT_CACHE) and reused for the same extension version, provider,
+model and prompt, so a paid model is not asked twice. Local Ollama answers are
+never saved. "config show" prints the path and the entry count.`,
+		Example: `  rootout config cache clear   # forget every saved answer`,
+	}
+	cmd.AddCommand(&cobra.Command{
+		Use: "clear", Short: "Delete the saved AI assessments", Args: cobra.NoArgs,
+		Long:    `Delete the saved assessments file. The next scan asks the model again.`,
+		Example: `  rootout config cache clear`,
+		RunE: func(*cobra.Command, []string) error {
+			env, err := fsx.Real()
+			if err != nil {
+				return err
+			}
+			return cacheClear(os.Stderr, assesscache.Path(env, os.Getenv))
+		},
+	})
+	return cmd
+}
+
+// cacheClear removes the saved assessments at path and says what happened.
+func cacheClear(out io.Writer, path string) error {
+	n := 0
+	if c, err := assesscache.Open(path); err == nil {
+		n = c.Len()
+	}
+	removed, err := assesscache.Clear(path)
+	if err != nil {
+		return err
+	}
+	if !removed {
+		_, _ = fmt.Fprintf(out, "no saved assessments at %s\n", path)
+		return nil
+	}
+	_, _ = fmt.Fprintf(out, "removed %d saved assessments at %s\n", n, path)
 	return nil
 }
 

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shiva2021/rootout/internal/assesscache"
 	"github.com/shiva2021/rootout/internal/config"
 	"github.com/shiva2021/rootout/internal/keychain"
 	"github.com/shiva2021/rootout/internal/llm"
@@ -166,5 +167,20 @@ func TestResolveHostedKeyEmptyIsNotFound(t *testing.T) {
 	store.keys["anthropic"] = "sk-ant-x"
 	if k, err := resolveHostedKey(store, "anthropic", noEnv); err != nil || k != "sk-ant-x" {
 		t.Fatalf("key = %q, %v", k, err)
+	}
+}
+
+func TestCacheClear(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "assessments.json")
+	var out bytes.Buffer
+	if err := cacheClear(&out, path); err != nil || !strings.Contains(out.String(), "no saved assessments") {
+		t.Fatalf("absent: %v\n%s", err, out.String())
+	}
+	c, _ := assesscache.Open(path)
+	_ = c.Store(assesscache.EntryID{ExtID: "a"}, llm.Assessment{})
+	_ = c.Store(assesscache.EntryID{ExtID: "b"}, llm.Assessment{})
+	out.Reset()
+	if err := cacheClear(&out, path); err != nil || !strings.Contains(out.String(), "removed 2 saved assessments") || !strings.Contains(out.String(), path) {
+		t.Fatalf("present: %v\n%s", err, out.String())
 	}
 }
