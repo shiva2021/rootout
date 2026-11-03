@@ -18,7 +18,7 @@ builds:
 archives:
   - formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    files: [README.md, CHANGELOG.md]
+    files: [README.md, CHANGELOG.md, LICENSE]
 
 checksum:
   name_template: checksums.txt
@@ -51,58 +51,10 @@ homebrew_casks:
       name: Shivang Chaturvedi
       email: shiva.chaturvedi91@gmail.com
     caveats: |
-      rootout is distributed from a private GitHub repository and is not code-signed.
-      Set HOMEBREW_GITHUB_API_TOKEN to a token with read access to shiva2021/rootout
-      before `brew install`/`brew upgrade`. The quarantine attribute is cleared on install.
-    url:
-      template: "https://github.com/shiva2021/rootout/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
-      using: GitHubPrivateRepositoryReleaseDownloadStrategy
-    custom_block: |
-      require "download_strategy"
-
-      class GitHubPrivateRepositoryReleaseDownloadStrategy < CurlDownloadStrategy
-        def initialize(url, name, version, **meta)
-          @url = url
-          parse_url_pattern
-          set_github_token
-          meta[:headers] ||= []
-          meta[:headers] << "Accept: application/octet-stream"
-          meta[:headers] << "Authorization: Bearer #{@github_token}"
-          ghurl = "https://api.github.com/repos/#{@owner}/#{@repo}/releases/assets/#{asset_id}"
-          super(ghurl, name, version, **meta)
-        end
-
-        def parse_url_pattern
-          url_pattern = %r{https://github.com/([^/]+)/([^/]+)/releases/download/([^/]+)/(\S+)}
-          raise CurlDownloadStrategyError, "Invalid url pattern" unless @url =~ url_pattern
-
-          _, @owner, @repo, @tag, @filename = *@url.match(url_pattern)
-        end
-
-        def download_url
-          "https://#{@github_token}@api.github.com/repos/#{@owner}/#{@repo}/releases/assets/#{asset_id}"
-        end
-
-        private
-
-        def set_github_token
-          @github_token = ENV["HOMEBREW_GITHUB_API_TOKEN"]
-          raise CurlDownloadStrategyError, "HOMEBREW_GITHUB_API_TOKEN is required." unless @github_token
-
-          # validate access
-          GitHub.repository(@owner, @repo)
-        end
-
-        def asset_id
-          @asset_id ||= GitHub.get_release(@owner, @repo, @tag)["assets"]
-                              .find { |a| a["name"] == @filename }
-                              .fetch("id") { raise CurlDownloadStrategyError, "Asset not found" }
-        end
-      end
+      rootout is not code-signed. The quarantine attribute is cleared on install.
     hooks:
       post:
-        # GoReleaser 2.18.3 form (docs at that tag); newer docs use install_steps.
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/rootout"]
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/rootout"]
           end
