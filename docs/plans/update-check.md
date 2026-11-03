@@ -1,6 +1,6 @@
 # Update check · `rootout doctor` row and a home-screen notice
 
-_Spec written 2026-11-04. Status: backlog, approved by Shivang in plan review, not started. Decision D-039 is logged when implementation begins._
+_Spec written 2026-11-04. Status: implemented on `feat/update-check` the same day (D-039 logged). Kept as the record of the design; the code is the truth now._
 
 
 ## Context

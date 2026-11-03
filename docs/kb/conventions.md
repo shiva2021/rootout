@@ -48,7 +48,7 @@ golangci-lint run     # config in .golangci.yml
 ## Releases and versions
 - Every merge to `main` gets an annotated semver tag: minor for a feature (`v0.4.0`), patch for fixes or docs (`v0.3.1`). Cut it at wrap-up: `git tag -a vX.Y.Z -m "vX.Y.Z: <one line>"` then `git push origin main vX.Y.Z`.
 - Tagging goes through `make release-check NEXT=vX.Y.Z` first: the pushed tag publishes a release and the release job does not run the tests. Full steps in `release.md`.
-- The binary learns its version from `git describe --tags --always --dirty` (Makefile → `main.version`), so a clean checkout of a tag prints `vX.Y.Z`; anything else prints `vX.Y.Z-N-g<hash>[-dirty]`, which says how far past the tag the build is. `rootout --version`, `rootout doctor` (first line) and the home-screen title all show it; `make install` echoes what it installed.
+- The binary learns its version from `git describe --tags --always --dirty` (Makefile → `main.version`), so a clean checkout of a tag prints `vX.Y.Z`; anything else prints `vX.Y.Z-N-g<hash>[-dirty]`, which says how far past the tag the build is. `rootout --version`, `rootout doctor` (first line) and the home-screen title all show it; `make install` echoes what it installed. The same string feeds the update check (`internal/update.Installed` reads the leading `vX.Y.Z`), so `dev` and `go install` builds never ask GitHub.
 - `CHANGELOG.md` (Keep a Changelog format) gets an entry per tag; add to its "Unreleased" section as features land.
 
 ## Safety rules that are also conventions
