@@ -1,6 +1,6 @@
 # Handover
 
-_Updated: 2026-11-04 · Session: README release diagram (branch `docs/release-diagram`), after the v0.7.0 release_
+_Updated: 2026-11-04 · Session: README release diagram (branch `docs/release-diagram`, PR #15), after the v0.7.0 release_
 
 ## Status
 **README now has a "Releases" section** with a mermaid diagram of the release flow as the git history shows it: feature PRs → `release/X.Y.Z` branch with the CHANGELOG move → `make release-check` → release PR merged → tag on `main` → Release workflow (notes from CHANGELOG, GoReleaser) → GitHub Release and cask → `brew upgrade`. CHANGELOG Unreleased has the line. Docs only; `make test`/`make lint` green. Noted but not changed (Shivang's call: README only): `docs/kb/release.md` "Cut a release" still says commit and `git push origin main`, which the PR-only ruleset blocks, and names `postflight_steps` where `.goreleaser.yaml` uses `install_steps`.
@@ -29,6 +29,7 @@ Verified: unit/view tests throughout (TDD), a pty run of the scan screen against
 - `REPORT.md:47` login scrubbed at HEAD (stays in history since `90ba3fb`, Shivang's call). `.gitignore`: `/service/`, `/.idea/`. Repo topics, private vulnerability reporting on.
 
 ## Next steps
+0. Merge PR #15 (README release diagram), then decide the tag: conventions say a patch tag per docs merge (`v0.7.1`), but 0.6.1 got a CHANGELOG section and no tag. Either cut `v0.7.1` (CHANGELOG move, `make release-check NEXT=v0.7.1`) or leave the Unreleased line for the next release.
 1. `brew update && brew upgrade --cask rootout` on this Mac once the Release workflow is green, then `rootout version` → v0.7.0. Then manual: `rootout setup` → Claude → enter (keeps the stored key, live check) → model list → choose → home shows `AI: Claude · <model>`; scan → tick rows → `l` → summary and icons → `m` → hosted picker → `L`.
 2. `~/.local/bin/rootout` (an old `make install` build) is still on this Mac and may shadow the brew copy: `rm ~/.local/bin/rootout` (`docs/kb/release.md`, "Which binary am I running").
 3. Earlier manual checks still open: model grid and home loop in a real terminal; Full Disk Access denied path; v0.2 interactive flows; M2 QA on a throwaway account; live `scan --llm`.
