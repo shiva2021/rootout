@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/shiva2021/rootout/internal/config"
+	"github.com/shiva2021/rootout/internal/keychain"
 	"github.com/shiva2021/rootout/internal/llm"
 	"github.com/shiva2021/rootout/internal/llm/ollama"
 )
@@ -154,5 +155,16 @@ func TestPrintHostedModels(t *testing.T) {
 	}
 	if got.Provider != "openai" || got.Current != "gpt-5.2" || len(got.Models) != 1 || got.Models[0].ID != "claude-new" {
 		t.Errorf("json = %+v", got)
+	}
+}
+
+func TestResolveHostedKeyEmptyIsNotFound(t *testing.T) {
+	store := &mapStore{keys: map[string]string{"anthropic": "  "}}
+	if _, err := resolveHostedKey(store, "anthropic", noEnv); !errors.Is(err, keychain.ErrNotFound) {
+		t.Fatalf("blank Keychain item: err = %v, want ErrNotFound", err)
+	}
+	store.keys["anthropic"] = "sk-ant-x"
+	if k, err := resolveHostedKey(store, "anthropic", noEnv); err != nil || k != "sk-ant-x" {
+		t.Fatalf("key = %q, %v", k, err)
 	}
 }

@@ -2,8 +2,10 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
@@ -37,6 +39,10 @@ var hostedKeys = []keyHelp{
 	{"ctrl+x", "quit rootout"},
 	{"?", "this help"},
 }
+
+// hostedFetchSeq numbers fetches across every picker in the process, so a
+// message from a picker that was closed cannot pass a later picker's guard.
+var hostedFetchSeq atomic.Int64
 
 // hostedModelsMsg is the fetched list; id matches the fetch it belongs to.
 type hostedModelsMsg struct {
@@ -101,11 +107,26 @@ func NewHostedPickerWith(models []llm.ModelInfo, provider, current string) *Host
 	return p
 }
 
+// NewHostedPickerFailed builds a picker for a list that could not be
+// fetched: the error in red, the current model as its own row, and the
+// cursor on the typing row.
+func NewHostedPickerFailed(provider, current, fetchErr string) *HostedPicker {
+	p := NewHostedPickerWith([]llm.ModelInfo{}, provider, current)
+	p.fetchErr = firstLine(fetchErr)
+	p.cursor = p.typeRow()
+	p.scroll()
+	return p
+}
+
 // PickHostedModel shows the picker full screen over models and returns the
-// choice. ok=false means the user cancelled; ctrl+x and ctrl+c return
-// ErrQuit.
-func PickHostedModel(ctx context.Context, provider string, models []llm.ModelInfo, current string) (model string, ok bool, err error) {
+// choice; fetchErr != "" means the list could not be fetched and only the
+// current model and a typed id are offered. ok=false means the user
+// cancelled; ctrl+x and ctrl+c return ErrQuit.
+func PickHostedModel(ctx context.Context, provider string, models []llm.ModelInfo, current, fetchErr string) (model string, ok bool, err error) {
 	p := NewHostedPickerWith(models, provider, current)
+	if fetchErr != "" {
+		p = NewHostedPickerFailed(provider, current, fetchErr)
+	}
 	p.ctx = ctx
 	if _, err := tea.NewProgram(p, tea.WithContext(ctx)).Run(); err != nil {
 		return "", false, runErr(err, "pick model")
@@ -142,13 +163,18 @@ func (p *HostedPicker) Init() tea.Cmd {
 		return nil
 	}
 	p.loading, p.fetchErr = true, ""
-	p.fetchID++
+	p.fetchID = int(hostedFetchSeq.Add(1))
 	id, fetch := p.fetchID, p.fetch
 	ctx, cancel := context.WithCancel(p.ctx)
 	p.cancelFn = cancel
 	return tea.Batch(func() tea.Msg {
 		defer cancel()
 		models, err := fetch(ctx)
+		if errors.Is(ctx.Err(), context.Canceled) {
+			// Cancelled by esc or ctrl+x: nobody is waiting, and a picker
+			// opened later must not mistake this for its own fetch.
+			return nil
+		}
 		return hostedModelsMsg{id: id, models: models, err: err}
 	}, p.spin.Tick)
 }

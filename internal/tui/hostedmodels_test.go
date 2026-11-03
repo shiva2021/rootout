@@ -233,3 +233,38 @@ func TestHostedPickerRowsExactWidth(t *testing.T) {
 		}
 	}
 }
+
+// A fetch cancelled by esc must not post its result: the next picker opened
+// with m would mistake it for its own (both number fetches from 1).
+func TestHostedPickerCancelledFetchSendsNothing(t *testing.T) {
+	fetch := func(ctx context.Context) ([]llm.ModelInfo, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	a := newTestHosted(t, NewHostedPicker(context.Background(), "anthropic", fetch, ""))
+	cmd := a.Init()
+	pressHP(a, keyEsc) // cancels the fetch
+	msgs := runCmd(cmd)
+	for _, m := range msgs {
+		if _, ok := m.(hostedModelsMsg); ok {
+			t.Fatalf("cancelled fetch posted %v", m)
+		}
+	}
+	// Even if it had, a second picker shows its own list.
+	b := newTestHosted(t, NewHostedPicker(context.Background(), "anthropic", func(context.Context) ([]llm.ModelInfo, error) { return hostedFixture(), nil }, ""))
+	bcmd := b.Init()
+	b.Update(hostedModelsMsg{id: 1, err: context.Canceled})
+	pumpHP(b, bcmd)
+	if out := viewHP(b); !strings.Contains(out, "claude-new") || strings.Contains(out, "canceled") {
+		t.Fatalf("second picker should show its own list:\n%s", out)
+	}
+}
+
+func TestHostedPickerWithFetchError(t *testing.T) {
+	p := NewHostedPickerFailed("openai", "gpt-5.2", "openai: could not list models: offline")
+	p.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	out := viewHP(p)
+	if !strings.Contains(out, "could not list models") || !strings.Contains(out, "gpt-5.2 (current)") || !strings.Contains(out, "› Type a model id") {
+		t.Fatalf("failed-fetch picker should show the error, the current row and the typing row selected:\n%s", out)
+	}
+}

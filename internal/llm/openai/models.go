@@ -15,9 +15,11 @@ import (
 	"github.com/shiva2021/rootout/internal/llm"
 )
 
-// excludedModelWords mark ids that are not chat models (embeddings, speech,
-// images, moderation); the models endpoint lists every kind.
-var excludedModelWords = []string{"embedding", "tts", "whisper", "dall-e", "realtime", "audio", "image", "transcribe", "moderation"}
+// excludedModelWords mark ids the Responses API adapter cannot use:
+// embeddings, speech, images, moderation, the Chat-Completions-only
+// search previews and legacy completions ("instruct") models. The models
+// endpoint lists every kind.
+var excludedModelWords = []string{"embedding", "tts", "whisper", "dall-e", "realtime", "audio", "image", "transcribe", "moderation", "search", "instruct"}
 
 // chatCapable reports whether id looks like a chat model: a gpt-* or o<N>*
 // id with none of the excluded words. "chatgpt-*" aliases are skipped too.

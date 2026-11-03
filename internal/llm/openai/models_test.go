@@ -29,6 +29,10 @@ func TestChatCapable(t *testing.T) {
 		{"gpt-4o-audio-preview", false},
 		{"omni-moderation-latest", false},
 		{"chatgpt-4o-latest", false},
+		{"gpt-4o-search-preview", false},
+		{"gpt-4o-mini-search-preview", false},
+		{"gpt-3.5-turbo-instruct", false},
+		{"o1-pro", true},
 		{"babbage-002", false},
 		{"omni-thing", false},
 	}

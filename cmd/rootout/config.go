@@ -498,7 +498,7 @@ func hostedModels(ctx context.Context, g *globalFlags, provider string, pick boo
 	if err != nil {
 		return err
 	}
-	key, _, err := keychain.Resolve(keychain.New(), provider, os.Getenv)
+	key, err := resolveHostedKey(keychain.New(), provider, os.Getenv)
 	if errors.Is(err, keychain.ErrNotFound) {
 		return &exitErr{code: exitBadInput, msg: fmt.Sprintf("no %s API key; run `rootout setup`", provider)}
 	}
@@ -507,18 +507,17 @@ func hostedModels(ctx context.Context, g *globalFlags, provider string, pick boo
 	}
 	models, err := hostedLister(provider, key)(ctx)
 	current := hostedModel(c, provider)
+	fetchErr := ""
 	if err != nil {
 		if !pick {
 			return err
 		}
-		// The picker can still take a typed id.
-		fmt.Fprintln(os.Stderr, "rootout:", err)
-		models = nil
+		fetchErr = err.Error() // the picker shows it and still takes a typed id
 	}
 	if !pick {
 		return printHostedModels(os.Stdout, g.json, provider, current, models)
 	}
-	model, ok, err := tui.PickHostedModel(ctx, provider, models, current)
+	model, ok, err := tui.PickHostedModel(ctx, provider, models, current, fetchErr)
 	if err != nil {
 		return err
 	}
@@ -526,6 +525,19 @@ func hostedModels(ctx context.Context, g *globalFlags, provider string, pick boo
 		return &exitErr{code: exitDeclined, msg: "no model chosen"}
 	}
 	return saveModel(provider, model)
+}
+
+// resolveHostedKey is keychain.Resolve with a blank item (edited outside
+// rootout) reported as ErrNotFound rather than returned as an empty key.
+func resolveHostedKey(store keychain.Store, provider string, getenv func(string) string) (string, error) {
+	key, _, err := keychain.Resolve(store, provider, getenv)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(key) == "" {
+		return "", keychain.ErrNotFound
+	}
+	return key, nil
 }
 
 // printHostedModels prints the hosted model grid, or the JSON form.
