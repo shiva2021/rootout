@@ -21,7 +21,6 @@ internal/
   llm/ollama/ Detect, ListInstalled, Recommend (catalog.go), Pull, Hardware probe
   keychain/  Get/Set/Delete via zalando/go-keyring behind an interface
   config/    ~/.config/rootout/config.toml: provider, model, defaults (never secrets)
-  license/   Check(ctx) Status — always Allowed until M6
   progress/  Reporter (Start/Step/Done), Term renderer for stderr, Recorder for tests
   output/    human table + JSON renderers shared by subcommands
   tui/       Bubble Tea models: home screen (action rows + flash of the last outcome), app picker (loads inside the
@@ -71,4 +70,4 @@ Spotlight bundles, launchd, processes) → `plan.New` grouped by owner, nothing 
 - Never touches `/System`, `/usr`, `/bin`, `/sbin`, `/private/var/db`, `/Library/Apple`.
 - Login items are reported, not removed.
 - Marketplace/Open VSX lookups are optional; scoring never depends on them.
-- Licensing is a seam (`license.Check`) until M6.
+- No licence or membership checks: rootout is open source (D-033).

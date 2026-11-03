@@ -15,7 +15,6 @@ import (
 
 	"github.com/shiva2021/rootout/internal/config"
 	"github.com/shiva2021/rootout/internal/fsx"
-	"github.com/shiva2021/rootout/internal/license"
 	"github.com/shiva2021/rootout/internal/progress"
 )
 
@@ -24,11 +23,10 @@ var version = "dev"
 
 // Exit codes shared by every subcommand (see docs/kb/conventions.md).
 const (
-	exitOK        = 0
-	exitError     = 1
-	exitBadInput  = 2
-	exitDeclined  = 3
-	exitLicensing = 4
+	exitOK       = 0
+	exitError    = 1
+	exitBadInput = 2
+	exitDeclined = 3
 )
 
 type globalFlags struct {
@@ -86,9 +84,6 @@ Getting started
 				lvl = slog.LevelDebug
 			}
 			slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lvl})))
-			if st := license.Check(cmd.Context(), cmd.Name()); !st.Allowed {
-				return &exitErr{code: exitLicensing, msg: "license: " + st.Reason}
-			}
 			firstRunHint(cmd, &g)
 			return nil
 		},
