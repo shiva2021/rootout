@@ -4,11 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/shiva2021/rootout/internal/config"
 	"github.com/shiva2021/rootout/internal/ext"
 	"github.com/shiva2021/rootout/internal/fsx"
 	"github.com/shiva2021/rootout/internal/keychain"
@@ -17,7 +22,12 @@ import (
 	"github.com/shiva2021/rootout/internal/run"
 	"github.com/shiva2021/rootout/internal/tcc"
 	"github.com/shiva2021/rootout/internal/trash"
+	"github.com/shiva2021/rootout/internal/update"
 )
+
+// brewUpgrade is the fix for a Homebrew install; brew update first, because
+// a stale tap clone reports "already installed" (docs/kb/release.md).
+const brewUpgrade = "brew update && brew upgrade --cask rootout"
 
 // check is one doctor line.
 type check struct {
@@ -33,10 +43,12 @@ func newDoctorCmd(g *globalFlags) *cobra.Command {
 		Short: "Check the environment rootout depends on",
 		Long: `Check what rootout can use on this Mac: the installed rootout version, the macOS version, how files reach
 the Trash, Full Disk Access for this terminal, Homebrew, the VS Code-family editors and their command-line tools,
-the config file, stored API keys and Ollama with this Mac's chip and RAM.
+the config file, stored API keys and Ollama with this Mac's chip and RAM. It also asks GitHub for the
+latest rootout release (one request, 5 s timeout; off with "rootout config set updates.check false")
+and remembers the answer under ~/.cache/rootout/update.json so the home screen can reuse it.
 
-Each line is a check mark or a "!" with a fix. Doctor only reads; it changes
-nothing and installs nothing.
+Each line is a check mark or a "!" with a fix. Doctor only reads this Mac; apart
+from that one record file it changes nothing and installs nothing.
 
 --json prints [{name, ok, detail, fix}].`,
 		Example: `  rootout doctor
@@ -44,6 +56,9 @@ nothing and installs nothing.
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			checks := runChecks(cmd.Context())
+			// The update row is doctor's alone: runChecks also serves the
+			// guide, which must stay offline.
+			checks = slices.Insert(checks, 1, updateRow(cmd.Context()))
 			w := output.New(os.Stdout, g.json)
 			if g.json {
 				return w.Emit(checks)
@@ -157,4 +172,78 @@ func runChecks(ctx context.Context) []check {
 		add(check{Name: "Ollama", OK: c.LLM.Provider != "ollama", Detail: "not installed (optional, for local models); " + tier, Fix: "rootout config models --pick"})
 	}
 	return out
+}
+
+// updateRow builds the Update check from the real environment.
+func updateRow(ctx context.Context) check {
+	enabled := config.Default().Updates.Check
+	if c, _, err := loadConfig(); err == nil {
+		enabled = c.Updates.Check // an unreadable config keeps the default, not "off"
+	}
+	recordPath := ""
+	if env, err := fsx.Real(); err == nil {
+		recordPath = update.Path(env, os.Getenv)
+	}
+	return updateCheck(ctx, update.New(version), enabled, version, recordPath, executable())
+}
+
+// executable is the resolved path of this binary, "" when unknown.
+func executable() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if real, err := filepath.EvalSymlinks(exe); err == nil {
+		return real
+	}
+	return exe
+}
+
+// updateCheck asks GitHub for the latest release and compares it with
+// installed. A disabled check, an unknown build or an unreachable GitHub
+// is OK (nothing for the user to fix); a newer release is a "!" row whose
+// fix is the upgrade command. A successful answer is recorded at
+// recordPath for the home screen when recordPath is not empty.
+func updateCheck(ctx context.Context, cl *update.Client, enabled bool, installed, recordPath, exe string) check {
+	row := check{Name: "Update", OK: true}
+	if !enabled {
+		row.Detail = "off (rootout config set updates.check true)"
+		return row
+	}
+	if _, ok := update.Installed(installed); !ok {
+		row.Detail = "dev build; cannot compare with the latest release"
+		return row
+	}
+	rel, err := cl.Latest(ctx)
+	if err != nil {
+		row.Detail = "could not reach GitHub: " + err.Error()
+		return row
+	}
+	if recordPath != "" {
+		if err := update.WriteRecord(recordPath, rel, time.Now()); err != nil {
+			slog.Debug("doctor: update record", "path", recordPath, "err", err)
+		}
+	}
+	if !update.Newer(rel.Tag, installed) {
+		row.Detail = "up to date (latest " + rel.Tag + ")"
+		return row
+	}
+	row.OK = false
+	row.Detail = fmt.Sprintf("%s available (installed %s", rel.Tag, installed)
+	if !rel.PublishedAt.IsZero() {
+		row.Detail += ", released " + rel.PublishedAt.Format("2006-01-02")
+	}
+	row.Detail += ")"
+	row.Fix = upgradeHint(exe, rel.URL)
+	return row
+}
+
+// upgradeHint is the way to install a newer release: the brew command when
+// this binary was installed by the cask (brew links it from the Caskroom),
+// else the release page.
+func upgradeHint(exe, url string) string {
+	if strings.Contains(filepath.ToSlash(exe), "/Caskroom/rootout/") {
+		return brewUpgrade
+	}
+	return url
 }
