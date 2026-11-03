@@ -12,7 +12,7 @@ import (
 
 const (
 	homeHelp       = "↑/↓ move · enter select · ctrl+x quit · ? help"
-	homeChromeRows = 4 // title, blank row, flash row, footer row
+	homeChromeRows = 5 // title, AI status row, blank row, flash row, footer row
 )
 
 // homeKeys is the ? overlay of the home screen.
@@ -37,7 +37,7 @@ const (
 	ActionUninstall
 	ActionOrphans
 	ActionScan
-	ActionModel
+	ActionSetup
 	ActionQuit // never returned by PickAction: the Quit row yields ErrQuit
 )
 
@@ -51,15 +51,16 @@ var homeRows = []homeRow{
 	{ActionUninstall, "Uninstall an app", "pick an installed app, review every file it left behind, remove it"},
 	{ActionOrphans, "Remove orphaned leftovers", "find files left by apps that are already gone"},
 	{ActionScan, "Scan editor extensions", "score VS Code-family extensions for malicious behaviour"},
-	{ActionModel, "Choose local AI model", "pick or download an Ollama model that fits this Mac"},
+	{ActionSetup, "Set up AI", "optional: a local model or a Claude/OpenAI key for keep/uninstall recommendations"},
 	{ActionQuit, "Quit", "leave rootout (ctrl+x works on every screen)"},
 }
 
-// PickAction shows the home screen (titled with version, e.g. "v0.3.0")
-// and returns the chosen action. It returns ErrQuit when the user quits
-// (ctrl+x, ctrl+c or the Quit row).
-func PickAction(ctx context.Context, version string, flash Flash) (Action, error) {
-	h := NewHome(version, flash)
+// PickAction shows the home screen (titled with version, e.g. "v0.3.0",
+// with ai as the status line under the title) and returns the chosen
+// action. It returns ErrQuit when the user quits (ctrl+x, ctrl+c or the
+// Quit row).
+func PickAction(ctx context.Context, version string, flash Flash, ai string) (Action, error) {
+	h := NewHome(version, flash, ai)
 	if _, err := tea.NewProgram(h, tea.WithContext(ctx)).Run(); err != nil {
 		return ActionNone, runErr(err, "home")
 	}
@@ -75,6 +76,7 @@ type Home struct {
 	rows          []homeRow
 	styles        styles
 	version       string
+	ai            string // status line under the title, e.g. "AI: not set up"
 	width, height int
 	cursor        int
 	flash         Flash
@@ -85,12 +87,14 @@ type Home struct {
 }
 
 // NewHome builds the home screen showing flash under the list. version is
-// appended to the title when not empty.
-func NewHome(version string, flash Flash) *Home {
+// appended to the title when not empty; ai is the one-line AI status shown
+// under the title.
+func NewHome(version string, flash Flash, ai string) *Home {
 	return &Home{
 		rows:    homeRows,
 		styles:  defaultStyles(),
 		version: version,
+		ai:      ai,
 		width:   defaultWidth,
 		height:  defaultHeight,
 		flash:   flash,
@@ -174,6 +178,8 @@ func (h *Home) render() string {
 		title += " " + h.version
 	}
 	b.WriteString(h.styles.title.Render(title))
+	b.WriteString("\n")
+	b.WriteString(h.styles.dim.Render(output.Truncate(h.ai, width)))
 	b.WriteString("\n\n")
 	b.WriteString(fillRows(lines, width, max(h.height-homeChromeRows, 1)))
 	b.WriteString("\n")

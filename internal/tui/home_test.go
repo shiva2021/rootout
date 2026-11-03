@@ -7,15 +7,17 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+const testAI = "AI: not set up · heuristics only"
+
 func newTestHome(t *testing.T, flash Flash) *Home {
 	t.Helper()
-	h := NewHome("", flash)
+	h := NewHome("", flash, testAI)
 	h.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	return h
 }
 
 func TestHomeTitleVersion(t *testing.T) {
-	h := NewHome("v0.3.0", Flash{})
+	h := NewHome("v0.3.0", Flash{}, testAI)
 	h.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	if first := strings.SplitN(viewH(h), "\n", 2)[0]; strings.TrimSpace(first) != "rootout v0.3.0" {
 		t.Errorf("title = %q, want %q", first, "rootout v0.3.0")
@@ -105,7 +107,7 @@ func TestHomeEnterSelects(t *testing.T) {
 		{0, ActionUninstall},
 		{1, ActionOrphans},
 		{2, ActionScan},
-		{3, ActionModel},
+		{3, ActionSetup},
 	}
 	for _, tt := range tests {
 		h := newTestHome(t, Flash{})
@@ -194,5 +196,19 @@ func TestHomeHelpOverlay(t *testing.T) {
 	assertQuit(t, pressH(h, keyCtrlX))
 	if !h.quitAll {
 		t.Error("ctrl+x while help is open should quit rootout")
+	}
+}
+
+func TestHomeAILine(t *testing.T) {
+	h := newTestHome(t, Flash{})
+	lines := strings.Split(viewH(h), "\n")
+	if got := strings.TrimSpace(lines[1]); got != testAI {
+		t.Errorf("line under the title = %q, want %q", got, testAI)
+	}
+	if !strings.Contains(viewH(h), "Set up AI") {
+		t.Errorf("home rows should offer Set up AI:\n%s", viewH(h))
+	}
+	if len(lines) != 30 {
+		t.Errorf("view has %d lines, want 30", len(lines))
 	}
 }

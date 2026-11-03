@@ -212,3 +212,17 @@ func TestPath(t *testing.T) {
 		t.Errorf("override Path = %q", got)
 	}
 }
+
+func TestLoadEmptyFileReturnsDefault(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(c, Default()) {
+		t.Errorf("Load(empty) = %+v, want Default()", c)
+	}
+}

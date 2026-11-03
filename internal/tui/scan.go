@@ -18,7 +18,7 @@ import (
 const (
 	scanChromeRows = 5 // title row, AI row, blank row, flash row, help row
 	scanNoAI       = "AI: none"
-	scanNoAIPick   = "AI: none · m to pick a local model"
+	scanNoAIPick   = "AI: none · m to pick a local model · rootout setup for a key"
 	scanProvider   = "ollama" // Label prefix whose model the picker pre-selects
 	labelSep       = " · "
 	lowScore       = 30 // reports under this are hidden by `f`
