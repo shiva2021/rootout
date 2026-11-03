@@ -55,12 +55,17 @@ var homeRows = []homeRow{
 	{ActionQuit, "Quit", "leave rootout (ctrl+x works on every screen)"},
 }
 
+// noticeMsg carries the update notice once the notice func has returned.
+type noticeMsg string
+
 // PickAction shows the home screen (titled with version, e.g. "v0.3.0",
 // with ai as the status line under the title) and returns the chosen
-// action. It returns ErrQuit when the user quits (ctrl+x, ctrl+c or the
+// action. notice, when not nil, runs in the background and its text (an
+// update notice; "" for none) joins the title line when it arrives.
+// It returns ErrQuit when the user quits (ctrl+x, ctrl+c or the
 // Quit row).
-func PickAction(ctx context.Context, version string, flash Flash, ai string) (Action, error) {
-	h := NewHome(version, flash, ai)
+func PickAction(ctx context.Context, version string, flash Flash, ai string, notice func() string) (Action, error) {
+	h := NewHome(version, flash, ai, notice)
 	if _, err := tea.NewProgram(h, tea.WithContext(ctx)).Run(); err != nil {
 		return ActionNone, runErr(err, "home")
 	}
@@ -77,6 +82,8 @@ type Home struct {
 	styles        styles
 	version       string
 	ai            string // status line under the title, e.g. "AI: not set up"
+	notice        func() string
+	noticeText    string // dim text after the version once notice has answered
 	width, height int
 	cursor        int
 	flash         Flash
@@ -88,13 +95,14 @@ type Home struct {
 
 // NewHome builds the home screen showing flash under the list. version is
 // appended to the title when not empty; ai is the one-line AI status shown
-// under the title.
-func NewHome(version string, flash Flash, ai string) *Home {
+// under the title; notice (may be nil) supplies the update notice.
+func NewHome(version string, flash Flash, ai string, notice func() string) *Home {
 	return &Home{
 		rows:    homeRows,
 		styles:  defaultStyles(),
 		version: version,
 		ai:      ai,
+		notice:  notice,
 		width:   defaultWidth,
 		height:  defaultHeight,
 		flash:   flash,
@@ -105,12 +113,20 @@ func NewHome(version string, flash Flash, ai string) *Home {
 // when nothing was chosen.
 func (h *Home) Chosen() (Action, bool) { return h.chosen, h.ok }
 
-// Init has nothing to start.
-func (h *Home) Init() tea.Cmd { return nil }
+// Init starts the notice func, if any, so the screen never waits for it.
+func (h *Home) Init() tea.Cmd {
+	if h.notice == nil {
+		return nil
+	}
+	notice := h.notice
+	return func() tea.Msg { return noticeMsg(notice()) }
+}
 
-// Update handles window resizes and keys.
+// Update handles window resizes, keys and the notice arriving.
 func (h *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case noticeMsg:
+		h.noticeText = string(msg)
 	case tea.WindowSizeMsg:
 		h.width, h.height = msg.Width, msg.Height
 	case tea.KeyPressMsg:
@@ -178,6 +194,12 @@ func (h *Home) render() string {
 		title += " " + h.version
 	}
 	b.WriteString(h.styles.title.Render(title))
+	// The notice shares the title line so the layout keeps its row count;
+	// it is cut to fit and dropped when there is no room for a word.
+	if room := width - lipgloss.Width(title) - 2; h.noticeText != "" && room >= 4 {
+		b.WriteString("  ")
+		b.WriteString(h.styles.dim.Render(output.Truncate(h.noticeText, room)))
+	}
 	b.WriteString("\n")
 	b.WriteString(h.styles.dim.Render(output.Truncate(h.ai, width)))
 	b.WriteString("\n\n")

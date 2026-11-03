@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/shiva2021/rootout/internal/leftover"
 	"github.com/shiva2021/rootout/internal/plan"
@@ -12,6 +14,7 @@ import (
 	"github.com/shiva2021/rootout/internal/progress"
 	"github.com/shiva2021/rootout/internal/testutil"
 	"github.com/shiva2021/rootout/internal/tui"
+	"github.com/shiva2021/rootout/internal/update"
 )
 
 func TestDeclinedOnQuit(t *testing.T) {
@@ -171,5 +174,67 @@ func TestScanFlash(t *testing.T) {
 		if got.Text != tc.want || got.Err != tc.wantErr {
 			t.Errorf("scanFlash(%d,%d) = %+v, want {%q %v}", tc.done, tc.failed, got, tc.want, tc.wantErr)
 		}
+	}
+}
+
+func TestUpdateNotice(t *testing.T) {
+	const exe = "/opt/homebrew/Caskroom/rootout/0.7.0/rootout"
+	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+	tests := []struct {
+		name     string
+		enabled  bool
+		version  string
+		record   *update.Release // nil = no record on disk
+		status   int
+		body     string
+		want     string
+		wantHits int
+		wantTag  string // tag in the record afterwards
+	}{
+		{"fresh record, newer", true, "v0.7.0", &update.Release{Tag: "v0.8.0"}, 200, releaseV080, "v0.8.0 available · " + brewUpgrade, 0, "v0.8.0"},
+		{"fresh record, up to date", true, "v0.8.0", &update.Release{Tag: "v0.8.0"}, 200, releaseV080, "", 0, "v0.8.0"},
+		{"fresh record, empty tag", true, "v0.7.0", &update.Release{}, 200, releaseV080, "", 0, ""},
+		{"no record, fetch", true, "v0.7.0", nil, 200, releaseV080, "v0.8.0 available · " + brewUpgrade, 1, "v0.8.0"},
+		{"no record, server down", true, "v0.7.0", nil, 500, "", "", 1, ""},
+		{"disabled", false, "v0.7.0", nil, 200, releaseV080, "", 0, "-"},
+		{"dev build", true, "dev", nil, 200, releaseV080, "", 0, "-"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cl, hits := fakeGitHub(t, tt.status, tt.body)
+			path := filepath.Join(t.TempDir(), "rootout", "update.json")
+			if tt.record != nil {
+				if err := update.WriteRecord(path, *tt.record, now.Add(-time.Hour)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			notice := updateNotice(context.Background(), cl, tt.enabled, tt.version, path, exe, clock)
+			if got := notice(); got != tt.want {
+				t.Errorf("notice() = %q, want %q", got, tt.want)
+			}
+			if got := notice(); got != tt.want {
+				t.Errorf("second notice() = %q, want %q", got, tt.want)
+			}
+			if *hits != tt.wantHits {
+				t.Errorf("GitHub hits = %d, want %d (memoised, at most one)", *hits, tt.wantHits)
+			}
+			rec, ok := update.ReadRecord(path, now)
+			switch {
+			case tt.wantTag == "-" && ok:
+				t.Errorf("record written = %+v, want none", rec)
+			case tt.wantTag != "-" && (!ok || rec.Tag != tt.wantTag):
+				t.Errorf("record = %+v, %v; want tag %q", rec, ok, tt.wantTag)
+			}
+		})
+	}
+}
+
+func TestUpdateNoticeHintWithoutBrew(t *testing.T) {
+	cl, _ := fakeGitHub(t, 200, releaseV080)
+	path := filepath.Join(t.TempDir(), "update.json")
+	got := updateNotice(context.Background(), cl, true, "v0.7.0", path, "/Users/me/.local/bin/rootout", time.Now)()
+	if want := "v0.8.0 available · github.com/shiva2021/rootout/releases"; got != want {
+		t.Errorf("notice = %q, want %q", got, want)
 	}
 }
