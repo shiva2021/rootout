@@ -1,8 +1,11 @@
 # Handover
 
-_Updated: 2026-11-04 · Session: scan/LLM enhancements (D-035…D-038) merged as PRs #10–#13 and released as v0.7.0_
+_Updated: 2026-11-04 · Session: README release diagram (branch `docs/release-diagram`, PR #15), after the v0.7.0 release_
 
 ## Status
+**README now has a "Releases" section** with a mermaid diagram of the release flow as the git history shows it: feature PRs → `release/X.Y.Z` branch with the CHANGELOG move → `make release-check` → release PR merged → tag on `main` → Release workflow (notes from CHANGELOG, GoReleaser) → GitHub Release and cask → `brew upgrade`. CHANGELOG Unreleased has the line. Docs only; `make test`/`make lint` green. Noted but not changed (Shivang's call: README only): `docs/kb/release.md` "Cut a release" still says commit and `git push origin main`, which the PR-only ruleset blocks, and names `postflight_steps` where `.goreleaser.yaml` uses `install_steps`.
+
+## Previous session (v0.7.0)
 **v0.7.0 covers all four scan/LLM enhancements** (D-035…D-038), merged into `main` in order as PRs #10 (hosted model choice), #11 (`l` on ticked rows, bounded queue, summary pane), #12 (verdict icons), #13 (saved assessments, `L`, `--no-cache`, `config cache clear`). One tag instead of the four the plan assumed, because all four landed together; the CHANGELOG `0.7.0` section carries the five lines. Both review passes (one per stack half) are fully folded in, minors included. `make test`/`make lint` and CI on `main` green.
 
 - **D-035**: `anthropic/openai.ListModels` (`Verify` wraps them), `providers.ListModels`, `tui.HostedPicker` + `embeddedPicker`, the wizard's model step after a verified key, `m` for hosted providers, `config models --provider anthropic|openai [--pick]`, generic `saveModel` (silent; CLI paths announce), home AI line refreshed after a scan. OpenAI ids filtered to Responses-API-capable ones.
@@ -26,6 +29,7 @@ Verified: unit/view tests throughout (TDD), a pty run of the scan screen against
 - `REPORT.md:47` login scrubbed at HEAD (stays in history since `90ba3fb`, Shivang's call). `.gitignore`: `/service/`, `/.idea/`. Repo topics, private vulnerability reporting on.
 
 ## Next steps
+0. Merge PR #15 (README release diagram), then decide the tag: conventions say a patch tag per docs merge (`v0.7.1`), but 0.6.1 got a CHANGELOG section and no tag. Either cut `v0.7.1` (CHANGELOG move, `make release-check NEXT=v0.7.1`) or leave the Unreleased line for the next release.
 1. `brew update && brew upgrade --cask rootout` on this Mac once the Release workflow is green, then `rootout version` → v0.7.0. Then manual: `rootout setup` → Claude → enter (keeps the stored key, live check) → model list → choose → home shows `AI: Claude · <model>`; scan → tick rows → `l` → summary and icons → `m` → hosted picker → `L`.
 2. `~/.local/bin/rootout` (an old `make install` build) is still on this Mac and may shadow the brew copy: `rm ~/.local/bin/rootout` (`docs/kb/release.md`, "Which binary am I running").
 3. Earlier manual checks still open: model grid and home loop in a real terminal; Full Disk Access denied path; v0.2 interactive flows; M2 QA on a throwaway account; live `scan --llm`.
