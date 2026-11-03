@@ -268,3 +268,64 @@ func TestHostedPickerWithFetchError(t *testing.T) {
 		t.Fatalf("failed-fetch picker should show the error, the current row and the typing row selected:\n%s", out)
 	}
 }
+
+func TestHostedPickerHelpWhileTyping(t *testing.T) {
+	p := newTestHosted(t, NewHostedPickerWith(hostedFixture(), "anthropic", "claude-sonnet-5-5"))
+	pressHP(p, runeKey('t'))
+	pressHP(p, keyQuestion)
+	if out := viewHP(p); !strings.Contains(out, "any key to close") {
+		t.Fatalf("? while typing should open the help, not insert a character:\n%s", out)
+	}
+	pressHP(p, keyDown)
+	out := viewHP(p)
+	if strings.Contains(out, "any key to close") || !strings.Contains(out, "Model id") || strings.Contains(out, "claude-sonnet-5-5?") {
+		t.Fatalf("help should close back to the input with the text untouched:\n%s", out)
+	}
+	pressHP(p, keyEnter)
+	if model, chosen, _ := p.done(); !chosen || model != "claude-sonnet-5-5" {
+		t.Errorf("done() = %q %v", model, chosen)
+	}
+}
+
+func TestHostedPickerLongIDKeepsColumns(t *testing.T) {
+	long := "claude-" + strings.Repeat("x", 60)
+	models := []llm.ModelInfo{{ID: long, DisplayName: "Long One"}, {ID: "claude-new", DisplayName: "Short One"}}
+	p := newTestHosted(t, NewHostedPickerWith(models, "anthropic", long))
+	lines := strings.Split(viewHP(p), "\n")
+	col := func(name string) int {
+		for _, l := range lines {
+			if i := strings.Index(l, name); i >= 0 {
+				return lipgloss.Width(l[:i])
+			}
+		}
+		return -1
+	}
+	if a, b := col("Long One"), col("Short One"); a != b || a < 0 {
+		t.Fatalf("NAME column moved: long at %d, short at %d\n%s", a, b, viewHP(p))
+	}
+	if !strings.Contains(viewHP(p), "…") {
+		t.Fatal("the long id should be truncated with an ellipsis")
+	}
+}
+
+func TestHostedPickerNarrowWidths(t *testing.T) {
+	fetch := func(context.Context) ([]llm.ModelInfo, error) { return hostedFixture(), nil }
+	for _, w := range []int{8, 12, 20} {
+		p := NewHostedPicker(context.Background(), "anthropic", fetch, "")
+		p.setEmbedded(true)
+		p.Update(tea.WindowSizeMsg{Width: w, Height: 10})
+		cmd := p.Init() // loading state
+		for i, l := range strings.Split(viewHP(p), "\n") {
+			if got := lipgloss.Width(l); got > w {
+				t.Errorf("width %d loading: line %d is %d cells: %q", w, i, got, l)
+			}
+		}
+		pumpHP(p, cmd)
+		pressHP(p, runeKey('t'))
+		for i, l := range strings.Split(viewHP(p), "\n") {
+			if got := lipgloss.Width(l); got > w {
+				t.Errorf("width %d typing: line %d is %d cells: %q", w, i, got, l)
+			}
+		}
+	}
+}

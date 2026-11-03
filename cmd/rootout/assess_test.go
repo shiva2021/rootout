@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -45,6 +46,27 @@ func TestSaveModel(t *testing.T) {
 
 	if err := saveModel("gemini", "x"); err == nil {
 		t.Fatal("unknown provider: want error")
+	}
+}
+
+func TestSaveModelIsSilent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	t.Setenv("ROOTOUT_CONFIG", path)
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stderr
+	os.Stderr = w
+	saveErr := saveModel("anthropic", "claude-opus-5-5")
+	os.Stderr = old
+	_ = w.Close()
+	out, _ := io.ReadAll(r)
+	if saveErr != nil {
+		t.Fatal(saveErr)
+	}
+	if len(out) != 0 {
+		t.Fatalf("saveModel wrote to stderr (it runs under the scan screen): %q", out)
 	}
 }
 
