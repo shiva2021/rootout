@@ -24,6 +24,9 @@ brew trust shiva2021/rootout   # Homebrew 7 requires this once for third-party c
 brew install --cask rootout
 brew upgrade --cask rootout    # later, for a new version
 ```
+If `brew upgrade` says the latest version is already installed but `rootout --version` is older, the local tap clone is stale: run `brew update` first, then upgrade again (seen on v0.6.0).
+
+`main` accepts changes only through a pull request (GitHub ruleset "rollout-ruleset": no deletion, no force-push, pull request and status checks required); feature branches are unrestricted.
 `go install github.com/shiva2021/rootout/cmd/rootout@latest` also works; that binary prints `dev` for `--version` because the Makefile ldflags are not applied.
 
 ## Which binary am I running
