@@ -301,7 +301,7 @@ func openEmbeddedPicker(t *testing.T, v *ScanView) {
 		t.Fatalf("picker not rendered:\n%s", viewS(v))
 	}
 	pump(v, cmd)
-	if v.picker == nil || v.picker.state != stateReady {
+	if mp, ok := v.picker.(*ModelPicker); !ok || mp.state != stateReady {
 		t.Fatalf("picker did not reach the list")
 	}
 }
@@ -309,10 +309,11 @@ func openEmbeddedPicker(t *testing.T, v *ScanView) {
 func TestScanViewPickModel(t *testing.T) {
 	var picked string
 	a := Assessor{
-		Label:  "ollama · llama3.2:3b",
-		Models: &ModelDeps{Client: ollamaServer(t), Hardware: testHW},
-		OnModel: func(_ context.Context, model string) (Assessor, error) {
-			picked = model
+		Provider: "ollama",
+		Label:    "ollama · llama3.2:3b",
+		Models:   &ModelDeps{Client: ollamaServer(t), Hardware: testHW},
+		OnModel: func(_ context.Context, provider, model string) (Assessor, error) {
+			picked = provider + "/" + model
 			return Assessor{Label: "ollama · x", Assess: func(context.Context, heur.Report) (llm.Assessment, error) { return llm.Assessment{}, nil }}, nil
 		},
 	}
@@ -322,8 +323,8 @@ func TestScanViewPickModel(t *testing.T) {
 	if !strings.Contains(out, "llama3.2:3b (current)") || strings.Contains(out, "Scan results") {
 		t.Fatalf("picker list not shown with the current model:\n%s", out)
 	}
-	if v.picker.width != 140 || v.picker.height != 40 {
-		t.Fatalf("picker size %dx%d, want 140x40", v.picker.width, v.picker.height)
+	if mp := v.picker.(*ModelPicker); mp.width != 140 || mp.height != 40 {
+		t.Fatalf("picker size %dx%d, want 140x40", mp.width, mp.height)
 	}
 
 	cmd := pressS(v, keyEnter)
@@ -331,7 +332,7 @@ func TestScanViewPickModel(t *testing.T) {
 		t.Fatal("enter on an installed model should close the picker and return the OnModel Cmd")
 	}
 	pump(v, cmd)
-	if picked != "llama3.2:3b" {
+	if picked != "ollama/llama3.2:3b" {
 		t.Fatalf("OnModel got %q", picked)
 	}
 	out = viewS(v)
@@ -345,8 +346,10 @@ func TestScanViewPickModel(t *testing.T) {
 
 func TestScanViewPickModelError(t *testing.T) {
 	a := Assessor{
-		Models:  &ModelDeps{Client: ollamaServer(t), Hardware: testHW},
-		OnModel: func(context.Context, string) (Assessor, error) { return Assessor{}, errors.New("no such provider") },
+		Models: &ModelDeps{Client: ollamaServer(t), Hardware: testHW},
+		OnModel: func(context.Context, string, string) (Assessor, error) {
+			return Assessor{}, errors.New("no such provider")
+		},
 	}
 	v := newTestScan(t, a)
 	openEmbeddedPicker(t, v)
@@ -365,7 +368,7 @@ func TestScanViewPickModelCancel(t *testing.T) {
 	called := false
 	a := Assessor{
 		Models:  &ModelDeps{Client: ollamaServer(t), Hardware: testHW},
-		OnModel: func(context.Context, string) (Assessor, error) { called = true; return Assessor{}, nil },
+		OnModel: func(context.Context, string, string) (Assessor, error) { called = true; return Assessor{}, nil },
 	}
 	v := newTestScan(t, a)
 	openEmbeddedPicker(t, v)
@@ -418,7 +421,7 @@ func TestScanViewHelpOverlay(t *testing.T) {
 	}
 	pressS(v, runeKey('?'))
 	out := viewS(v)
-	for _, want := range []string{helpClose, "tick / untick", "pick a local Ollama model", "type delete", "quit rootout"} {
+	for _, want := range []string{helpClose, "tick / untick", "pick a model", "type delete", "quit rootout"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("help missing %q:\n%s", want, out)
 		}
@@ -444,7 +447,7 @@ func TestScanViewPickModelCancelWhenNotInstalled(t *testing.T) {
 		t.Fatal("m should open the picker")
 	}
 	pump(v, cmd)
-	if v.picker == nil || v.picker.state != stateNotInstalled {
+	if mp, ok := v.picker.(*ModelPicker); !ok || mp.state != stateNotInstalled {
 		t.Fatalf("picker state = %v, want not installed", v.picker)
 	}
 	if !strings.Contains(viewS(v), "not installed") {
@@ -458,5 +461,99 @@ func TestScanViewPickModelCancelWhenNotInstalled(t *testing.T) {
 	}
 	if cmd := pressS(v, keyEsc); cmd == nil {
 		t.Fatal("second esc should quit")
+	}
+}
+
+func TestScanViewModelKeyHosted(t *testing.T) {
+	var picked string
+	fetched := 0
+	a := Assessor{
+		Provider: "anthropic",
+		Label:    "anthropic · claude-sonnet-5-5",
+		HostedModels: func(context.Context) ([]llm.ModelInfo, error) {
+			fetched++
+			return hostedFixture(), nil
+		},
+		OnModel: func(_ context.Context, provider, model string) (Assessor, error) {
+			picked = provider + "/" + model
+			return Assessor{Provider: provider, Label: hostedLabel(provider, model), Assess: func(context.Context, heur.Report) (llm.Assessment, error) { return llm.Assessment{}, nil }}, nil
+		},
+	}
+	v := newTestScan(t, a)
+	if !strings.Contains(viewS(v), "m model") {
+		t.Fatalf("footer should offer m for a hosted provider:\n%s", viewS(v))
+	}
+	cmd := pressS(v, runeKey('m'))
+	if v.picker == nil || cmd == nil || !strings.Contains(viewS(v), "listing models") {
+		t.Fatalf("m should open the hosted picker and start the fetch:\n%s", viewS(v))
+	}
+	pump(v, cmd)
+	out := viewS(v)
+	if fetched != 1 || !strings.Contains(out, "› claude-sonnet-5-5 (current)") || strings.Contains(out, "Scan results") {
+		t.Fatalf("hosted list not shown with the current model (fetched %d):\n%s", fetched, out)
+	}
+	cmd = pressS(v, keyUp, keyEnter)
+	if v.picker != nil || cmd == nil {
+		t.Fatal("enter should close the picker and return the OnModel Cmd")
+	}
+	pump(v, cmd)
+	if picked != "anthropic/claude-new" {
+		t.Fatalf("OnModel got %q", picked)
+	}
+	if out := viewS(v); !strings.Contains(out, "AI: anthropic · claude-new") || !strings.Contains(out, "l ask AI") {
+		t.Fatalf("assessor not replaced:\n%s", out)
+	}
+}
+
+func TestScanViewModelKeyHostedFetchError(t *testing.T) {
+	a := Assessor{
+		Provider: "openai",
+		Label:    "openai · gpt-5.2",
+		HostedModels: func(context.Context) ([]llm.ModelInfo, error) {
+			return nil, errors.New("openai: could not list models: offline")
+		},
+		OnModel: func(_ context.Context, p, m string) (Assessor, error) {
+			return Assessor{Provider: p, Label: hostedLabel(p, m)}, nil
+		},
+	}
+	v := newTestScan(t, a)
+	pump(v, pressS(v, runeKey('m')))
+	out := viewS(v)
+	if !strings.Contains(out, "could not list models") || !strings.Contains(out, "gpt-5.2 (current)") || !strings.Contains(out, "› Type a model id") {
+		t.Fatalf("error with the typing fallback expected:\n%s", out)
+	}
+	pressS(v, keyEnter)
+	typeS(v, "-pro")
+	pump(v, pressS(v, keyEnter))
+	if out := viewS(v); !strings.Contains(out, "AI: openai · gpt-5.2-pro") {
+		t.Fatalf("typed model not applied:\n%s", out)
+	}
+}
+
+func TestScanViewModelKeyHostedEsc(t *testing.T) {
+	called := false
+	a := Assessor{
+		Provider:     "anthropic",
+		Label:        "anthropic · claude-sonnet-5-5",
+		HostedModels: func(context.Context) ([]llm.ModelInfo, error) { return hostedFixture(), nil },
+		OnModel:      func(context.Context, string, string) (Assessor, error) { called = true; return Assessor{}, nil },
+	}
+	v := newTestScan(t, a)
+	pump(v, pressS(v, runeKey('m')))
+	if cmd := pressS(v, keyEsc); cmd != nil || v.picker != nil || called {
+		t.Fatal("esc should close the picker without OnModel or quitting")
+	}
+	if out := viewS(v); !strings.Contains(out, "Scan results") || !strings.Contains(out, "AI: anthropic · claude-sonnet-5-5") {
+		t.Fatalf("scan view not restored:\n%s", out)
+	}
+}
+
+func TestScanViewModelKeyHostedWithoutFetchFallsBackToOllama(t *testing.T) {
+	// A hosted provider without a model list still offers the Ollama picker.
+	a := Assessor{Provider: "anthropic", Label: "anthropic · claude-sonnet-5-5", Models: &ModelDeps{Client: ollamaServer(t), Hardware: testHW}}
+	v := newTestScan(t, a)
+	openEmbeddedPicker(t, v)
+	if _, ok := v.picker.(*ModelPicker); !ok {
+		t.Fatal("expected the Ollama picker")
 	}
 }

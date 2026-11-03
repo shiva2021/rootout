@@ -19,7 +19,7 @@ const (
 	scanChromeRows = 5 // title row, AI row, blank row, flash row, help row
 	scanNoAI       = "AI: none"
 	scanNoAIPick   = "AI: none · m to pick a local model · rootout setup for a key"
-	scanProvider   = "ollama" // Label prefix whose model the picker pre-selects
+	scanProvider   = "ollama"
 	labelSep       = " · "
 	lowScore       = 30 // reports under this are hidden by `f`
 	highScore      = 70
@@ -35,14 +35,19 @@ type ScanResult struct {
 // AssessFunc runs the configured LLM on one report; nil hides the "assess" action.
 type AssessFunc func(ctx context.Context, r heur.Report) (llm.Assessment, error)
 
-// Assessor is the AI the scan screen can ask, plus how to swap it.
+// Assessor is the AI the scan screen can ask, plus how to swap its model.
 type Assessor struct {
-	Label  string     // "ollama · qwen3.5:4b", "anthropic · claude-sonnet-5-5"; "" = none configured
-	Assess AssessFunc // nil = none
-	Models *ModelDeps // nil = local model picking unavailable
-	// OnModel is called after the user picks a local model and returns the
-	// replacement Assessor (Label, Assess and Models are taken from it).
-	OnModel func(ctx context.Context, model string) (Assessor, error)
+	Provider string     // "ollama" | "anthropic" | "openai"; "" = none configured
+	Label    string     // "ollama · qwen3.5:4b", "anthropic · claude-sonnet-5-5"; "" = none configured
+	Assess   AssessFunc // nil = none
+	Models   *ModelDeps // nil = local model picking unavailable
+	// HostedModels lists the configured hosted provider's models for the m
+	// key; nil = unavailable (no key). Built in cmd/ with the key resolved.
+	HostedModels func(ctx context.Context) ([]llm.ModelInfo, error)
+	// OnModel is called after the user picks a model for provider and
+	// returns the replacement Assessor (Provider, Label, Assess, Models and
+	// HostedModels are taken from it).
+	OnModel func(ctx context.Context, provider, model string) (Assessor, error)
 }
 
 // ReviewScan shows the scan results full screen and returns the extensions
@@ -137,10 +142,10 @@ type ScanView struct {
 	cursor, top   int // cursor indexes visible
 	detailTop     int // first visible line of the details pane
 	flash         string
-	errLine       string        // red one-liner (model swap failed)
-	confirm       *typedConfirm // typed "delete" box; nil when closed
-	picker        *ModelPicker  // embedded model picker; nil when closed
-	help          bool          // ? overlay open
+	errLine       string         // red one-liner (model swap failed)
+	confirm       *typedConfirm  // typed "delete" box; nil when closed
+	picker        embeddedPicker // embedded model picker; nil when closed
+	help          bool           // ? overlay open
 	accepted      bool
 	quitAll       bool // ctrl+x / ctrl+c: leave rootout, not just this screen
 }
@@ -201,7 +206,8 @@ func (v *ScanView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			v.errLine = "model: " + msg.err.Error()
 			return v, nil
 		}
-		v.assessor.Label, v.assessor.Assess, v.assessor.Models = msg.a.Label, msg.a.Assess, msg.a.Models
+		v.assessor.Provider, v.assessor.Label, v.assessor.Assess = msg.a.Provider, msg.a.Label, msg.a.Assess
+		v.assessor.Models, v.assessor.HostedModels = msg.a.Models, msg.a.HostedModels
 		if msg.a.OnModel != nil {
 			v.assessor.OnModel = msg.a.OnModel
 		}
@@ -313,26 +319,50 @@ func (v *ScanView) confirmUpdate(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// openPicker embeds a model picker over the screen; nil when local model
-// picking is unavailable.
+// openPicker embeds a model picker over the screen: the configured hosted
+// provider's list when it can be fetched, else the Ollama picker; nil when
+// neither is available.
 func (v *ScanView) openPicker() tea.Cmd {
-	if v.assessor.Models == nil {
+	var p embeddedPicker
+	switch {
+	case v.hosted() && v.assessor.HostedModels != nil:
+		p = NewHostedPicker(v.ctx, v.assessor.Provider, v.assessor.HostedModels, v.currentModel())
+	case v.assessor.Models != nil:
+		p = NewModelPicker(v.ctx, *v.assessor.Models, v.currentOllamaModel())
+	default:
 		return nil
 	}
-	p := NewModelPicker(v.ctx, *v.assessor.Models, v.currentModel())
 	p.setEmbedded(true)
 	p.Update(tea.WindowSizeMsg{Width: v.width, Height: v.height})
 	v.picker = p
 	return p.Init()
 }
 
-// currentModel is the model part of an "ollama · <model>" label, else "".
+// hosted reports whether the configured provider is a hosted one.
+func (v *ScanView) hosted() bool {
+	return v.assessor.Provider != "" && v.assessor.Provider != scanProvider
+}
+
+// pickerProvider is the provider a picked model belongs to.
+func (v *ScanView) pickerProvider() string {
+	if _, ok := v.picker.(*HostedPicker); ok {
+		return v.assessor.Provider
+	}
+	return scanProvider
+}
+
+// currentModel is the model part of the "<provider> · <model>" label.
 func (v *ScanView) currentModel() string {
-	provider, model, ok := strings.Cut(v.assessor.Label, labelSep)
-	if !ok || provider != scanProvider {
+	_, model, _ := strings.Cut(v.assessor.Label, labelSep)
+	return model
+}
+
+// currentOllamaModel is the current model when the provider is Ollama.
+func (v *ScanView) currentOllamaModel() string {
+	if v.assessor.Provider != scanProvider {
 		return ""
 	}
-	return model
+	return v.currentModel()
 }
 
 // delegate forwards msg to the embedded picker and, once it has finished,
@@ -343,20 +373,21 @@ func (v *ScanView) delegate(msg tea.Msg) tea.Cmd {
 	if !finished {
 		return cmd
 	}
+	provider := v.pickerProvider()
 	v.closePicker()
 	if !chosen || v.assessor.OnModel == nil {
 		return cmd
 	}
 	ctx, on := v.ctx, v.assessor.OnModel
 	return func() tea.Msg {
-		a, err := on(ctx, model)
+		a, err := on(ctx, provider, model)
 		return assessorMsg{a: a, err: err}
 	}
 }
 
 func (v *ScanView) closePicker() {
 	if v.picker != nil {
-		v.picker.cancelPull()
+		v.picker.cancel()
 		v.picker = nil
 	}
 }
@@ -511,7 +542,7 @@ func (v *ScanView) footerHelp() string {
 	if v.assessor.Assess != nil {
 		parts = append(parts, "l ask AI")
 	}
-	if v.assessor.Models != nil {
+	if v.assessor.Models != nil || (v.hosted() && v.assessor.HostedModels != nil) {
 		parts = append(parts, "m model")
 	}
 	parts = append(parts, "enter uninstall", "esc back", "ctrl+x quit", "? help")
@@ -526,7 +557,7 @@ func (v *ScanView) helpKeys() []keyHelp {
 		{"tab", "switch focus between the list and the details"},
 		{"f", "hide / show extensions scoring under " + fmt.Sprint(lowScore)},
 		{"l", "ask the configured AI about the selected extension"},
-		{"m", "pick a local Ollama model"},
+		{"m", "pick a model: the provider's hosted list (Claude, OpenAI) or a local Ollama model"},
 		{"enter", "uninstall the ticked extensions (asks you to type " + plan.ConfirmWord + ")"},
 		{"esc", "back without changes"},
 		{"ctrl+x", "quit rootout"},
