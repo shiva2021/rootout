@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/spinner"
@@ -25,6 +26,12 @@ const (
 	highScore      = 70
 	nothingTicked  = "nothing ticked for uninstall"
 	scoreWidth     = 3
+
+	// assessWorkers bounds the model calls in flight: hosted calls cost
+	// money and are rate-limited, local ones share one Mac.
+	assessWorkers       = 2
+	nothingTickedAssess = "tick rows with space, then l"
+	summaryHidden       = "(hidden)"
 )
 
 // ScanResult is what the user decided.
@@ -135,6 +142,7 @@ type ScanView struct {
 	results  map[int]llm.Assessment
 	errs     map[int]error
 	pending  map[int]bool
+	queue    []int // reports waiting for a worker, in ask order
 	hideLow  bool
 	detailsF bool // details pane has focus
 
@@ -221,7 +229,7 @@ func (v *ScanView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			delete(v.errs, msg.report)
 			v.results[msg.report] = msg.a
 		}
-		return v, nil
+		return v, v.startNext()
 
 	case spinner.TickMsg:
 		// Both spinners may be ticking; each ignores the other's ID.
@@ -285,7 +293,7 @@ func (v *ScanView) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		v.hideLow = !v.hideLow
 		v.filter()
 	case "l":
-		return v, v.startAssess()
+		return v, v.enqueueAssess()
 	case "m":
 		return v, v.openPicker()
 	case "?":
@@ -403,25 +411,98 @@ func (v *ScanView) View() tea.View {
 	return view
 }
 
-// startAssess runs the LLM on the cursor report as a Cmd and starts the
-// spinner when it was idle.
-func (v *ScanView) startAssess() tea.Cmd {
-	r, ok := v.current()
-	if v.assessor.Assess == nil || !ok || v.pending[r] {
+// enqueueAssess queues the ticked reports for the model, skipping the ones
+// already answered or in flight (an errored one is asked again), and
+// starts as many as the worker bound allows. Nothing ticked is a hint.
+func (v *ScanView) enqueueAssess() tea.Cmd {
+	if v.assessor.Assess == nil {
 		return nil
 	}
+	order := v.tickedOrder()
+	if len(order) == 0 {
+		v.flash = nothingTickedAssess
+		return nil
+	}
+	answered, asked := 0, 0
+	for _, r := range order {
+		if _, ok := v.results[r]; ok {
+			answered++
+			continue
+		}
+		if v.pending[r] || slices.Contains(v.queue, r) {
+			continue
+		}
+		v.queue = append(v.queue, r)
+		asked++
+	}
+	switch {
+	case asked == 0:
+		v.flash = fmt.Sprintf("%d already answered", answered)
+	case answered > 0:
+		v.flash = fmt.Sprintf("asking %d · %d already answered", asked, answered)
+	default:
+		v.flash = fmt.Sprintf("asking %d", asked)
+	}
+	return v.startNext()
+}
+
+// startNext pops queued reports into free workers. Each call captures the
+// Assess in force when it starts, so a model swap applies to the rest of
+// the queue. The spinner starts with the first in-flight call.
+func (v *ScanView) startNext() tea.Cmd {
+	var cmds []tea.Cmd
 	idle := len(v.pending) == 0
-	v.pending[r] = true
-	delete(v.errs, r)
-	ctx, assess, rep := v.ctx, v.assessor.Assess, v.reports[r]
-	run := func() tea.Msg {
-		a, err := assess(ctx, rep)
-		return assessMsg{report: r, a: a, err: err}
+	for len(v.pending) < assessWorkers && len(v.queue) > 0 {
+		r := v.queue[0]
+		v.queue = v.queue[1:]
+		v.pending[r] = true
+		delete(v.errs, r)
+		ctx, assess, rep := v.ctx, v.assessor.Assess, v.reports[r]
+		cmds = append(cmds, func() tea.Msg {
+			a, err := assess(ctx, rep)
+			return assessMsg{report: r, a: a, err: err}
+		})
+	}
+	if len(cmds) == 0 {
+		return nil
 	}
 	if idle {
-		return tea.Batch(run, v.spin.Tick)
+		cmds = append(cmds, v.spin.Tick)
 	}
-	return run
+	return tea.Batch(cmds...)
+}
+
+// tickedOrder is the ticked reports: the visible ones in display order,
+// then the ones hidden by the filter in report order.
+func (v *ScanView) tickedOrder() []int {
+	var out []int
+	shown := map[int]bool{}
+	for _, r := range v.visible {
+		shown[r] = true
+		if v.ticked[r] {
+			out = append(out, r)
+		}
+	}
+	for r := range v.reports {
+		if v.ticked[r] && !shown[r] {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// anyTickedAsked reports whether a ticked row has a result, an error or a
+// call in flight: only then does the summary replace the single detail.
+func (v *ScanView) anyTickedAsked() bool {
+	for r, on := range v.ticked {
+		if !on {
+			continue
+		}
+		if _, ok := v.results[r]; ok || v.pending[r] || v.errs[r] != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // filter rebuilds the visible list, keeping the cursor on the same report
@@ -540,7 +621,7 @@ func (v *ScanView) render() string {
 func (v *ScanView) footerHelp() string {
 	parts := []string{"↑/↓ move", "space tick", "tab focus", "f hide low"}
 	if v.assessor.Assess != nil {
-		parts = append(parts, "l ask AI")
+		parts = append(parts, "l ask AI (ticked)")
 	}
 	if v.assessor.Models != nil || (v.hosted() && v.assessor.HostedModels != nil) {
 		parts = append(parts, "m model")
@@ -556,7 +637,7 @@ func (v *ScanView) helpKeys() []keyHelp {
 		{"space", "tick / untick the extension for uninstall"},
 		{"tab", "switch focus between the list and the details"},
 		{"f", "hide / show extensions scoring under " + fmt.Sprint(lowScore)},
-		{"l", "ask the configured AI about the selected extension"},
+		{"l", "ask the configured AI about every ticked extension, " + fmt.Sprint(assessWorkers) + " at a time; rows already answered are skipped, errors are retried"},
 		{"m", "pick a model: the provider's hosted list (Claude, OpenAI) or a local Ollama model"},
 		{"enter", "uninstall the ticked extensions (asks you to type " + plan.ConfirmWord + ")"},
 		{"esc", "back without changes"},
@@ -651,9 +732,14 @@ func (v *ScanView) renderDetails(width, rows int) string {
 	return pane.Render(strings.Join(lines[from:to], "\n"))
 }
 
-// detailLines lays out the cursor report's details pre-wrapped to width.
+// detailLines lays out the cursor report's details pre-wrapped to width,
+// or the AI summary of the ticked rows once more than one is ticked and
+// at least one has been asked.
 func (v *ScanView) detailLines(width int) []string {
 	width = max(width, 10)
+	if v.tickedCount() > 1 && v.anyTickedAsked() {
+		return v.summaryLines(width)
+	}
 	ri, ok := v.current()
 	if !ok {
 		return []string{v.styles.noMatch.Render("Nothing to show")}
@@ -721,6 +807,76 @@ func (v *ScanView) detailLines(width int) []string {
 		out = append(out, strings.Split(l, "\n")...)
 	}
 	return out
+}
+
+// summaryLines lists every ticked report with its AI status: verdict and
+// confidence, the spinner while asking, the error, or "not asked", then
+// the first sentence of the reasoning.
+func (v *ScanView) summaryLines(width int) []string {
+	s := v.styles
+	order := v.tickedOrder()
+	answered, asking := 0, 0
+	for _, r := range order {
+		if _, ok := v.results[r]; ok {
+			answered++
+		}
+		if v.pending[r] {
+			asking++
+		}
+	}
+	head := fmt.Sprintf("AI summary · %d ticked · %d answered", len(order), answered)
+	if asking > 0 {
+		head += fmt.Sprintf(" · %d asking", asking)
+	}
+	lines := []string{s.title.Render(output.Truncate(head, width)), ""}
+	shown := map[int]bool{}
+	for _, r := range v.visible {
+		shown[r] = true
+	}
+	for _, r := range order {
+		e := v.reports[r].Ext
+		name := e.ID + " " + s.dim.Render("["+e.Editor+"]")
+		if !shown[r] {
+			name += " " + s.dim.Render(summaryHidden)
+		}
+		var status, reason string
+		switch {
+		case v.pending[r]:
+			status = v.spin.View() + s.dim.Render(" asking…")
+		case v.errs[r] != nil:
+			status = s.danger.Render("error: " + firstLine(strings.TrimPrefix(v.errs[r].Error(), "llm: ")))
+		default:
+			if a, ok := v.results[r]; ok {
+				vs, ok := s.verdict[a.Verdict]
+				if !ok {
+					vs = s.dim
+				}
+				status = vs.Render(fmt.Sprintf("%s %.0f%%", strings.ToUpper(a.Verdict), a.Confidence*100))
+				reason = firstSentence(a.Reasoning)
+			} else {
+				status = s.dim.Render("not asked")
+			}
+		}
+		lines = append(lines, wrapLines(name+"  "+status, width))
+		if reason != "" {
+			lines = append(lines, indent(wrapLines(reason, width-2), "  "))
+		}
+		lines = append(lines, "")
+	}
+	var out []string
+	for _, l := range lines {
+		out = append(out, strings.Split(l, "\n")...)
+	}
+	return out
+}
+
+// firstSentence is s up to its first full stop (or the whole of s).
+func firstSentence(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.Index(s, ". "); i >= 0 {
+		return s[:i+1]
+	}
+	return s
 }
 
 // findingLines renders "[severity] rule  file:line", the wrapped detail and

@@ -2,6 +2,13 @@
 
 How rootout asks a model about an extension, from the scan screen and from `scan --no-tui`. Read when touching `internal/llm`, `internal/tui/scan.go`, `cmd/rootout/assess.go` or the setup screen's model step.
 
+## Asking the model from the scan screen (D-036)
+
+- **Flow.** `l` → `enqueueAssess` builds `tickedOrder()` (visible ticked first, then hidden ticked), skips answered/in-flight rows, appends the rest to `queue`, sets the flash (`asking N · M already answered`), and calls `startNext`. `startNext` pops into `pending` while `len(pending) < assessWorkers` (2), each Cmd capturing the current `assessor.Assess`; the `assessMsg` handler records the result then calls `startNext` again. The spinner tick is added only when `pending` goes from empty to non-empty.
+- **Summary pane.** `detailLines` returns `summaryLines` when `tickedCount() > 1 && anyTickedAsked()`; otherwise the cursor row's detail as before. Status cell per row: verdict + confidence (`styles.verdict`), spinner `asking…`, red `error: …`, or dim `not asked`; then `firstSentence(Reasoning)`.
+- **Esc / quit.** `ReviewScan` cancels the context, which stops in-flight calls; the queue is dropped with the screen.
+- **Testing.** `recordingAssess()` and `feedAssess(v, cmd)` in `scan_test.go` drive the queue deterministically (`runCmd` runs batch members in order, so call order is the ask order).
+
 ## Choosing a hosted model (D-035)
 
 - **Where the list comes from.** `anthropic.ListModels` and `openai.ListModels` call each provider's models endpoint with no retries; `Verify` is the same call without the result. Anthropic pages up to five times and drops `retired` models; OpenAI returns everything in one page, so `chatCapable` keeps `gpt-*` and `o<N>*` ids without the words `embedding, tts, whisper, dall-e, realtime, audio, image, transcribe, moderation, search, instruct`; the rule is "usable through the Responses API with a strict JSON schema" (D-013), which the search previews and legacy completions models are not. Judge future catalogue or SDK changes against that. Both sort newest first and flag deprecated models (Anthropic `lifecycle`, OpenAI `shutdown_date`). `providers.ListModels` dispatches by provider name.

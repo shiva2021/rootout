@@ -18,7 +18,7 @@ const (
 	setupKeyHelp  = "enter check and save · esc back · ctrl+x quit"
 	setupFailHelp = "r retry · s save anyway · esc back · ? help"
 	setupTitle    = "Welcome to rootout"
-	setupIntro    = "rootout removes macOS apps completely and scores editor extensions (VS Code, Cursor, Windsurf…) for malicious behaviour. Scores come from built-in rules. Optionally, an AI model reads each finding and recommends keep or uninstall: press l on an extension in the scan screen."
+	setupIntro    = "rootout removes macOS apps completely and scores editor extensions (VS Code, Cursor, Windsurf…) for malicious behaviour. Scores come from built-in rules. Optionally, an AI model reads each finding and recommends keep or uninstall: tick extensions in the scan screen and press l."
 	setupNoKey    = "paste a key first"
 	setupChecking = "Checking the key…"
 )

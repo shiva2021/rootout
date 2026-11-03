@@ -9,6 +9,7 @@ All notable changes to rootout. Format: [Keep a Changelog](https://keepachangelo
 
 ### Changed
 - `rootout config models` gained `--provider`; the home screen refreshes its AI line after a scan, since `m` can change the saved model.
+- Scan screen: `l` now asks the model about every ticked extension (the same tick as uninstall), two at a time, instead of the cursor row; with nothing ticked it shows a hint and sends nothing. Rows already answered are skipped and failed ones retried; re-asking an answered row arrives with the saved-answers feature. With several ticked and at least one asked, the right pane lists every ticked extension with its verdict, confidence and first sentence of reasoning (D-036).
 
 ## [0.6.1] - 2026-11-03
 
