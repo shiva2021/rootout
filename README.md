@@ -11,6 +11,7 @@ rootout remove <app>          # move them to the Trash after you confirm
 rootout scan                  # score installed extensions; review and uninstall on a terminal
 rootout scan --llm            # also ask Claude, OpenAI or a local Ollama model
 rootout orphans               # leftovers of apps you already deleted, grouped by old app id
+rootout setup                 # optional: a local model or a Claude/OpenAI key for recommendations
 rootout config models --pick  # choose or download a local model that fits this Mac
 rootout doctor                # check what rootout depends on
 rootout guide                 # a step-by-step tour adapted to this Mac
@@ -35,6 +36,16 @@ make install
 ```
 
 The binary is not code-signed; Homebrew clears the quarantine flag for you.
+
+## First launch
+
+The first `rootout` opens a short setup screen: pick a free local model
+through Ollama, paste a Claude or OpenAI API key (checked with one free
+request, then stored in the macOS Keychain), or choose "Not now". AI is
+optional: without it, scans still score extensions with the built-in rules;
+with it, `l` on an extension in the scan screen asks the model whether to
+keep or uninstall it. The home screen always shows the current AI status,
+and `rootout setup` reopens the screen.
 
 Nothing is uninstalled until you type `delete`. In every screen `?` lists the
 keys; in the scan screen `m` picks a local model without leaving the scan.

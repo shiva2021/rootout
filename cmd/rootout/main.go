@@ -68,7 +68,7 @@ Getting started
   rootout doctor                 check what rootout can use on this Mac
   rootout                        open the home screen
   rootout scan                   score your editor extensions
-  rootout config models --pick   choose a local AI model that fits this Mac
+  rootout setup                  choose an AI model for recommendations (optional)
   rootout guide                  a step-by-step tour`,
 		Example: `  rootout                               # open the home screen
   rootout remove Spotify --dry-run      # list what removing Spotify would touch
@@ -102,6 +102,7 @@ Getting started
 		newDoctorCmd(&g),
 		newOrphansCmd(&g),
 		newGuideCmd(&g),
+		newSetupCmd(&g),
 	)
 
 	root.SetArgs(args)
@@ -118,13 +119,17 @@ Getting started
 	return exitError
 }
 
-// firstRunHint points a new user at the guide, once. It runs only on a
-// terminal without --json, skips the commands that are themselves help, and
-// creates the config directory so the hint does not repeat.
+// firstRunHint points a new user at setup and the guide, once. It runs only
+// on a terminal without --json, skips the bare command (the setup screen
+// covers it) and the commands that are themselves help, and creates the
+// config directory so the hint does not repeat.
 func firstRunHint(cmd *cobra.Command, g *globalFlags) {
+	if cmd.Parent() == nil {
+		return // bare rootout: the setup screen covers the first run
+	}
 	for c := cmd; c != nil; c = c.Parent() {
 		switch c.Name() {
-		case "guide", "help", "completion", cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
+		case "guide", "help", "setup", "completion", cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
 			return
 		}
 	}
@@ -139,7 +144,7 @@ func firstRunHint(cmd *cobra.Command, g *globalFlags) {
 	if _, err := os.Stat(dir); err == nil {
 		return
 	}
-	fmt.Fprintln(os.Stderr, "New here? rootout guide walks you through it.")
+	fmt.Fprintln(os.Stderr, "New here? rootout setup adds an optional AI second opinion; rootout guide walks you through everything.")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		slog.Debug("first-run hint: create config dir", "dir", dir, "err", err)
 	}

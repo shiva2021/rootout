@@ -23,9 +23,10 @@ internal/
   config/    ~/.config/rootout/config.toml: provider, model, defaults (never secrets)
   progress/  Reporter (Start/Step/Done), Term renderer for stderr, Recorder for tests
   output/    human table + JSON renderers shared by subcommands
-  tui/       Bubble Tea models: home screen (action rows + flash of the last outcome), app picker (loads inside the
-             program), removal confirm (typed delete, groups), scan results (Assessor header, embedded model picker),
-             model picker; shared typedConfirm, ? overlay, bar; ErrQuit (ctrl+x/ctrl+c) ends everything
+  tui/       Bubble Tea models: home screen (AI status line, action rows + flash of the last outcome), setup screen
+             (first run and `rootout setup`: Ollama picker embedded, hidden key input, live key check; never persists),
+             app picker (loads inside the program), removal confirm (typed delete, groups), scan results (Assessor
+             header, embedded model picker), model picker; shared typedConfirm, ? overlay, bar; ErrQuit ends everything
   testutil/  FakeHome(t, spec), RequireSandbox(t, env)
 ```
 
