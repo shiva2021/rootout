@@ -61,7 +61,8 @@ func runTUI(ctx context.Context, g *globalFlags) error {
 			fmt.Fprintln(os.Stderr, "rootout:", err)
 			flash = errorFlash(err)
 		}
-		if a == tui.ActionSetup {
+		// Setup and the scan screen's m key can change the saved model.
+		if a == tui.ActionSetup || a == tui.ActionScan {
 			ai = currentAIStatus()
 		}
 	}

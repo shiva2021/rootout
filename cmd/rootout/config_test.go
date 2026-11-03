@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -10,8 +11,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shiva2021/rootout/internal/config"
+	"github.com/shiva2021/rootout/internal/llm"
 	"github.com/shiva2021/rootout/internal/llm/ollama"
 )
 
@@ -118,4 +121,38 @@ func TestRemoveModel(t *testing.T) {
 			t.Fatalf("err = %v", err)
 		}
 	})
+}
+
+func TestPrintHostedModels(t *testing.T) {
+	models := []llm.ModelInfo{
+		{ID: "claude-new", DisplayName: "Claude New", Created: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)},
+		{ID: "claude-sonnet-5-5", DisplayName: "Claude Sonnet 5.5", Created: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{ID: "claude-old", DisplayName: "Claude Old", Created: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), Deprecated: true},
+	}
+	var out bytes.Buffer
+	if err := printHostedModels(&out, false, "anthropic", "claude-sonnet-5-5", models); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	for _, want := range []string{"Claude models", "MODEL", "NAME", "RELEASED", "claude-new", "2026-06-01", "claude-sonnet-5-5 (current)", "claude-old", "deprecated", "config set llm.anthropic.model"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("text missing %q:\n%s", want, text)
+		}
+	}
+
+	out.Reset()
+	if err := printHostedModels(&out, true, "openai", "gpt-5.2", models[:1]); err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Provider string          `json:"provider"`
+		Current  string          `json:"current"`
+		Models   []llm.ModelInfo `json:"models"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("json: %v\n%s", err, out.String())
+	}
+	if got.Provider != "openai" || got.Current != "gpt-5.2" || len(got.Models) != 1 || got.Models[0].ID != "claude-new" {
+		t.Errorf("json = %+v", got)
+	}
 }

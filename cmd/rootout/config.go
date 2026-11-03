@@ -15,6 +15,7 @@ import (
 	"github.com/shiva2021/rootout/internal/config"
 	"github.com/shiva2021/rootout/internal/fsx"
 	"github.com/shiva2021/rootout/internal/keychain"
+	"github.com/shiva2021/rootout/internal/llm"
 	"github.com/shiva2021/rootout/internal/llm/ollama"
 	"github.com/shiva2021/rootout/internal/output"
 	"github.com/shiva2021/rootout/internal/run"
@@ -226,23 +227,37 @@ func configSetKey(provider string) error {
 
 func newModelsCmd(g *globalFlags) *cobra.Command {
 	var pick bool
+	var provider string
 	cmd := &cobra.Command{
 		Use:   "models",
-		Short: "List installed Ollama models and the ones recommended for this Mac",
-		Long: `Without --pick, print this Mac's chip and RAM, the Ollama models already
+		Short: "List the models you can use: Ollama on this Mac, or a hosted provider's",
+		Long: `Without flags, print this Mac's chip and RAM, the Ollama models already
 installed, and the models recommended for this hardware with their download
 size. With --pick, open the interactive picker, which can install Ollama,
 start it, download a model and make it the default. Nothing is installed or
 downloaded without your confirmation.
 
---json prints {ollama, version, hardware, current, installed, recommended}.
-"config models rm <model>" uninstalls a model.`,
-		Example: `  rootout config models             # what is installed and what would fit
-  rootout config models --pick      # choose, download and set the default
-  rootout config models rm llama3.2 # uninstall a model
+With --provider anthropic|openai, list the models that provider's saved API
+key can use (one free request, newest first); --pick then opens a picker
+that saves the choice to llm.<provider>.model and makes it the provider.
+
+--json prints {ollama, version, hardware, current, installed, recommended},
+or {provider, current, models} with --provider.
+"config models rm <model>" uninstalls an Ollama model.`,
+		Example: `  rootout config models                        # what is installed and what would fit
+  rootout config models --pick                 # choose, download and set the default
+  rootout config models --provider anthropic   # models your Claude key can use
+  rootout config models --provider openai --pick
+  rootout config models rm llama3.2            # uninstall a model
   rootout config models --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if provider != "" {
+				if err := checkHosted(provider); err != nil {
+					return err
+				}
+				return declinedOnQuit(hostedModels(cmd.Context(), g, provider, pick), "no model chosen")
+			}
 			if pick {
 				_, err := pickAndSaveModel(cmd.Context())
 				return declinedOnQuit(err, "no model chosen")
@@ -251,6 +266,7 @@ downloaded without your confirmation.
 		},
 	}
 	cmd.Flags().BoolVar(&pick, "pick", false, "open the interactive picker")
+	cmd.Flags().StringVar(&provider, "provider", "", "list a hosted provider's models instead: anthropic or openai")
 	cmd.AddCommand(newModelsRmCmd())
 	return cmd
 }
@@ -450,17 +466,99 @@ func modelDeps(ctx context.Context, c config.Config) (tui.ModelDeps, error) {
 }
 
 // saveOllamaModel makes model the default and Ollama the provider.
-func saveOllamaModel(model string) error {
+func saveOllamaModel(model string) error { return saveModel("ollama", model) }
+
+// saveModel makes model the default for provider and provider the one used
+// for assessments: llm.provider and llm.<provider>.model in the config file.
+func saveModel(provider, model string) error {
 	c, path, err := loadConfig()
 	if err != nil {
 		return err
 	}
-	c.LLM.Provider = "ollama"
-	c.LLM.Ollama.Model = model
+	switch provider {
+	case "ollama":
+		c.LLM.Ollama.Model = model
+	case "anthropic", "openai":
+		setHostedModel(&c, provider, model)
+	default:
+		return fmt.Errorf("config: unknown provider %q (anthropic, openai, ollama)", provider)
+	}
+	c.LLM.Provider = provider
 	if err := config.Save(path, c); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "using Ollama model %s for assessments\n", model)
+	fmt.Fprintf(os.Stderr, "using %s model %s for assessments\n", providerNames[provider], model)
+	return nil
+}
+
+// hostedModels lists (or, with pick, picks and saves) a hosted provider's
+// models using the saved key.
+func hostedModels(ctx context.Context, g *globalFlags, provider string, pick bool) error {
+	c, _, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	key, _, err := keychain.Resolve(keychain.New(), provider, os.Getenv)
+	if errors.Is(err, keychain.ErrNotFound) {
+		return &exitErr{code: exitBadInput, msg: fmt.Sprintf("no %s API key; run `rootout setup`", provider)}
+	}
+	if err != nil {
+		return err
+	}
+	models, err := hostedLister(provider, key)(ctx)
+	current := hostedModel(c, provider)
+	if err != nil {
+		if !pick {
+			return err
+		}
+		// The picker can still take a typed id.
+		fmt.Fprintln(os.Stderr, "rootout:", err)
+		models = nil
+	}
+	if !pick {
+		return printHostedModels(os.Stdout, g.json, provider, current, models)
+	}
+	model, ok, err := tui.PickHostedModel(ctx, provider, models, current)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return &exitErr{code: exitDeclined, msg: "no model chosen"}
+	}
+	return saveModel(provider, model)
+}
+
+// printHostedModels prints the hosted model grid, or the JSON form.
+func printHostedModels(out io.Writer, asJSON bool, provider, current string, models []llm.ModelInfo) error {
+	if asJSON {
+		if models == nil {
+			models = []llm.ModelInfo{}
+		}
+		return output.New(out, true).Emit(map[string]any{"provider": provider, "current": current, "models": models})
+	}
+	_, _ = fmt.Fprintf(out, "%s models your key can use (newest first)\n", providerNames[provider])
+	_, _ = fmt.Fprintf(out, "  %-34s %-28s %s\n", "MODEL", "NAME", "RELEASED")
+	listed := false
+	for _, m := range models {
+		name := m.ID
+		if m.ID == current {
+			name += " (current)"
+			listed = true
+		}
+		released := ""
+		if !m.Created.IsZero() {
+			released = m.Created.Format("2006-01-02")
+		}
+		note := ""
+		if m.Deprecated {
+			note = "  deprecated"
+		}
+		_, _ = fmt.Fprintf(out, "  %-34s %-28s %s%s\n", output.Truncate(name, 34), output.Truncate(m.DisplayName, 28), released, note)
+	}
+	if !listed && current != "" {
+		_, _ = fmt.Fprintf(out, "  %-34s %-28s\n", output.Truncate(current+" (current)", 34), "not in the list")
+	}
+	_, _ = fmt.Fprintf(out, "\nChange it with: rootout config models --provider %s --pick, or rootout config set llm.%s.model <id>\n", provider, provider)
 	return nil
 }
 

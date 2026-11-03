@@ -22,18 +22,20 @@ import (
 const assessTimeout = 3 * time.Minute
 
 // buildProvider resolves provider and model from flags, then config, and
-// fetches the API key. It returns (nil, nil) with a printed hint when the
-// assessment cannot run, so the scan still completes with heuristics only.
-// When provider is ollama with no model and the run is interactive, the
-// picker opens (and saves its choice).
-func buildProvider(ctx context.Context, c config.Config, provider, model string, interactive bool) (llm.Provider, error) {
+// fetches the API key. It returns (nil, "", nil) with a printed hint when
+// the assessment cannot run, so the scan still completes with heuristics
+// only. When provider is ollama with no model and the run is interactive,
+// the picker opens (and saves its choice). The key is returned alongside
+// so the scan screen can list the provider's models; it never reaches a
+// struct the TUI keeps.
+func buildProvider(ctx context.Context, c config.Config, provider, model string, interactive bool) (llm.Provider, string, error) {
 	if provider == "" {
 		provider = c.LLM.Provider
 	}
 	switch provider {
 	case "":
-		fmt.Fprintln(os.Stderr, "rootout: no AI provider configured; run `rootout config set llm.provider <anthropic|openai|ollama>` or press m in the scan screen (continuing with heuristics only)")
-		return nil, nil
+		fmt.Fprintln(os.Stderr, "rootout: no AI provider configured; run `rootout setup` or press m in the scan screen (continuing with heuristics only)")
+		return nil, "", nil
 	case "ollama":
 		if model == "" {
 			model = c.LLM.Ollama.Model
@@ -41,33 +43,45 @@ func buildProvider(ctx context.Context, c config.Config, provider, model string,
 		if model == "" {
 			if !interactive {
 				fmt.Fprintln(os.Stderr, "rootout: no Ollama model selected; run `rootout config models --pick` (continuing with heuristics only)")
-				return nil, nil
+				return nil, "", nil
 			}
 			m, err := pickAndSaveModel(ctx)
 			if err != nil {
-				return nil, err
+				return nil, "", err
 			}
 			model = m
 		}
-		return providers.New("ollama", model, "", c.LLM.Ollama.BaseURL)
+		p, err := providers.New("ollama", model, "", c.LLM.Ollama.BaseURL)
+		return p, "", err
 	case "anthropic", "openai":
 		if model == "" {
-			model = c.LLM.Anthropic.Model
-			if provider == "openai" {
-				model = c.LLM.OpenAI.Model
-			}
+			model = hostedModel(c, provider)
 		}
 		key, _, err := keychain.Resolve(keychain.New(), provider, os.Getenv)
 		if errors.Is(err, keychain.ErrNotFound) {
-			fmt.Fprintf(os.Stderr, "rootout: no %s API key; run `rootout config set-key %s` (continuing with heuristics only)\n", provider, provider)
-			return nil, nil
+			fmt.Fprintf(os.Stderr, "rootout: no %s API key; run `rootout setup` (continuing with heuristics only)\n", provider)
+			return nil, "", nil
 		}
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
-		return providers.New(provider, model, key, "")
+		p, err := providers.New(provider, model, key, "")
+		return p, key, err
 	default:
-		return nil, &exitErr{code: exitBadInput, msg: fmt.Sprintf("unknown provider %q (anthropic, openai, ollama)", provider)}
+		return nil, "", &exitErr{code: exitBadInput, msg: fmt.Sprintf("unknown provider %q (anthropic, openai, ollama)", provider)}
+	}
+}
+
+// hostedLister lists a hosted provider's models with key; nil when there is
+// no key. The closure holds the key, nothing else does.
+func hostedLister(provider, key string) func(context.Context) ([]llm.ModelInfo, error) {
+	if key == "" {
+		return nil
+	}
+	return func(ctx context.Context) ([]llm.ModelInfo, error) {
+		ctx, cancel := context.WithTimeout(ctx, verifyTimeout)
+		defer cancel()
+		return providers.ListModels(ctx, provider, key)
 	}
 }
 
@@ -88,33 +102,42 @@ func assessFunc(p llm.Provider) tui.AssessFunc {
 }
 
 // buildAssessor is what the scan screen gets: the current provider (if any),
-// its label, and the hooks that let the user pick a local model in place.
+// its label, and the hooks that let the user pick a model in place: the
+// hosted provider's list when a key is at hand, the Ollama picker otherwise.
 func buildAssessor(ctx context.Context, c config.Config, provider, model string, interactive bool) (tui.Assessor, error) {
-	p, err := buildProvider(ctx, c, provider, model, interactive)
+	p, key, err := buildProvider(ctx, c, provider, model, interactive)
 	if err != nil {
 		return tui.Assessor{}, err
 	}
 	a := tui.Assessor{Assess: assessFunc(p)}
 	if p != nil {
-		a.Label = p.Name() + " · " + p.Model()
+		a.Provider, a.Label = p.Name(), p.Name()+" · "+p.Model()
 	}
-	if interactive {
-		deps, err := modelDeps(ctx, c)
-		if err == nil {
-			a.Models = &deps
-		} else {
-			fmt.Fprintln(os.Stderr, "rootout: local model picking unavailable:", err)
+	if !interactive {
+		return a, nil
+	}
+	a.HostedModels = hostedLister(a.Provider, key)
+	deps, err := modelDeps(ctx, c)
+	if err == nil {
+		a.Models = &deps
+	} else {
+		fmt.Fprintln(os.Stderr, "rootout: local model picking unavailable:", err)
+	}
+	a.OnModel = func(_ context.Context, provider, m string) (tui.Assessor, error) {
+		if err := saveModel(provider, m); err != nil {
+			return tui.Assessor{}, err
 		}
-		a.OnModel = func(ctx context.Context, m string) (tui.Assessor, error) {
-			if err := saveOllamaModel(m); err != nil {
-				return tui.Assessor{}, err
-			}
-			np, err := providers.New("ollama", m, "", c.LLM.Ollama.BaseURL)
-			if err != nil {
-				return tui.Assessor{}, err
-			}
-			return tui.Assessor{Label: "ollama · " + m, Assess: assessFunc(np), Models: a.Models}, nil
+		np, err := providers.New(provider, m, key, c.LLM.Ollama.BaseURL)
+		if err != nil {
+			return tui.Assessor{}, err
 		}
+		return tui.Assessor{
+			Provider:     provider,
+			Label:        provider + " · " + m,
+			Assess:       assessFunc(np),
+			Models:       a.Models,
+			HostedModels: hostedLister(provider, key),
+		}, nil
 	}
 	return a, nil
 }
