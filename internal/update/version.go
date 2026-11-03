@@ -4,9 +4,14 @@
 package update
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 )
+
+// ReleasesPage is where a user without Homebrew gets a newer release; it
+// names the same repository as DefaultURL.
+const ReleasesPage = "https://github.com/shiva2021/rootout/releases"
 
 // Installed parses the leading vMAJOR.MINOR.PATCH of a version string as
 // the Makefile and GoReleaser produce it: "v0.7.0", "v0.7.0-3-gabc-dirty"
@@ -50,4 +55,16 @@ func Newer(latest, installed string) bool {
 		}
 	}
 	return false
+}
+
+// Canonical returns the "vMAJOR.MINOR.PATCH" form of a version or tag, or
+// "" when Installed cannot parse it. Screens print this rather than a raw
+// tag, so whatever a release was named cannot carry wide or control
+// characters onto a fixed-width line.
+func Canonical(version string) string {
+	v, ok := Installed(version)
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("v%d.%d.%d", v[0], v[1], v[2])
 }

@@ -1,6 +1,9 @@
 package update
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestInstalled(t *testing.T) {
 	tests := []struct {
@@ -49,5 +52,29 @@ func TestNewer(t *testing.T) {
 				t.Errorf("Newer(%q, %q) = %v, want %v", tt.latest, tt.installed, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCanonical(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"v0.8.0", "v0.8.0"},
+		{"v0.8.0-3-gabc1234-dirty", "v0.8.0"},
+		{"v9.9.9-日本語\x1b[31m", "v9.9.9"},
+		{"0.8.0", "v0.8.0"},
+		{"dev", ""},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			if got := Canonical(tt.in); got != tt.want {
+				t.Errorf("Canonical(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReleasesPageSharesHostWithDefaultURL(t *testing.T) {
+	if !strings.HasPrefix(ReleasesPage, "https://github.com/shiva2021/rootout/") || !strings.Contains(DefaultURL, "/repos/shiva2021/rootout/") {
+		t.Errorf("ReleasesPage %q and DefaultURL %q name different repos", ReleasesPage, DefaultURL)
 	}
 }

@@ -84,3 +84,22 @@ func TestUpdateCheck(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateCheckRendersParsedTagAndLocalDate(t *testing.T) {
+	oldLocal := time.Local
+	time.Local = time.FixedZone("AEDT", 11*3600)
+	t.Cleanup(func() { time.Local = oldLocal })
+	cl, _ := fakeGitHub(t, 200, `{"tag_name":"v9.9.9-日本語\u001b[31m","html_url":"https://example.test/r","published_at":"2026-11-04T23:00:00Z"}`)
+	c := updateCheck(context.Background(), cl, true, "v0.8.0", filepath.Join(t.TempDir(), "update.json"), "")
+	if want := "v9.9.9 available (installed v0.8.0, released 2026-11-05)"; c.Detail != want {
+		t.Errorf("Detail = %q, want %q", c.Detail, want)
+	}
+}
+
+func TestUpdateCheckUnreadableTag(t *testing.T) {
+	cl, _ := fakeGitHub(t, 200, `{"tag_name":"latest","html_url":"https://example.test/r"}`)
+	c := updateCheck(context.Background(), cl, true, "v0.8.0", filepath.Join(t.TempDir(), "update.json"), "")
+	if !c.OK || !strings.Contains(c.Detail, "could not read the latest release tag") || strings.Contains(c.Detail, "latest)") {
+		t.Errorf("check = %+v; want OK with 'could not read the latest release tag'", c)
+	}
+}

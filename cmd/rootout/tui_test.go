@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -235,6 +236,30 @@ func TestUpdateNoticeHintWithoutBrew(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "update.json")
 	got := updateNotice(context.Background(), cl, true, "v0.7.0", path, "/Users/me/.local/bin/rootout", time.Now)()
 	if want := "v0.8.0 available · github.com/shiva2021/rootout/releases"; got != want {
+		t.Errorf("notice = %q, want %q", got, want)
+	}
+}
+
+func TestUpdateNoticeCancelledContextIsNotRecorded(t *testing.T) {
+	cl, hits := fakeGitHub(t, 200, releaseV080)
+	path := filepath.Join(t.TempDir(), "update.json")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got := updateNotice(ctx, cl, true, "v0.7.0", path, "", time.Now)(); got != "" {
+		t.Errorf("notice = %q, want empty", got)
+	}
+	if _, ok := update.ReadRecord(path, time.Now()); ok {
+		t.Error("a cancelled context must not be recorded as a check")
+	}
+	if *hits != 0 {
+		t.Errorf("GitHub hits = %d, want 0", *hits)
+	}
+}
+
+func TestUpdateNoticeRendersParsedTag(t *testing.T) {
+	cl, _ := fakeGitHub(t, 200, `{"tag_name":"v9.9.9-日本語\u001b[31m","html_url":"https://example.test/r"}`)
+	got := updateNotice(context.Background(), cl, true, "v0.8.0", filepath.Join(t.TempDir(), "update.json"), "", time.Now)()
+	if want := "v9.9.9 available · " + strings.TrimPrefix(update.ReleasesPage, "https://"); got != want {
 		t.Errorf("notice = %q, want %q", got, want)
 	}
 }

@@ -90,7 +90,10 @@ func currentUpdateNotice(ctx context.Context, env fsx.Env) func() string {
 // "". The answer is computed once (the home screen is rebuilt after every
 // action) from the daily record when it is fresh, otherwise from one GitHub
 // request with a 5 s timeout; the answer, or the failure, is recorded so
-// GitHub is asked at most once a day. Errors never reach the screen.
+// GitHub is asked at most once a day. A fetch cut short because ctx itself
+// was cancelled is not a check and is not recorded. When the record cannot
+// be written (read-only cache directory) every launch fetches; that is the
+// one case the once-a-day rule does not cover. Errors never reach the screen.
 func updateNotice(ctx context.Context, cl *update.Client, enabled bool, installed, recordPath, exe string, now func() time.Time) func() string {
 	var once sync.Once
 	var text string
@@ -109,6 +112,9 @@ func updateNotice(ctx context.Context, cl *update.Client, enabled bool, installe
 				var err error
 				if rel, err = cl.Latest(fctx); err != nil {
 					slog.Debug("update check", "err", err)
+					if ctx.Err() != nil {
+						return // rootout is shutting down, not GitHub failing
+					}
 					rel = update.Release{}
 				}
 				if err := update.WriteRecord(recordPath, rel, now()); err != nil {
@@ -116,7 +122,7 @@ func updateNotice(ctx context.Context, cl *update.Client, enabled bool, installe
 				}
 			}
 			if rel.Tag != "" && update.Newer(rel.Tag, installed) {
-				text = rel.Tag + " available · " + noticeHint(exe)
+				text = update.Canonical(rel.Tag) + " available · " + noticeHint(exe)
 			}
 		})
 		return text
@@ -128,7 +134,7 @@ func noticeHint(exe string) string {
 	if upgradeHint(exe, "") == brewUpgrade {
 		return brewUpgrade
 	}
-	return "github.com/shiva2021/rootout/releases"
+	return strings.TrimPrefix(update.ReleasesPage, "https://")
 }
 
 // runAction runs one home-screen action and returns what to show on the flash.

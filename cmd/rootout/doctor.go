@@ -224,14 +224,20 @@ func updateCheck(ctx context.Context, cl *update.Client, enabled bool, installed
 			slog.Debug("doctor: update record", "path", recordPath, "err", err)
 		}
 	}
+	// Screens print the parsed version, never the raw tag.
+	latest := update.Canonical(rel.Tag)
+	if latest == "" {
+		row.Detail = "could not read the latest release tag"
+		return row
+	}
 	if !update.Newer(rel.Tag, installed) {
-		row.Detail = "up to date (latest " + rel.Tag + ")"
+		row.Detail = "up to date (latest " + latest + ")"
 		return row
 	}
 	row.OK = false
-	row.Detail = fmt.Sprintf("%s available (installed %s", rel.Tag, installed)
+	row.Detail = fmt.Sprintf("%s available (installed %s", latest, installed)
 	if !rel.PublishedAt.IsZero() {
-		row.Detail += ", released " + rel.PublishedAt.Format("2006-01-02")
+		row.Detail += ", released " + rel.PublishedAt.Local().Format("2006-01-02")
 	}
 	row.Detail += ")"
 	row.Fix = upgradeHint(exe, rel.URL)
