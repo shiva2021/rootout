@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/shiva2021/rootout/internal/heur"
@@ -34,6 +35,23 @@ func TestNewNoKey(t *testing.T) {
 		}
 		if _, err := p.Assess(context.Background(), heur.Report{}); !errors.Is(err, llm.ErrNoKey) {
 			t.Errorf("%s: err = %v, want ErrNoKey", name, err)
+		}
+	}
+}
+
+func TestVerifyUnknownProvider(t *testing.T) {
+	for _, name := range []string{"ollama", "gemini", ""} {
+		if err := Verify(context.Background(), name, "k"); err == nil {
+			t.Errorf("%q: want error", name)
+		}
+	}
+}
+
+func TestVerifyDispatches(t *testing.T) {
+	// A hosted provider with an empty key fails before any request is made.
+	for _, name := range []string{"anthropic", "openai"} {
+		if err := Verify(context.Background(), name, ""); err == nil || !strings.Contains(err.Error(), "API key") {
+			t.Errorf("%s: err = %v, want API key error", name, err)
 		}
 	}
 }

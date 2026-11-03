@@ -3,6 +3,7 @@
 package providers
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/shiva2021/rootout/internal/llm"
@@ -25,4 +26,16 @@ func New(provider, model, key, ollamaURL string) (llm.Provider, error) {
 		return ollamachat.New(ollamaURL, model, nil), nil
 	}
 	return nil, fmt.Errorf("llm: unknown provider %q (want anthropic, openai or ollama)", provider)
+}
+
+// Verify checks an API key for a hosted provider ("anthropic" | "openai")
+// with one free request. Ollama needs no key and is an error here.
+func Verify(ctx context.Context, provider, key string) error {
+	switch provider {
+	case "anthropic":
+		return anthropic.Verify(ctx, key)
+	case "openai":
+		return openai.Verify(ctx, key)
+	}
+	return fmt.Errorf("llm: %q takes no API key (want anthropic or openai)", provider)
 }
