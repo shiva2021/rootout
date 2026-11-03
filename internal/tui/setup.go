@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/shiva2021/rootout/internal/llm"
 	"github.com/shiva2021/rootout/internal/output"
 )
 
@@ -38,19 +39,23 @@ var setupKeys = []keyHelp{
 type SetupDeps struct {
 	Models    *ModelDeps // nil = local model picking unavailable
 	ModelsErr string     // why, shown on the Ollama row
-	// Verify checks a hosted provider's key with one request. An empty key
-	// means "keep the stored one": the caller resolves and checks that.
-	Verify func(ctx context.Context, provider, key string) error
+	// Verify checks a hosted provider's key with one request, the models
+	// list, and returns it so the model step needs no second call. An empty
+	// key means "keep the stored one": the caller resolves and checks that.
+	Verify func(ctx context.Context, provider, key string) ([]llm.ModelInfo, error)
 	// Existing reports a stored key for provider as its masked form and
 	// source ("keychain" or "env"); masked "" with a nil error means none.
 	Existing func(provider string) (masked, source string, err error)
 	Current  string // current Ollama model, pre-selected in the picker
+	// CurrentHosted is the configured model for a hosted provider,
+	// pre-selected in its picker; nil means none known.
+	CurrentHosted func(provider string) string
 }
 
 // SetupResult is what the user chose.
 type SetupResult struct {
 	Provider    string // "" when skipped
-	Model       string // Ollama model
+	Model       string // model for Provider; "" keeps the configured one
 	Key         string // hosted key; "" keeps the stored one
 	KeyVerified bool
 	Warning     string // the check error when the key was saved anyway
@@ -76,7 +81,8 @@ type setupStep int
 const (
 	stepMenu setupStep = iota
 	stepKey
-	stepPicker
+	stepPicker // Ollama picker over the menu
+	stepModel  // hosted picker after a verified key
 )
 
 type setupRow struct {
@@ -98,10 +104,12 @@ var hosted = map[string]struct{ name, site, envVar string }{
 	"openai":    {"OpenAI", "platform.openai.com", "OPENAI_API_KEY"},
 }
 
-// verifiedMsg is the outcome of a key check; id matches the check it belongs to.
+// verifiedMsg is the outcome of a key check, with the models the key can
+// use; id matches the check it belongs to.
 type verifiedMsg struct {
-	id  int
-	err error
+	id     int
+	models []llm.ModelInfo
+	err    error
 }
 
 // Setup is the setup screen model. It implements tea.Model.
@@ -127,7 +135,7 @@ type Setup struct {
 	verifyID   int
 	cancelFunc context.CancelFunc
 
-	picker *ModelPicker
+	picker embeddedPicker
 
 	result  SetupResult
 	ok      bool
@@ -171,7 +179,7 @@ func (s *Setup) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		s.checking = false
 		s.cancelFunc = nil
 		if msg.err == nil {
-			return s, s.finish(SetupResult{Provider: s.provider, Key: s.typedKey(), KeyVerified: true})
+			return s, s.openHosted(msg.models)
 		}
 		s.failed = true
 		s.hint = firstLine(msg.err.Error())
@@ -335,7 +343,8 @@ func (s *Setup) startCheck() tea.Cmd {
 	s.cancelFunc = cancel
 	return tea.Batch(func() tea.Msg {
 		defer cancel()
-		return verifiedMsg{id: id, err: verify(ctx, provider, key)}
+		models, err := verify(ctx, provider, key)
+		return verifiedMsg{id: id, models: models, err: err}
 	}, s.spin.Tick)
 }
 
@@ -360,28 +369,53 @@ func (s *Setup) openPicker() tea.Cmd {
 	return p.Init()
 }
 
+// openHosted embeds the hosted model picker over the verified key screen.
+func (s *Setup) openHosted(models []llm.ModelInfo) tea.Cmd {
+	current := ""
+	if s.deps.CurrentHosted != nil {
+		current = s.deps.CurrentHosted(s.provider)
+	}
+	p := NewHostedPickerWith(models, s.provider, current)
+	p.setEmbedded(true)
+	p.Update(tea.WindowSizeMsg{Width: s.width, Height: s.height})
+	s.picker = p
+	s.step = stepModel
+	return p.Init()
+}
+
 // delegate forwards msg to the embedded picker and, once it has finished,
-// closes it: a chosen model ends the setup, otherwise back to the menu.
+// closes it: a chosen model ends the setup; otherwise the Ollama picker
+// goes back to the menu and the hosted one to the key screen.
 func (s *Setup) delegate(msg tea.Msg) tea.Cmd {
 	_, cmd := s.picker.Update(msg)
 	model, chosen, finished := s.picker.done()
 	if !finished {
 		return cmd
 	}
+	hosted := s.step == stepModel
 	s.closePicker()
 	if !chosen {
+		if hosted {
+			return tea.Batch(cmd, s.input.Focus())
+		}
 		return cmd
+	}
+	if hosted {
+		return tea.Batch(cmd, s.finish(SetupResult{Provider: s.provider, Key: s.typedKey(), KeyVerified: true, Model: model}))
 	}
 	return tea.Batch(cmd, s.finish(SetupResult{Provider: "ollama", Model: model}))
 }
 
 func (s *Setup) closePicker() {
 	if s.picker != nil {
-		s.picker.cancelPull()
+		s.picker.cancel()
 		s.picker = nil
 	}
-	if s.step == stepPicker {
+	switch s.step {
+	case stepPicker:
 		s.step = stepMenu
+	case stepModel:
+		s.step = stepKey
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"github.com/shiva2021/rootout/internal/config"
 	"github.com/shiva2021/rootout/internal/fsx"
 	"github.com/shiva2021/rootout/internal/keychain"
+	"github.com/shiva2021/rootout/internal/llm"
 	"github.com/shiva2021/rootout/internal/llm/providers"
 	"github.com/shiva2021/rootout/internal/tui"
 )
@@ -94,9 +95,10 @@ func runSetup(ctx context.Context) (tui.Flash, error) {
 // setupDeps wires the setup screen to Ollama, the key check and the Keychain.
 func setupDeps(ctx context.Context, c config.Config, store keychain.Store) tui.SetupDeps {
 	d := tui.SetupDeps{
-		Verify:   keyVerifier(store, os.Getenv, providers.Verify),
-		Existing: existingKey(store, os.Getenv),
-		Current:  c.LLM.Ollama.Model,
+		Verify:        keyVerifier(store, os.Getenv, providers.ListModels),
+		Existing:      existingKey(store, os.Getenv),
+		Current:       c.LLM.Ollama.Model,
+		CurrentHosted: func(provider string) string { return hostedModel(c, provider) },
 	}
 	if deps, err := modelDeps(ctx, c); err == nil {
 		d.Models = &deps
@@ -107,20 +109,21 @@ func setupDeps(ctx context.Context, c config.Config, store keychain.Store) tui.S
 }
 
 // keyVerifier returns the screen's Verify: an empty key means "keep the
-// stored one", resolved from the environment or the Keychain. Each check
-// has its own timeout.
-func keyVerifier(store keychain.Store, getenv func(string) string, verify func(ctx context.Context, provider, key string) error) func(ctx context.Context, provider, key string) error {
-	return func(ctx context.Context, provider, key string) error {
+// stored one", resolved from the environment or the Keychain. The check is
+// the models list, so its result feeds the model step. Each check has its
+// own timeout.
+func keyVerifier(store keychain.Store, getenv func(string) string, list func(ctx context.Context, provider, key string) ([]llm.ModelInfo, error)) func(ctx context.Context, provider, key string) ([]llm.ModelInfo, error) {
+	return func(ctx context.Context, provider, key string) ([]llm.ModelInfo, error) {
 		if key == "" {
 			stored, _, err := keychain.Resolve(store, provider, getenv)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			key = stored
 		}
 		ctx, cancel := context.WithTimeout(ctx, verifyTimeout)
 		defer cancel()
-		return verify(ctx, provider, key)
+		return list(ctx, provider, key)
 	}
 }
 
@@ -164,8 +167,11 @@ func applySetup(res tui.SetupResult, store keychain.Store, path string) (string,
 		}
 	}
 	c.LLM.Provider = res.Provider
-	if res.Provider == "ollama" {
+	switch {
+	case res.Provider == "ollama":
 		c.LLM.Ollama.Model = res.Model
+	case res.Model != "":
+		setHostedModel(&c, res.Provider, res.Model)
 	}
 	if err := config.Save(path, c); err != nil {
 		return "", err
@@ -179,15 +185,31 @@ func applySetup(res tui.SetupResult, store keychain.Store, path string) (string,
 
 // configuredModel is the model the configured provider would use.
 func configuredModel(c config.Config) string {
-	switch c.LLM.Provider {
+	if c.LLM.Provider == "ollama" {
+		return c.LLM.Ollama.Model
+	}
+	return hostedModel(c, c.LLM.Provider)
+}
+
+// hostedModel is the configured model for a hosted provider, "" otherwise.
+func hostedModel(c config.Config, provider string) string {
+	switch provider {
 	case "anthropic":
 		return c.LLM.Anthropic.Model
 	case "openai":
 		return c.LLM.OpenAI.Model
-	case "ollama":
-		return c.LLM.Ollama.Model
 	}
 	return ""
+}
+
+// setHostedModel stores model for a hosted provider; other names are ignored.
+func setHostedModel(c *config.Config, provider, model string) {
+	switch provider {
+	case "anthropic":
+		c.LLM.Anthropic.Model = model
+	case "openai":
+		c.LLM.OpenAI.Model = model
+	}
 }
 
 // aiStatus is the home screen's one-line AI status. It reads the Keychain

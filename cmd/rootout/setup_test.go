@@ -11,6 +11,7 @@ import (
 
 	"github.com/shiva2021/rootout/internal/config"
 	"github.com/shiva2021/rootout/internal/keychain"
+	"github.com/shiva2021/rootout/internal/llm"
 	"github.com/shiva2021/rootout/internal/tui"
 )
 
@@ -136,6 +137,10 @@ func TestApplySetupHosted(t *testing.T) {
 			map[string]string{"openai": "sk-bad"}, "AI: OpenAI · gpt-5.2 · key not verified: openai: the API key was rejected (401)"},
 		{"keep stored key", tui.SetupResult{Provider: "anthropic", KeyVerified: true}, map[string]string{"anthropic": "sk-ant-old"},
 			map[string]string{"anthropic": "sk-ant-old"}, "AI: Claude · claude-sonnet-5-5"},
+		{"claude with model", tui.SetupResult{Provider: "anthropic", Key: "sk-ant-new", KeyVerified: true, Model: "claude-opus-5-5"}, nil,
+			map[string]string{"anthropic": "sk-ant-new"}, "AI: Claude · claude-opus-5-5"},
+		{"openai with model", tui.SetupResult{Provider: "openai", KeyVerified: true, Model: "o4-mini"}, map[string]string{"openai": "sk-old"},
+			map[string]string{"openai": "sk-old"}, "AI: OpenAI · o4-mini"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -155,15 +160,29 @@ func TestApplySetupHosted(t *testing.T) {
 			if err != nil || c.LLM.Provider != tt.res.Provider {
 				t.Errorf("provider = %q, %v; want %q", c.LLM.Provider, err, tt.res.Provider)
 			}
+			if tt.res.Model != "" && configuredModel(c) != tt.res.Model {
+				t.Errorf("configured model = %q, want %q", configuredModel(c), tt.res.Model)
+			}
+			def := config.Default()
+			if tt.res.Model == "" && (c.LLM.Anthropic.Model != def.LLM.Anthropic.Model || c.LLM.OpenAI.Model != def.LLM.OpenAI.Model) {
+				t.Errorf("no model chosen: defaults should be kept, got %+v", c.LLM)
+			}
+			if tt.res.Provider == "anthropic" && c.LLM.OpenAI.Model != def.LLM.OpenAI.Model {
+				t.Errorf("openai model changed: %+v", c.LLM)
+			}
+			if tt.res.Provider == "openai" && c.LLM.Anthropic.Model != def.LLM.Anthropic.Model {
+				t.Errorf("anthropic model changed: %+v", c.LLM)
+			}
 		})
 	}
 }
 
 func TestKeyVerifierResolvesStoredKey(t *testing.T) {
 	var got [][2]string
-	verify := func(_ context.Context, provider, key string) error {
+	models := []llm.ModelInfo{{ID: "claude-x"}}
+	list := func(_ context.Context, provider, key string) ([]llm.ModelInfo, error) {
 		got = append(got, [2]string{provider, key})
-		return nil
+		return models, nil
 	}
 	store := &mapStore{keys: map[string]string{"anthropic": "sk-ant-stored"}}
 	env := func(name string) string {
@@ -172,26 +191,26 @@ func TestKeyVerifierResolvesStoredKey(t *testing.T) {
 		}
 		return ""
 	}
-	v := keyVerifier(store, env, verify)
+	v := keyVerifier(store, env, list)
 	ctx := context.Background()
-	if err := v(ctx, "anthropic", "sk-typed"); err != nil {
+	if ms, err := v(ctx, "anthropic", "sk-typed"); err != nil || !reflect.DeepEqual(ms, models) {
+		t.Fatalf("models = %v, %v", ms, err)
+	}
+	if _, err := v(ctx, "anthropic", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := v(ctx, "anthropic", ""); err != nil {
-		t.Fatal(err)
-	}
-	if err := v(ctx, "openai", ""); err != nil {
+	if _, err := v(ctx, "openai", ""); err != nil {
 		t.Fatal(err)
 	}
 	want := [][2]string{{"anthropic", "sk-typed"}, {"anthropic", "sk-ant-stored"}, {"openai", "sk-env"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("verify calls = %v, want %v", got, want)
 	}
-	if err := v(ctx, "openai", ""); err != nil {
+	if _, err := v(ctx, "openai", ""); err != nil {
 		t.Fatal(err)
 	}
 	store.keys = nil
-	if err := v(ctx, "anthropic", ""); err == nil || !errors.Is(err, keychain.ErrNotFound) {
+	if _, err := v(ctx, "anthropic", ""); err == nil || !errors.Is(err, keychain.ErrNotFound) {
 		t.Errorf("no stored key: err = %v, want ErrNotFound", err)
 	}
 }
