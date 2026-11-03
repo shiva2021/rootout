@@ -44,7 +44,7 @@ and review of VS Code user settings, mcp.json, argv.json and extension state.
 - Bundled vsc-leetcode-cli runs `eval()` on strings scraped from leetcode.com HTTP responses
   (node_modules/vsc-leetcode-cli/lib/plugins/leetcode.js:353,356).
 - Live LeetCode session cookie (909 chars), JWT session id and CSRF token stored in plaintext at
-  `~/.lc/leetcode/user.json` (login shiva2191, dated Feb 2025).
+  `~/.lc/leetcode/user.json` (login redacted).
 - Shipped `out/src/.env.local` contains only placeholder GA keys (not a leak).
 - Status: already marked obsolete; folder, `~/.lc`, a `LeetCode.vscode-leetcode` state key and the
   `leetcode.workspaceFolder` setting remain. The configured workspace folder no longer exists.
