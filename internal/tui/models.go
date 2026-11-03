@@ -220,6 +220,9 @@ func (m *ModelPicker) done() (model string, chosen, finished bool) {
 	return m.chosen, m.ok, m.finished
 }
 
+// cancel stops a running download (embeddedPicker).
+func (m *ModelPicker) cancel() { m.cancelPull() }
+
 // quit ends the picker: tea.Quit on its own, the done flag when embedded.
 func (m *ModelPicker) quit() tea.Cmd {
 	if m.embedded {

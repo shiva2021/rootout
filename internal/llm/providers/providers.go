@@ -39,3 +39,16 @@ func Verify(ctx context.Context, provider, key string) error {
 	}
 	return fmt.Errorf("llm: %q takes no API key (want anthropic or openai)", provider)
 }
+
+// ListModels returns the models a hosted provider's key can use ("anthropic"
+// | "openai"), newest first. It is the same single request Verify makes.
+// Ollama lists its models through its own client and is an error here.
+func ListModels(ctx context.Context, provider, key string) ([]llm.ModelInfo, error) {
+	switch provider {
+	case "anthropic":
+		return anthropic.ListModels(ctx, key)
+	case "openai":
+		return openai.ListModels(ctx, key)
+	}
+	return nil, fmt.Errorf("llm: %q has no hosted model list (want anthropic or openai)", provider)
+}

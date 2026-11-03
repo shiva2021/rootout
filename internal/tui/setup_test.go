@@ -8,17 +8,22 @@ import (
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/shiva2021/rootout/internal/llm"
 )
 
 // recordingVerify returns a Verify func that records its calls and answers
-// with the given error.
-func recordingVerify(err error) (func(context.Context, string, string) error, *[][2]string) {
+// with the given models or error.
+func recordingVerify(models []llm.ModelInfo, err error) (func(context.Context, string, string) ([]llm.ModelInfo, error), *[][2]string) {
 	var calls [][2]string
-	return func(_ context.Context, provider, key string) error {
+	return func(_ context.Context, provider, key string) ([]llm.ModelInfo, error) {
 		calls = append(calls, [2]string{provider, key})
-		return err
+		return models, err
 	}, &calls
 }
+
+// currentHosted is a CurrentHosted that answers the same model for any provider.
+func currentHosted(model string) func(string) string { return func(string) string { return model } }
 
 func newTestSetup(t *testing.T, d SetupDeps) *Setup {
 	t.Helper()
@@ -125,8 +130,8 @@ func TestSetupHelpOverlay(t *testing.T) {
 }
 
 func TestSetupHostedKeyVerifiedAndSaved(t *testing.T) {
-	verify, calls := recordingVerify(nil)
-	s := newTestSetup(t, SetupDeps{Verify: verify})
+	verify, calls := recordingVerify(hostedFixture(), nil)
+	s := newTestSetup(t, SetupDeps{Verify: verify, CurrentHosted: currentHosted("claude-sonnet-5-5")})
 	toHostedKey(t, s)
 	typeSetup(s, "sk-ant-secret-key")
 	out := viewSetup(s)
@@ -141,14 +146,82 @@ func TestSetupHostedKeyVerifiedAndSaved(t *testing.T) {
 	if len(*calls) != 1 || (*calls)[0] != [2]string{"anthropic", "sk-ant-secret-key"} {
 		t.Fatalf("Verify calls = %v", *calls)
 	}
+	out = viewSetup(s)
+	if !strings.Contains(out, "Claude (Anthropic) models") || !strings.Contains(out, "› claude-sonnet-5-5 (current)") || strings.Contains(out, "Checking the key") {
+		t.Fatalf("model picker with the current model selected expected after the check:\n%s", out)
+	}
+	if _, ok := s.Result(); ok {
+		t.Fatal("no result before a model is chosen")
+	}
+	assertQuit(t, pressSetup(s, keyUp, keyEnter))
 	res, ok := s.Result()
-	if !ok || res.Provider != "anthropic" || res.Key != "sk-ant-secret-key" || !res.KeyVerified || res.Skipped {
+	if !ok || res.Provider != "anthropic" || res.Key != "sk-ant-secret-key" || !res.KeyVerified || res.Skipped || res.Model != "claude-new" {
 		t.Errorf("Result() = %+v, %v", res, ok)
 	}
 }
 
+func TestSetupHostedPickerEscReturnsToKeyScreen(t *testing.T) {
+	verify, _ := recordingVerify(hostedFixture(), nil)
+	s := newTestSetup(t, SetupDeps{Verify: verify, CurrentHosted: currentHosted("claude-sonnet-5-5")})
+	toHostedKey(t, s)
+	typeSetup(s, "sk-ant-secret-key")
+	pumpSetup(s, pressSetup(s, keyEnter))
+	if !strings.Contains(viewSetup(s), "Claude (Anthropic) models") {
+		t.Fatalf("picker not shown:\n%s", viewSetup(s))
+	}
+	if cmd := pressSetup(s, keyEsc); cmd != nil && isQuit(cmd) {
+		t.Fatal("esc in the picker should go back, not quit")
+	}
+	out := viewSetup(s)
+	if s.picker != nil || !strings.Contains(out, "console.anthropic.com") || strings.Contains(out, "Checking the key") {
+		t.Fatalf("key screen not restored after esc:\n%s", out)
+	}
+	if _, ok := s.Result(); ok {
+		t.Fatal("esc must not produce a result")
+	}
+	// The typed key is still there: enter checks again and the picker returns.
+	cmd := pressSetup(s, keyEnter)
+	if cmd == nil {
+		t.Fatal("enter should re-run the check")
+	}
+	pumpSetup(s, cmd)
+	assertQuit(t, pressSetup(s, keyEnter))
+	if res, ok := s.Result(); !ok || res.Model != "claude-sonnet-5-5" || res.Key != "sk-ant-secret-key" {
+		t.Errorf("Result() = %+v, %v", res, ok)
+	}
+}
+
+func TestSetupHostedPickerTypedModel(t *testing.T) {
+	verify, _ := recordingVerify(nil, nil) // the key works but the list is empty
+	s := newTestSetup(t, SetupDeps{Verify: verify, CurrentHosted: currentHosted("gpt-5.2")})
+	pressSetup(s, keyDown, keyDown, keyEnter) // OpenAI
+	typeSetup(s, "sk-proj-abc")
+	pumpSetup(s, pressSetup(s, keyEnter))
+	if out := viewSetup(s); !strings.Contains(out, "OpenAI models") || !strings.Contains(out, "› gpt-5.2 (current)") {
+		t.Fatalf("empty list should still offer the current model:\n%s", out)
+	}
+	pressSetup(s, runeKey('t'))
+	typeSetup(s, "-pro")
+	assertQuit(t, pressSetup(s, keyEnter))
+	if res, ok := s.Result(); !ok || res.Provider != "openai" || res.Model != "gpt-5.2-pro" || !res.KeyVerified {
+		t.Errorf("Result() = %+v, %v", res, ok)
+	}
+}
+
+func TestSetupHostedPickerCtrlXQuitsAll(t *testing.T) {
+	verify, _ := recordingVerify(hostedFixture(), nil)
+	s := newTestSetup(t, SetupDeps{Verify: verify})
+	toHostedKey(t, s)
+	typeSetup(s, "sk-ant-secret-key")
+	pumpSetup(s, pressSetup(s, keyEnter))
+	assertQuit(t, pressSetup(s, keyCtrlX))
+	if _, ok := s.Result(); ok || !s.quitAll || s.picker != nil {
+		t.Errorf("ctrl+x in the picker: ok %v quitAll %v picker %v", ok, s.quitAll, s.picker != nil)
+	}
+}
+
 func TestSetupHostedKeyTrimsPaste(t *testing.T) {
-	verify, calls := recordingVerify(nil)
+	verify, calls := recordingVerify(hostedFixture(), nil)
 	s := newTestSetup(t, SetupDeps{Verify: verify})
 	pressSetup(s, keyDown, keyDown, keyEnter) // OpenAI
 	if !strings.Contains(viewSetup(s), "platform.openai.com") {
@@ -162,7 +235,7 @@ func TestSetupHostedKeyTrimsPaste(t *testing.T) {
 }
 
 func TestSetupHostedVerifyFailsRetryOrSave(t *testing.T) {
-	verify, calls := recordingVerify(errors.New("anthropic: the API key was rejected (401)"))
+	verify, calls := recordingVerify(nil, errors.New("anthropic: the API key was rejected (401)"))
 	s := newTestSetup(t, SetupDeps{Verify: verify})
 	toHostedKey(t, s)
 	typeSetup(s, "sk-bad")
@@ -186,8 +259,8 @@ func TestSetupHostedVerifyFailsRetryOrSave(t *testing.T) {
 	// s saves anyway with a warning.
 	assertQuit(t, pressSetup(s, runeKey('s')))
 	res, ok := s.Result()
-	if !ok || res.Provider != "anthropic" || res.Key != "sk-bad" || res.KeyVerified || !strings.Contains(res.Warning, "401") {
-		t.Errorf("Result() = %+v, %v", res, ok)
+	if !ok || res.Provider != "anthropic" || res.Key != "sk-bad" || res.KeyVerified || res.Model != "" || !strings.Contains(res.Warning, "401") {
+		t.Errorf("Result() = %+v, %v (save anyway skips the model picker)", res, ok)
 	}
 }
 
@@ -204,7 +277,7 @@ func TestSetupHostedEscGoesBack(t *testing.T) {
 }
 
 func TestSetupHostedEnterWithoutKey(t *testing.T) {
-	verify, calls := recordingVerify(nil)
+	verify, calls := recordingVerify(hostedFixture(), nil)
 	s := newTestSetup(t, SetupDeps{Verify: verify})
 	toHostedKey(t, s)
 	if cmd := pressSetup(s, keyEnter); cmd != nil {
@@ -219,14 +292,14 @@ func TestSetupHostedEnterWithoutKey(t *testing.T) {
 }
 
 func TestSetupHostedExistingKeyKept(t *testing.T) {
-	verify, calls := recordingVerify(nil)
+	verify, calls := recordingVerify(hostedFixture(), nil)
 	existing := func(provider string) (string, string, error) {
 		if provider == "anthropic" {
 			return "sk-ant-…WXYZ", "keychain", nil
 		}
 		return "", "", nil
 	}
-	s := newTestSetup(t, SetupDeps{Verify: verify, Existing: existing})
+	s := newTestSetup(t, SetupDeps{Verify: verify, Existing: existing, CurrentHosted: currentHosted("claude-sonnet-5-5")})
 	toHostedKey(t, s)
 	if out := viewSetup(s); !strings.Contains(out, "Stored key sk-ant-…WXYZ") || !strings.Contains(out, "enter keeps it") {
 		t.Fatalf("stored-key note missing:\n%s", out)
@@ -235,8 +308,9 @@ func TestSetupHostedExistingKeyKept(t *testing.T) {
 	if len(*calls) != 1 || (*calls)[0] != [2]string{"anthropic", ""} {
 		t.Fatalf("Verify calls = %v, want an empty key (keep the stored one)", *calls)
 	}
+	assertQuit(t, pressSetup(s, keyEnter))
 	res, ok := s.Result()
-	if !ok || res.Provider != "anthropic" || res.Key != "" || !res.KeyVerified {
+	if !ok || res.Provider != "anthropic" || res.Key != "" || !res.KeyVerified || res.Model != "claude-sonnet-5-5" {
 		t.Errorf("Result() = %+v, %v", res, ok)
 	}
 }
@@ -294,7 +368,7 @@ func TestSetupOllamaPickerChoosesModel(t *testing.T) {
 		t.Fatalf("picker list not shown:\n%s", out)
 	}
 	s.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
-	if s.picker == nil || s.picker.width != 140 {
+	if mp, ok := s.picker.(*ModelPicker); !ok || mp.width != 140 {
 		t.Fatal("resize should reach the embedded picker")
 	}
 	assertQuit(t, pressSetup(s, keyEnter))

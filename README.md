@@ -41,14 +41,17 @@ The binary is not code-signed; Homebrew clears the quarantine flag for you.
 
 The first `rootout` opens a short setup screen: pick a free local model
 through Ollama, paste a Claude or OpenAI API key (checked with one free
-request, then stored in the macOS Keychain), or choose "Not now". AI is
-optional: without it, scans still score extensions with the built-in rules;
-with it, `l` on an extension in the scan screen asks the model whether to
-keep or uninstall it. The home screen always shows the current AI status,
-and `rootout setup` reopens the screen.
+request, then stored in the macOS Keychain, after which you pick the model
+the key may use), or choose "Not now". AI is optional: without it, scans
+still score extensions with the built-in rules; with it, `l` on an extension
+in the scan screen asks the model whether to keep or uninstall it. The home
+screen always shows the current AI status and model, and `rootout setup`
+reopens the screen.
 
 Nothing is uninstalled until you type `delete`. In every screen `?` lists the
-keys; in the scan screen `m` picks a local model without leaving the scan.
+keys; in the scan screen `m` changes the model without leaving the scan (the
+provider's hosted list, or the local Ollama picker). Scripts use
+`rootout config models --provider anthropic|openai [--pick]`.
 esc goes back one screen; ctrl+x quits from anywhere.
 
 Every command takes `--json`. Removal goes to the Trash unless `--permanent`.

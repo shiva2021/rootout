@@ -1,15 +1,15 @@
 # Handover
 
-_Updated: 2026-11-03 · Session: onboarding (D-034) shipped as v0.6.0; branch ruleset scoped to main_
+_Updated: 2026-11-04 · Session: scan/LLM enhancements in four phases; Phase 1 (hosted model choice, D-035) on branch `m7/hosted-model`_
 
 ## Status
-**v0.6.0 is released and installed on this Mac.** Onboarding (D-034) is on `main`: a Mac without a config file gets a one-screen setup before the home screen (Local model via Ollama · Claude · OpenAI · Not now); `rootout setup` reopens it; the home row "Set up AI" replaces "Choose local AI model"; the home screen shows `AI: …` under the title. Hosted keys are checked with one free models-list request (`internal/llm/{anthropic,openai}.Verify`, `providers.Verify`; no retries, 20 s per check) before being stored; retry / save anyway / back on failure. Skipping a first run writes an empty config file. PR #8 merged (it superseded #7 to carry the 0.6.0 changelog section), tag `v0.6.0`, Release workflow green, tap cask at 0.6.0, `brew upgrade --cask rootout` → `rootout version v0.6.0` here. Verified through a pty on a fresh `ROOTOUT_CONFIG` before the merge: wizard → esc → empty file → home screen with the AI line; `rootout setup` → Claude → bad key → real 401 from Anthropic with `r retry · s save anyway · esc back` → esc → ctrl+x writes nothing. `setup --json` and `setup < /dev/null` exit 2 with hints.
+**Four enhancements are being shipped as four stacked branches/PRs** (plan: `~/.claude/plans/declarative-frolicking-patterson.md`, summarised here): (1) hosted model choice, (2) `l` assesses the ticked rows only with a bounded queue and a multi-result pane, (3) ✓/✗/⚠ verdict icons in the list, (4) assessments from paid providers persisted across runs. Decisions taken with Shivang: ticked rows are the uninstall tick and `l` refuses with a hint when nothing is ticked; icons come from the LLM verdict only (threshold 70 %); model choice in the wizard plus `m` and `config models`, no one-time prompt; one PR per phase, later branches stack on the earlier one until Shivang merges.
 
-**GitHub ruleset.** Shivang added "rollout-ruleset" (no deletion, no force-push, code quality, pull request required, required status checks). It first applied to every branch (`~ALL`), which blocked pushing a follow-up commit to the open PR branch; it is now scoped to `~DEFAULT_BRANCH` only. Pushing to feature branches works again; `main` still takes changes only through a pull request. Merging through `gh pr merge` was refused by the Claude Code permission classifier in this session, so Shivang merges PRs by hand.
+**Phase 1 (D-035, v0.7.0) is code-complete on `m7/hosted-model`**: `anthropic/openai.ListModels` (`Verify` wraps them), `providers.ListModels`, `tui.HostedPicker` + the `embeddedPicker` interface, the wizard's model step after a verified key, `m` on the scan screen for hosted providers, `config models --provider anthropic|openai [--pick]`, generic `saveModel`, home AI line refreshed after a scan. `make test`/`make lint` green. Live on this Mac: `rootout config models --provider anthropic` listed the real catalogue with the stored key (Haiku 5.5 … Sonnet 4.6, current marked). Not yet run in a real terminal: the wizard's model step and `m` → hosted picker (unit tests cover both).
 
-Earlier today (D-033): v0.5.0/v0.5.1 shipped; rootout is open source under MIT, the tap `shiva2021/homebrew-rootout` is public, token-free `brew install --cask rootout` verified on this Mac. The membership gate is dropped; PR #1 (`m6/membership`) is closed, branch kept; its `service/` leftovers are in `../rootout-m6-service.bak`.
+**Next**: review findings folded in, push, PR to `main`, then Phase 2 on `m7/assess-ticked` cut from this branch. `docs/kb/assessments.md` is the kb page for all four phases.
 
-## Done this session (onboarding, 2026-11-03)
+## Done earlier (onboarding, 2026-11-03)
 - Brainstormed with Shivang: TUI wizard + `rootout setup`; status line + "Set up AI" row; live key check with save-anyway. Plan reviewed by a Plan agent and the advisor; findings folded in: key paste trimming, `CharLimit = 0`, input blurred in the error state, per-call timeout, Keychain read once per launch, empty file on skip.
 - TDD throughout: `internal/llm/{anthropic,openai}/verify_test.go`, `providers_test.go`, `internal/tui/setup_test.go` (16 cases incl. the embedded picker), `home_test.go` (AI line, 30-line view), `cmd/rootout/setup_test.go` (`applySetup`, `needsSetup`, `keyVerifier`, `existingKey`, `aiStatus` with a map-backed `keychain.Store`), `config_test.go` (empty file = defaults).
 - `cmd/rootout/setup.go` persists; `tui.go` runs the wizard when `needsSetup(path)` and recomputes the AI status after the setup action; `main.go` adds `setup`, skips the first-run hint for the bare command (the wizard covers it) and for `setup`; the hint and the guide's AI step name `rootout setup`; scan's "AI: none" line mentions it.
@@ -23,7 +23,7 @@ Earlier today (D-033): v0.5.0/v0.5.1 shipped; rootout is open source under MIT, 
 - `REPORT.md:47` login scrubbed at HEAD (stays in history since `90ba3fb`, Shivang's call). `.gitignore`: `/service/`, `/.idea/`. Repo topics, private vulnerability reporting on.
 
 ## Next steps
-1. Manual on this Mac: `rootout setup` → Claude → enter (keeps the stored key, live check) → home shows `AI: Claude · claude-sonnet-5-5`; then the Ollama path with an installed model; then a scan with `l`.
+1. Manual on this Mac: `rootout setup` → Claude → enter (keeps the stored key, live check) → model list → choose → home shows `AI: Claude · <model>`; scan → `m` → hosted picker; then the Ollama path with an installed model; then a scan with `l`.
 2. `~/.local/bin/rootout` (an old `make install` build) is still on this Mac and may shadow the brew copy: `rm ~/.local/bin/rootout` (`docs/kb/release.md`, "Which binary am I running").
 3. Earlier manual checks still open: model grid and home loop in a real terminal; Full Disk Access denied path; v0.2 interactive flows; M2 QA on a throwaway account; live `scan --llm`.
 4. Optional: signing and notarisation (D-030 / D-015 quill flow); homebrew-cask submission once the project meets Homebrew's notability bar.
@@ -87,6 +87,8 @@ ruby -c dist/homebrew/Casks/rootout.rb
 - The tool was renamed from `purge` to `rootout` (D-018) because macOS ships `/usr/sbin/purge`. `make install` puts it in `~/.local/bin`, which hides the brew copy.
 - A failing `go test` piped into `tail` hides the exit code; check `${PIPESTATUS[0]}` or grep for FAIL.
 - Charm v2: `charm.land/...` imports; lipgloss sizes include borders.
+- zsh expands a bare `====` argument (`echo ====` fails with "=== not found"); quote separators in shell one-liners.
+- `go test ./... | tail` hides a red exit code; redirect to a file and check `$?` (bit me once this session: a commit went in with a failing test and had to be amended).
 - `/usr/bin/trash` rejects `--`; Homebrew's `trash` is a different tool.
 - macOS has no `timeout(1)`: `perl -e 'alarm N; exec @ARGV' -- cmd`.
 - gosec G101 flags constant names containing "Assess"/"Key"-like words; rename rather than suppress.

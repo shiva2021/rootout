@@ -17,7 +17,7 @@ internal/
   ext/       Enumerate() extensions for 5 editors, parse package.json + extensions.json + .obsolete, Uninstall()
   registry/  optional --online enrichment: Marketplace extensionquery + Open VSX
   heur/      walker with size caps, rule registry (pure funcs), Finding, Report{Score 0-100}
-  llm/       Provider interface, Assessment, BuildPrompt, fake + anthropic/openai/ollama adapters
+  llm/       Provider interface, Assessment, ModelInfo, BuildPrompt, fake + anthropic/openai/ollama adapters (ListModels/Verify per hosted adapter)
   llm/ollama/ Detect, ListInstalled, Recommend (catalog.go), Pull, Hardware probe
   keychain/  Get/Set/Delete via zalando/go-keyring behind an interface
   config/    ~/.config/rootout/config.toml: provider, model, defaults (never secrets)
@@ -58,6 +58,9 @@ Spotlight bundles, launchd, processes) → `plan.New` grouped by owner, nothing 
 
 **local model picker**: `ollama.Detect` → `ListInstalled` → `Recommend(hardware)` →
 `Pull` with progress → save `llm.ollama.model` in config.
+
+**hosted model picker** (D-035): `providers.ListModels` (the key check) → `tui.HostedPicker`
+(list, synthetic current row, typed id) → save `llm.<provider>.model` in config.
 
 ## Data
 

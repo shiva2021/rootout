@@ -10,5 +10,6 @@ Read only what today's task needs.
 | `safety.md` | Touching anything that deletes, matches leftovers, or runs with privileges |
 | `heuristics.md` | Adding or tuning an extension-scan rule |
 | `local-models.md` | Touching the Ollama picker or model catalogue |
+| `assessments.md` | Touching the LLM assessment flow, the hosted model picker or the scan screen's AI keys |
 | `qa.md` | Manual QA procedure for real-app removal (created in M2) |
 | `release.md` | Cutting, verifying or repairing a release; tap and token setup |
