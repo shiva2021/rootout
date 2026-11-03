@@ -3,7 +3,7 @@
 ## Prerequisites
 - Go 1.27 (pinned in `go.mod`: `go 1.27.0` / `toolchain go1.27.3`). Install with `brew install go`; with the default `GOTOOLCHAIN=auto` the pinned toolchain is fetched automatically.
 - `golangci-lint` (`brew install golangci-lint`) for `make lint`.
-- GoReleaser 2.18.3 (`brew install goreleaser`) for `make snapshot` and `make release-check`; CI pins the same version.
+- GoReleaser 2.19.0 (`brew install goreleaser`) for `make snapshot` and `make release-check`; CI pins the same version.
 - macOS 14 or later. `/usr/bin/trash` exists on macOS 15+; macOS 14 uses the Finder fallback.
 - Optional: Homebrew (cask detection), Ollama (local models), editor CLIs (`code`, `cursor`, `codium`, `windsurf`, `code-insiders`) for clean extension uninstall.
 

@@ -64,7 +64,7 @@ Append-only. Newest at the bottom. Never edit an old entry; add a new one that s
 **Decision.** `internal/license.Check(ctx)` always returns Allowed and is called once from the Cobra root. Real licensing is milestone M6 with its own plan.
 **Alternatives.** Build billing early.
 **Consequences.** Gating points must route through `license.Check` from day one so M6 needs no restructuring.
-**Status.** Accepted
+**Status.** Superseded by D-033 (the seam was removed; rootout is open source)
 
 ## D-009 · 2026-10-20 · Ollama model picker with hardware-aware recommendations
 
@@ -192,7 +192,7 @@ Append-only. Newest at the bottom. Never edit an old entry; add a new one that s
 **Decision.** Distribution stays a plain CLI binary: GitHub Releases plus a Homebrew tap, no App Store, no app bundle, no installer; signing/notarizing the bare binary is optional and decided at M5. M6 becomes a membership gate: an admin credential makes `license.Check` return Allowed for everything, offline; for other users, access requires an active Patreon membership, verified by a mechanism chosen at M6 (Patreon API/OAuth versus membership-linked signed license keys). Which commands are gated, the offline grace period and the non-member message are M6 decisions. Nothing is built before M5 is done.
 **Alternatives.** Mac App Store / in-app purchase (rejected: not a standard app rollout, and a CLI does not fit the store); Lemon Squeezy/Paddle license sales (the earlier M6 recommendation; superseded by Patreon membership, to be confirmed at M6); gating from day one (rejected: it would shape early development).
 **Consequences.** `license.Check` keeps its single call site at the Cobra root (D-008) so M6 needs no restructuring. `docs/PLAN.md` M5/M6 updated. A Patreon integration adds a network dependency to the paid path; the admin path must never depend on the network.
-**Status.** Accepted (supersedes the Lemon Squeezy/Paddle recommendation in D-008's M6 note)
+**Status.** Superseded by D-033 (the membership gate was dropped before it shipped)
 
 ## D-025 · 2026-10-21 · Uninstalling local models: y/n confirmation, default cleared
 
@@ -249,7 +249,7 @@ Append-only. Newest at the bottom. Never edit an old entry; add a new one that s
 **Decision.** New private tap `shiva2021/homebrew-rootout`, written by GoReleaser `homebrew_casks` using a fine-grained token stored as the Actions secret `TAP_GITHUB_TOKEN` (Contents read/write on the tap only). The cask uses GoReleaser's documented `GitHubPrivateRepositoryReleaseDownloadStrategy`, which reads `HOMEBREW_GITHUB_API_TOKEN` at download time (Homebrew ≥ 5.1.14 scrubs it during cask evaluation) and fetches the asset through the GitHub API.
 **Alternatives.** Make repo and tap public (rejected: code readable before the gate exists; the research folder still names a personal username); no tap, direct download only (rejected: drops the Homebrew path D-024 asked for).
 **Consequences.** Installing needs git access to the tap and a token with read access to rootout releases. The strategy calls Homebrew's internal `GitHub.get_release`, which may change; fallback is a plain API call in the same class. M6 decides how members get access.
-**Status.** Accepted
+**Status.** Superseded by D-033 (public repo and tap; plain cask)
 
 ## D-032 · 2026-10-22 · Release on every v* tag; notes from CHANGELOG.md; release-check is the test gate
 
@@ -257,4 +257,12 @@ Append-only. Newest at the bottom. Never edit an old entry; add a new one that s
 **Decision.** `.github/workflows/release.yml` runs GoReleaser on every `v*` tag on `ubuntu-latest` (cross-compiling, no cgo). Release notes are the matching `CHANGELOG.md` section extracted by `scripts/release_notes.sh`; a missing or empty section fails the release; GoReleaser's commit-based changelog is never generated because `--release-notes` replaces it (`changelog.disable` must stay off: in 2.18.3 it also skips loading the notes file). `.github/workflows/ci.yml` runs test and lint on `macos-latest` for pushes to `main` and pull requests. The release job does not re-run tests, so `make release-check NEXT=vX.Y.Z` (changelog, test, lint, `goreleaser check`) is the gate before tagging. Every action and tool version is pinned exactly; Go comes from `go.mod`.
 **Alternatives.** Manual workflow dispatch (rejected: one more step per release, D-028 already tags every merge); GoReleaser commit-based changelog (rejected: noisier, duplicates the curated file); tests inside the release job (rejected: wrong build tags on Ubuntu or 10x minutes on macOS).
 **Consequences.** Tags are never moved; a failed release is repaired with a patch tag. A tag pushed without running `release-check` can publish untested code; the runbook says to always run it.
+**Status.** Accepted
+
+## D-033 · 2026-11-03 · Open source under MIT; public tap; plain cask; membership gate dropped
+
+**Context.** `shiva2021/rootout` was made public without a licence file, which legally leaves it all rights reserved. D-024 planned a Patreon membership gate inside the binary, and branch `m6/membership` (PR #1) built it end to end, with a proprietary LICENSE and a plan to serve release assets from a separate public `rootout-releases` repo. A paywall in the binary conflicts with publishing the source, and with a public source repo the separate releases repo has no purpose.
+**Decision.** rootout is open source under the MIT licence. The membership gate is dropped: the no-op `license.Check` seam (D-008), its exit code 4 and the M6 plan go; PR #1 is closed and `m6/membership` is kept as an archive, unmerged. Releases stay on `shiva2021/rootout`; the tap `shiva2021/homebrew-rootout` becomes public; the cask is a plain `CurlDownloadStrategy` cask written by GoReleaser 2.19 (`install_steps` → `postflight_steps` clears quarantine) with no token at install time. The tap is still written with the fine-grained `TAP_GITHUB_TOKEN`, because Actions' default token cannot push to another repository.
+**Alternatives.** Ship the gate as built on the branch (rejected: Shivang chose to open the project instead); open core with a paid module later (rejected for now: nothing to gate); a separate `rootout-releases` repo (rejected: pointless once the source repo is public); AGPL or Apache-2.0 (rejected: MIT is the simplest for a CLI people may fork or package).
+**Consequences.** Supersedes D-008, D-024 and D-031. D-030 stands: the binary is still unsigned. Releases v0.4.0 and v0.4.1 keep their token-only casks; v0.5.0 is the first token-free one. The parked branch carries its own D-033 (public releases repo) and D-034 (gate mechanics); neither was accepted on `main`, and this entry takes the number. The personal login in `docs/research/vscode-extension-audit/REPORT.md` was scrubbed at HEAD only; it remains in history (Shivang's call, no rewrite).
 **Status.** Accepted

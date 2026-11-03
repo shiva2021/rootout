@@ -19,11 +19,13 @@ rootout guide                 # a step-by-step tour adapted to this Mac
 ## Install
 
 ```bash
-# Homebrew (private tap: needs git access to shiva2021/homebrew-rootout and a GitHub token)
-export HOMEBREW_GITHUB_API_TOKEN=<token with read access to shiva2021/rootout>
-brew tap shiva2021/rootout git@github.com:shiva2021/homebrew-rootout.git
-brew trust shiva2021/rootout   # newer Homebrew refuses untrusted taps
+# Homebrew
+brew tap shiva2021/rootout
+brew trust shiva2021/rootout   # Homebrew 7 asks this once for third-party casks
 brew install --cask rootout
+
+# Go toolchain (`rootout --version` prints `dev` this way; no release metadata)
+go install github.com/shiva2021/rootout/cmd/rootout@latest
 
 # Direct download: grab rootout_<version>_darwin_<arch>.tar.gz from the Releases page, then
 tar xzf rootout_*_darwin_*.tar.gz && xattr -d com.apple.quarantine rootout && mv rootout ~/.local/bin/
@@ -32,7 +34,7 @@ tar xzf rootout_*_darwin_*.tar.gz && xattr -d com.apple.quarantine rootout && mv
 make install
 ```
 
-The binary is not code-signed yet; Homebrew clears the quarantine flag for you.
+The binary is not code-signed; Homebrew clears the quarantine flag for you.
 
 Nothing is uninstalled until you type `delete`. In every screen `?` lists the
 keys; in the scan screen `m` picks a local model without leaving the scan.
@@ -48,4 +50,13 @@ what an extension can do (spawn processes, eval) from evidence of intent
 `docs/kb/heuristics.md`. An AI model, if configured, sees only the findings and
 short snippets, never the whole extension.
 
-Development: see `CLAUDE.md` and `docs/kb/README.md`.
+## Contributing
+
+Issues and pull requests are welcome. Branch from `main`, keep `make test` and
+`make lint` green, and read `CLAUDE.md` and `docs/kb/README.md` first: every
+deletion goes through `internal/safety.Validate`, and no test may touch the
+real home directory. Security reports: see `SECURITY.md`.
+
+## Licence
+
+MIT, see `LICENSE`.

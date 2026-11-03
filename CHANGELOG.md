@@ -4,6 +4,21 @@ All notable changes to rootout. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-03
+
+### Added
+- MIT licence; rootout is open source (D-033).
+- Token-free install from the public Homebrew tap: `brew tap shiva2021/rootout && brew trust shiva2021/rootout && brew install --cask rootout`.
+- `SECURITY.md` and Dependabot updates for Go modules and GitHub Actions.
+
+### Changed
+- GoReleaser 2.19.0; the cask clears quarantine with `postflight_steps` instead of the deprecated `postflight`.
+- Release archives include `LICENSE`.
+
+### Removed
+- The private-tap download strategy and the `HOMEBREW_GITHUB_API_TOKEN` requirement.
+- The no-op licence seam and exit code 4; the planned membership gate (D-024) is dropped.
+
 ## [0.4.1] - 2026-10-22
 
 ### Fixed
