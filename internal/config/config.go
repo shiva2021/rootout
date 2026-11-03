@@ -22,8 +22,9 @@ import (
 
 // Config is the whole settings file.
 type Config struct {
-	LLM  LLM  `toml:"llm"`
-	Scan Scan `toml:"scan"`
+	LLM     LLM     `toml:"llm"`
+	Scan    Scan    `toml:"scan"`
+	Updates Updates `toml:"updates"`
 }
 
 // LLM selects and configures the model provider.
@@ -51,6 +52,12 @@ type Scan struct {
 	Online   bool `toml:"online"`
 }
 
+// Updates controls the update check: whether doctor and the home screen
+// ask GitHub for the latest release.
+type Updates struct {
+	Check bool `toml:"check"`
+}
+
 // Default returns the built-in settings.
 func Default() Config {
 	return Config{
@@ -59,7 +66,8 @@ func Default() Config {
 			OpenAI:    Hosted{Model: "gpt-5.2"},
 			Ollama:    Ollama{BaseURL: "http://localhost:11434"},
 		},
-		Scan: Scan{MinScore: 30},
+		Scan:    Scan{MinScore: 30},
+		Updates: Updates{Check: true},
 	}
 }
 
@@ -180,6 +188,17 @@ var fields = map[string]field{
 				return fmt.Errorf("scan.online: %q is not a boolean", v)
 			}
 			c.Scan.Online = b
+			return nil
+		},
+	},
+	"updates.check": {
+		get: func(c *Config) string { return strconv.FormatBool(c.Updates.Check) },
+		set: func(c *Config, v string) error {
+			b, err := strconv.ParseBool(strings.TrimSpace(v))
+			if err != nil {
+				return fmt.Errorf("updates.check: %q is not a boolean", v)
+			}
+			c.Updates.Check = b
 			return nil
 		},
 	},

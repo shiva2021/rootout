@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -184,7 +185,7 @@ func TestUnknownKeyListsValidKeys(t *testing.T) {
 
 func TestKeysSortedAndGettable(t *testing.T) {
 	keys := Keys()
-	want := []string{"llm.anthropic.model", "llm.ollama.base_url", "llm.ollama.model", "llm.openai.model", "llm.provider", "scan.min_score", "scan.online"}
+	want := []string{"llm.anthropic.model", "llm.ollama.base_url", "llm.ollama.model", "llm.openai.model", "llm.provider", "scan.min_score", "scan.online", "updates.check"}
 	if !reflect.DeepEqual(keys, want) {
 		t.Errorf("Keys = %v", keys)
 	}
@@ -224,5 +225,53 @@ func TestLoadEmptyFileReturnsDefault(t *testing.T) {
 	}
 	if !reflect.DeepEqual(c, Default()) {
 		t.Errorf("Load(empty) = %+v, want Default()", c)
+	}
+}
+
+func TestUpdatesCheckDefaultsOn(t *testing.T) {
+	if !Default().Updates.Check {
+		t.Error("Default().Updates.Check = false, want true")
+	}
+	// A config written before the key existed has no [updates] table.
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[llm]\nprovider = \"ollama\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Updates.Check {
+		t.Error("a file without [updates] should load with Check = true")
+	}
+}
+
+func TestUpdatesCheckKey(t *testing.T) {
+	c := Default()
+	if got, err := c.Get("updates.check"); err != nil || got != "true" {
+		t.Errorf(`Get("updates.check") = %q, %v; want "true"`, got, err)
+	}
+	if err := c.Set("updates.check", "false"); err != nil {
+		t.Fatal(err)
+	}
+	if c.Updates.Check {
+		t.Error("Set false did not stick")
+	}
+	if err := c.Set("updates.check", "nope"); err == nil || !strings.Contains(err.Error(), "updates.check") {
+		t.Errorf("Set nope: err = %v, want a boolean error naming the key", err)
+	}
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Updates.Check {
+		t.Error("round trip lost updates.check = false")
+	}
+	if !slices.Contains(Keys(), "updates.check") {
+		t.Errorf("Keys() = %v, want updates.check listed", Keys())
 	}
 }
