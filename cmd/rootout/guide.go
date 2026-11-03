@@ -133,7 +133,8 @@ func buildGuide(ctx context.Context) []guideStep {
 		}
 		cmds = append(cmds, "rootout config models --pick")
 	}
-	text += " Or use a hosted model: store an API key in the macOS Keychain and set the provider."
+	text += " Or use a hosted model: store an API key in the macOS Keychain and set the provider. rootout setup does either from one screen and checks the key."
+	cmds = append([]string{"rootout setup"}, cmds...)
 	cmds = append(cmds, "rootout config set-key anthropic", "rootout config set llm.provider anthropic")
 	add("Add an AI second opinion", "ollama "+ollamaState(checks), text, cmds...)
 

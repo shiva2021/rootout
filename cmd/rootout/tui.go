@@ -28,8 +28,21 @@ func runTUI(ctx context.Context, g *globalFlags) error {
 		return err
 	}
 	var flash tui.Flash
+	// A Mac without a config file has never seen the setup screen: show it
+	// first. Skipping writes an empty file, so it does not come back.
+	if path, err := configPath(); err == nil && needsSetup(path) {
+		flash, err = runSetup(ctx)
+		if errors.Is(err, tui.ErrQuit) {
+			return nil
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "rootout:", err)
+			flash = errorFlash(err)
+		}
+	}
+	ai := currentAIStatus()
 	for {
-		a, err := tui.PickAction(ctx, version, flash)
+		a, err := tui.PickAction(ctx, version, flash, ai)
 		if errors.Is(err, tui.ErrQuit) {
 			return nil
 		}
@@ -48,6 +61,9 @@ func runTUI(ctx context.Context, g *globalFlags) error {
 			fmt.Fprintln(os.Stderr, "rootout:", err)
 			flash = errorFlash(err)
 		}
+		if a == tui.ActionSetup {
+			ai = currentAIStatus()
+		}
 	}
 }
 
@@ -60,8 +76,8 @@ func runAction(ctx context.Context, env fsx.Env, a tui.Action) (tui.Flash, error
 		return homeOrphans(ctx, env)
 	case tui.ActionScan:
 		return homeScan(ctx, env)
-	case tui.ActionModel:
-		return homeModel(ctx)
+	case tui.ActionSetup:
+		return runSetup(ctx)
 	}
 	return tui.Flash{}, nil
 }
@@ -168,20 +184,6 @@ func homeScan(ctx context.Context, env fsx.Env) (tui.Flash, error) {
 		return tui.Flash{Text: "No changes"}, nil
 	}
 	return scanFlash(done, failed), nil
-}
-
-func homeModel(ctx context.Context) (tui.Flash, error) {
-	m, err := pickAndSaveModel(ctx)
-	if errors.Is(err, tui.ErrQuit) {
-		return tui.Flash{}, err
-	}
-	if isExit(err, exitDeclined) {
-		return tui.Flash{}, nil
-	}
-	if err != nil {
-		return tui.Flash{}, err
-	}
-	return tui.Flash{Text: "Default local model: " + m}, nil
 }
 
 // removalFlash summarises a removal for the home screen's flash line. It
