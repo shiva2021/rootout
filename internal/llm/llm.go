@@ -32,7 +32,6 @@ type Assessment struct {
 	Model      string   `json:"model"`
 }
 
-// Provider is one model backend.
 // ConfidenceThreshold is the confidence from which a verdict is shown as
 // settled (a tick or a cross in the scan list); below it the row is marked
 // unsure whatever the verdict.
@@ -52,6 +51,7 @@ type ModelInfo struct {
 	Deprecated  bool      `json:"deprecated,omitempty"`
 }
 
+// Provider is one model backend.
 type Provider interface {
 	Name() string  // "anthropic" | "openai" | "ollama" | "fake"
 	Model() string // model id in use

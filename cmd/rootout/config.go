@@ -239,6 +239,9 @@ func cacheClear(out io.Writer, path string) error {
 		n = c.Len()
 	}
 	removed, err := assesscache.Clear(path)
+	if errors.Is(err, assesscache.ErrNotCache) {
+		return &exitErr{code: exitBadInput, msg: fmt.Sprintf("%s is not a rootout assessments file; nothing removed", path)}
+	}
 	if err != nil {
 		return err
 	}

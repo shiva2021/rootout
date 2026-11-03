@@ -16,7 +16,7 @@ Everything that deletes goes through `internal/safety`. Read this before touchin
 
 ## Files rootout writes
 
-Only the config file (`internal/config.Save`) and the saved-assessments file (`internal/assesscache`, `~/.cache/rootout/assessments.json`), both atomically via temp file + rename, 0600 in a 0700 directory. Neither path is ever a deletion target: nothing under `~/.cache/rootout` or `~/.config/rootout` matches a leftover rule, and `config cache clear` is the only remover (it removes exactly that file).
+Only the config file (`internal/config.Save`) and the saved-assessments file (`internal/assesscache`, `~/.cache/rootout/assessments.json`), both atomically via temp file + rename, 0600 in a 0700 directory. Neither is an app leftover: nothing under `~/.cache/rootout` or `~/.config/rootout` matches a leftover rule. `config cache clear` is the one deletion outside `Validate` (D-038): it removes the path only when it is a regular file that parses as a rootout assessments file, and refuses anything else `ROOTOUT_CACHE` may point at.
 
 ## Leftover rules (B = bundle id, B* = `B.` prefix, T.B = TeamID-prefixed, N = guarded name)
 | Location | Key |

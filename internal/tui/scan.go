@@ -38,7 +38,7 @@ const (
 	// (⚠ is drawn 1 or 2 cells wide depending on the terminal).
 	iconBenign    = "✓"
 	iconMalicious = "✗"
-	iconUnsure    = "⚠"
+	iconUnsure    = "⚠\ufe0e" // text presentation: one cell, not the two-cell emoji
 	iconError     = "!"
 	iconW         = 2
 )
@@ -467,13 +467,14 @@ func (v *ScanView) enqueueAssess(force bool) tea.Cmd {
 		v.flash = nothingTickedAssess
 		return nil
 	}
-	answered, asked := 0, 0
+	answered, asking, asked := 0, 0, 0
 	for _, r := range order {
-		if _, ok := v.results[r]; ok && !force {
-			answered++
+		if v.pending[r] || slices.Contains(v.queue, r) {
+			asking++
 			continue
 		}
-		if v.pending[r] || slices.Contains(v.queue, r) {
+		if _, ok := v.results[r]; ok && !force {
+			answered++
 			continue
 		}
 		v.queue = append(v.queue, r)
@@ -482,14 +483,17 @@ func (v *ScanView) enqueueAssess(force bool) tea.Cmd {
 		}
 		asked++
 	}
-	switch {
-	case asked == 0:
-		v.flash = fmt.Sprintf("%d already answered", answered)
-	case answered > 0:
-		v.flash = fmt.Sprintf("asking %d · %d already answered", asked, answered)
-	default:
-		v.flash = fmt.Sprintf("asking %d", asked)
+	var parts []string
+	if asked > 0 {
+		parts = append(parts, fmt.Sprintf("asking %d", asked))
 	}
+	if answered > 0 {
+		parts = append(parts, fmt.Sprintf("%d already answered", answered))
+	}
+	if asking > 0 {
+		parts = append(parts, fmt.Sprintf("%d already asking", asking))
+	}
+	v.flash = strings.Join(parts, labelSep)
 	return v.startNext()
 }
 
@@ -502,6 +506,12 @@ func (v *ScanView) startNext() tea.Cmd {
 	for len(v.pending) < assessWorkers && len(v.queue) > 0 {
 		r := v.queue[0]
 		v.queue = v.queue[1:]
+		if !v.ticked[r] {
+			// Unticked while waiting: the user changed their mind before it
+			// cost anything.
+			delete(v.force, r)
+			continue
+		}
 		v.pending[r] = true
 		delete(v.errs, r)
 		assess := v.assessor.Assess
@@ -671,7 +681,8 @@ func (v *ScanView) render() string {
 	return out
 }
 
-// footerHelp lists the keys that currently do something.
+// footerHelp lists the keys that currently do something, dropping the
+// least important ones until the line fits the width; "? help" always stays.
 func (v *ScanView) footerHelp() string {
 	parts := []string{"↑/↓ move", "space tick", "tab focus", "f hide low"}
 	if v.assessor.Assess != nil {
@@ -681,7 +692,27 @@ func (v *ScanView) footerHelp() string {
 		parts = append(parts, "m model")
 	}
 	parts = append(parts, "enter uninstall", "esc back", "ctrl+x quit", "? help")
-	return strings.Join(parts, " · ")
+	return fitFooter(parts, v.width)
+}
+
+// footerDropOrder is the order in which footer entries give way on a
+// narrow terminal (they all remain in the ? overlay).
+var footerDropOrder = []string{"tab focus", "f hide low", "ctrl+x quit", "esc back", "space tick", "enter uninstall", "L re-ask", "m model", "l ask AI (ticked)", "↑/↓ move"}
+
+// fitFooter joins parts with the separator, removing entries in
+// footerDropOrder until the result fits width.
+func fitFooter(parts []string, width int) string {
+	line := strings.Join(parts, labelSep)
+	for _, drop := range footerDropOrder {
+		if lipgloss.Width(line) <= width {
+			break
+		}
+		if i := slices.Index(parts, drop); i >= 0 {
+			parts = slices.Delete(parts, i, i+1)
+			line = strings.Join(parts, labelSep)
+		}
+	}
+	return output.Truncate(line, max(width, 1))
 }
 
 // helpKeys is the ? overlay table.

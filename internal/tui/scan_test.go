@@ -965,3 +965,50 @@ func TestScanViewHelpListsL(t *testing.T) {
 		t.Fatalf("help should explain L:\n%s", out)
 	}
 }
+
+func TestScanViewUntickedQueuedRowIsSkipped(t *testing.T) {
+	assess, ids := recordingAssess()
+	v := newTestScan(t, Assessor{Assess: assess})
+	pressS(v, keySpace, keyDown, keySpace, keyDown, keySpace) // tick all three; the third queues
+	cmd := pressS(v, runeKey('l'))
+	pressS(v, keySpace) // untick good.theme while it is still queued
+	feedAssess(v, feedAssess(v, cmd))
+	if strings.Join(*ids, " ") != "evil.stealer mid.tool" {
+		t.Fatalf("an unticked queued row must not be sent: %v", *ids)
+	}
+	if len(v.queue) != 0 || len(v.pending) != 0 {
+		t.Fatalf("queue %d pending %d", len(v.queue), len(v.pending))
+	}
+}
+
+func TestScanViewFlashWhileAsking(t *testing.T) {
+	block := make(chan struct{})
+	assess := func(context.Context, heur.Report) (llm.Assessment, error) {
+		<-block
+		return llm.Assessment{Verdict: llm.Benign}, nil
+	}
+	v := newTestScan(t, Assessor{Assess: assess})
+	defer close(block)
+	pressS(v, keySpace, runeKey('l'))
+	if cmd := pressS(v, runeKey('l')); cmd != nil || !strings.Contains(viewS(v), "1 already asking") {
+		t.Fatalf("second l while asking:\n%s", viewS(v))
+	}
+}
+
+func TestScanViewFooterFitsWidth(t *testing.T) {
+	for _, w := range []int{40, 80, 140} {
+		v := NewScanView(scanFixture(), Assessor{Assess: func(context.Context, heur.Report) (llm.Assessment, error) { return llm.Assessment{}, nil }, Models: &ModelDeps{}})
+		v.Update(tea.WindowSizeMsg{Width: w, Height: 20})
+		lines := strings.Split(viewS(v), "\n")
+		footer := strings.TrimRight(lines[len(lines)-1], " ")
+		if got := lipgloss.Width(footer); got > w {
+			t.Errorf("width %d: footer is %d cells: %q", w, got, footer)
+		}
+		if !strings.HasSuffix(footer, "? help") {
+			t.Errorf("width %d: footer must end with ? help: %q", w, footer)
+		}
+		if len(lines) != 20 {
+			t.Errorf("width %d: view has %d lines, want 20", w, len(lines))
+		}
+	}
+}

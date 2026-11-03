@@ -30,6 +30,10 @@ const EnvVar = "ROOTOUT_CACHE"
 // treated as empty and replaced on the next store.
 const fileVersion = 1
 
+// ErrNotCache is returned by Clear when the path is not a regular file that
+// parses as a rootout assessments file: Clear deletes nothing else.
+var ErrNotCache = errors.New("assesscache: not a rootout assessments file")
+
 // Path returns $ROOTOUT_CACHE if set, else ~/.cache/rootout/assessments.json.
 func Path(env fsx.Env, getenv func(string) string) string {
 	if getenv != nil {
@@ -175,13 +179,29 @@ func (c *Cache) write() error {
 	return nil
 }
 
-// Clear deletes the file; removed is false when there was none.
+// Clear deletes the file; removed is false when there was none. It only
+// removes a regular file that parses as a rootout assessments file, so a
+// ROOTOUT_CACHE pointing at anything else is refused with ErrNotCache.
 func Clear(path string) (removed bool, err error) {
-	err = os.Remove(path)
+	info, err := os.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	}
 	if err != nil {
+		return false, fmt.Errorf("assesscache: %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return false, fmt.Errorf("%w: %s is not a regular file", ErrNotCache, path)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false, fmt.Errorf("assesscache: read %s: %w", path, err)
+	}
+	var f file
+	if err := json.Unmarshal(raw, &f); err != nil || f.Version != fileVersion {
+		return false, fmt.Errorf("%w: %s", ErrNotCache, path)
+	}
+	if err := os.Remove(path); err != nil {
 		return false, fmt.Errorf("assesscache: remove %s: %w", path, err)
 	}
 	return true, nil

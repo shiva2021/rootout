@@ -163,10 +163,22 @@ func buildAssessor(ctx context.Context, c config.Config, provider, model string,
 	if err != nil {
 		return tui.Assessor{}, err
 	}
+	// One cache for the run: the saved answers are one file whatever the
+	// hosted provider, and two instances would overwrite each other.
+	var cache *assesscache.Cache
+	cacheFor := func(provider string) *assesscache.Cache {
+		if cache == nil {
+			cache = openCache(provider, noCache)
+		}
+		if provider != "anthropic" && provider != "openai" {
+			return nil
+		}
+		return cache
+	}
 	var a tui.Assessor
 	if p != nil {
 		a.Provider, a.Label = p.Name(), p.Name()+" · "+p.Model()
-		a = withCache(a, p, openCache(p.Name(), noCache))
+		a = withCache(a, p, cacheFor(p.Name()))
 	}
 	if !interactive {
 		return a, nil
@@ -191,7 +203,7 @@ func buildAssessor(ctx context.Context, c config.Config, provider, model string,
 			Label:        provider + " · " + m,
 			Models:       a.Models,
 			HostedModels: hostedLister(provider, key),
-		}, np, openCache(provider, noCache)), nil
+		}, np, cacheFor(provider)), nil
 	}
 	return a, nil
 }

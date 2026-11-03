@@ -2,6 +2,7 @@ package assesscache
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -213,5 +214,41 @@ func TestNeverContainsKeys(t *testing.T) {
 	raw, _ := os.ReadFile(path)
 	if strings.Contains(string(raw), "sk-") {
 		t.Fatalf("file must never hold a key:\n%s", raw)
+	}
+}
+
+func TestClearRefusesForeignFiles(t *testing.T) {
+	path, _ := fakeEnv(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{"notes": `{"todo":"keep me"}`, "text": "not json", "wrong version": `{"version":99,"entries":{}}`} {
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		removed, err := Clear(path)
+		if !errors.Is(err, ErrNotCache) || removed {
+			t.Errorf("%s: Clear = %v, %v; want ErrNotCache", name, removed, err)
+		}
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("%s: the file must be left alone: %v", name, err)
+		}
+	}
+	dir := filepath.Join(filepath.Dir(path), "adir")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if removed, err := Clear(dir); !errors.Is(err, ErrNotCache) || removed {
+		t.Errorf("directory: Clear = %v, %v; want ErrNotCache", removed, err)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Error("the directory must be left alone")
+	}
+	// A real cache still goes.
+	_ = os.Remove(path)
+	c, _ := Open(path)
+	_ = c.Store(IDFor(report(), "anthropic", "m"), llm.Assessment{})
+	if removed, err := Clear(path); err != nil || !removed {
+		t.Fatalf("real cache: Clear = %v, %v", removed, err)
 	}
 }

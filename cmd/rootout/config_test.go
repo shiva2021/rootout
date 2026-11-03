@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -182,5 +183,21 @@ func TestCacheClear(t *testing.T) {
 	out.Reset()
 	if err := cacheClear(&out, path); err != nil || !strings.Contains(out.String(), "removed 2 saved assessments") || !strings.Contains(out.String(), path) {
 		t.Fatalf("present: %v\n%s", err, out.String())
+	}
+}
+
+func TestCacheClearRefusesForeignFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "notes.json")
+	if err := os.WriteFile(path, []byte(`{"todo":"keep"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	err := cacheClear(&out, path)
+	var ee *exitErr
+	if !errors.As(err, &ee) || ee.code != exitBadInput || !strings.Contains(ee.msg, "not a rootout assessments file") {
+		t.Fatalf("err = %v, want exit %d with an explanation", err, exitBadInput)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("foreign file must be left alone")
 	}
 }
