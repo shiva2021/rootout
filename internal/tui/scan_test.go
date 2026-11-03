@@ -863,3 +863,200 @@ func TestScanViewIconLegendInHelp(t *testing.T) {
 		t.Fatalf("help should explain the icons and the threshold:\n%s", out)
 	}
 }
+
+// cachedFor is a Cached func answering only the given extension id.
+func cachedFor(id string, a llm.Assessment) func(heur.Report) (llm.Assessment, bool) {
+	a.Cached = true
+	return func(r heur.Report) (llm.Assessment, bool) {
+		if r.Ext.ID == id {
+			return a, true
+		}
+		return llm.Assessment{}, false
+	}
+}
+
+func TestScanViewPreloadsCached(t *testing.T) {
+	assess, ids := recordingAssess()
+	a := Assessor{Assess: assess, Cached: cachedFor("evil.stealer", llm.Assessment{Verdict: llm.Malicious, Confidence: 0.92, Reasoning: "Steals keys.", Model: "claude-x"})}
+	v := newTestScan(t, a)
+	if got, ok := v.results[0]; !ok || !got.Cached || len(v.results) != 1 {
+		t.Fatalf("results = %+v", v.results)
+	}
+	out := viewS(v)
+	if !strings.Contains(out, "MALICIOUS") || !strings.Contains(out, "claude-x · saved") || !strings.Contains(out, iconMalicious) {
+		t.Fatalf("cached result should show with the saved tag and the icon:\n%s", out)
+	}
+	if len(*ids) != 0 {
+		t.Fatal("preloading must not call the model")
+	}
+	// l skips it.
+	pressS(v, keySpace)
+	if cmd := pressS(v, runeKey('l')); cmd != nil || !strings.Contains(viewS(v), "1 already answered") {
+		t.Fatalf("l should skip the saved answer:\n%s", viewS(v))
+	}
+}
+
+func TestScanViewLReasksCached(t *testing.T) {
+	assess, ids := recordingAssess()
+	reassess, reIDs := recordingAssess()
+	a := Assessor{Assess: assess, Reassess: reassess, Cached: cachedFor("evil.stealer", llm.Assessment{Verdict: llm.Malicious, Confidence: 0.92})}
+	v := newTestScan(t, a)
+	if !strings.Contains(viewS(v), "L re-ask") {
+		t.Fatalf("footer should offer L:\n%s", viewS(v))
+	}
+	pressS(v, keySpace)
+	cmd := pressS(v, runeKey('L'))
+	if cmd == nil || !strings.Contains(viewS(v), "asking 1") {
+		t.Fatalf("L should ask again:\n%s", viewS(v))
+	}
+	feedAssess(v, cmd)
+	if len(*ids) != 0 || len(*reIDs) != 1 || (*reIDs)[0] != "evil.stealer" {
+		t.Fatalf("L should use Reassess: assess %v reassess %v", *ids, *reIDs)
+	}
+	if got := v.results[0]; got.Cached || got.Verdict != llm.Benign {
+		t.Fatalf("fresh answer should replace the saved one: %+v", got)
+	}
+	if strings.Contains(viewS(v), "saved") {
+		t.Fatal("saved tag should be gone")
+	}
+	// L with nothing ticked is the same hint as l.
+	pressS(v, keySpace)
+	if cmd := pressS(v, runeKey('L')); cmd != nil || !strings.Contains(viewS(v), nothingTickedAssess) {
+		t.Fatal("L with nothing ticked should hint")
+	}
+}
+
+func TestScanViewLFallsBackToAssess(t *testing.T) {
+	assess, ids := recordingAssess()
+	v := newTestScan(t, Assessor{Assess: assess})
+	v.results[0] = llm.Assessment{Verdict: llm.Malicious, Confidence: 0.9}
+	pressS(v, keySpace)
+	feedAssess(v, pressS(v, runeKey('L')))
+	if len(*ids) != 1 || v.results[0].Verdict != llm.Benign {
+		t.Fatalf("L without Reassess should use Assess and replace the answer: %v %+v", *ids, v.results[0])
+	}
+}
+
+func TestScanViewModelSwapDropsCached(t *testing.T) {
+	assess, _ := recordingAssess()
+	a := Assessor{Assess: assess, Cached: cachedFor("evil.stealer", llm.Assessment{Verdict: llm.Malicious, Confidence: 0.9})}
+	v := newTestScan(t, a)
+	v.results[1] = llm.Assessment{Verdict: llm.Benign, Confidence: 0.9} // a fresh answer stays
+	v.Update(assessorMsg{a: Assessor{Label: "anthropic · other", Assess: assess, Cached: cachedFor("good.theme", llm.Assessment{Verdict: llm.Benign, Confidence: 0.8})}})
+	if _, ok := v.results[0]; ok {
+		t.Error("the old model's saved answer should be dropped")
+	}
+	if _, ok := v.results[1]; !ok {
+		t.Error("a fresh answer from this screen stays")
+	}
+	if got, ok := v.results[2]; !ok || !got.Cached {
+		t.Error("the new model's saved answers should be preloaded")
+	}
+	v.Update(assessorMsg{a: Assessor{Label: "ollama · x", Assess: assess}})
+	if _, ok := v.results[2]; ok {
+		t.Error("a provider without a cache drops the saved answers")
+	}
+}
+
+func TestScanViewHelpListsL(t *testing.T) {
+	v := newTestScan(t, Assessor{})
+	pressS(v, runeKey('?'))
+	if out := viewS(v); !strings.Contains(out, "ignoring saved answers") {
+		t.Fatalf("help should explain L:\n%s", out)
+	}
+}
+
+func TestScanViewUntickedQueuedRowIsSkipped(t *testing.T) {
+	assess, ids := recordingAssess()
+	v := newTestScan(t, Assessor{Assess: assess})
+	pressS(v, keySpace, keyDown, keySpace, keyDown, keySpace) // tick all three; the third queues
+	cmd := pressS(v, runeKey('l'))
+	pressS(v, keySpace) // untick good.theme while it is still queued
+	feedAssess(v, feedAssess(v, cmd))
+	if strings.Join(*ids, " ") != "evil.stealer mid.tool" {
+		t.Fatalf("an unticked queued row must not be sent: %v", *ids)
+	}
+	if len(v.queue) != 0 || len(v.pending) != 0 {
+		t.Fatalf("queue %d pending %d", len(v.queue), len(v.pending))
+	}
+}
+
+func TestScanViewFlashWhileAsking(t *testing.T) {
+	block := make(chan struct{})
+	assess := func(context.Context, heur.Report) (llm.Assessment, error) {
+		<-block
+		return llm.Assessment{Verdict: llm.Benign}, nil
+	}
+	v := newTestScan(t, Assessor{Assess: assess})
+	defer close(block)
+	pressS(v, keySpace, runeKey('l'))
+	if cmd := pressS(v, runeKey('l')); cmd != nil || !strings.Contains(viewS(v), "1 already asking") {
+		t.Fatalf("second l while asking:\n%s", viewS(v))
+	}
+}
+
+func TestScanViewFooterFitsWidth(t *testing.T) {
+	for _, w := range []int{40, 80, 140} {
+		v := NewScanView(scanFixture(), Assessor{Assess: func(context.Context, heur.Report) (llm.Assessment, error) { return llm.Assessment{}, nil }, Models: &ModelDeps{}})
+		v.Update(tea.WindowSizeMsg{Width: w, Height: 20})
+		lines := strings.Split(viewS(v), "\n")
+		footer := strings.TrimRight(lines[len(lines)-1], " ")
+		if got := lipgloss.Width(footer); got > w {
+			t.Errorf("width %d: footer is %d cells: %q", w, got, footer)
+		}
+		if !strings.HasSuffix(footer, "? help") {
+			t.Errorf("width %d: footer must end with ? help: %q", w, footer)
+		}
+		if len(lines) != 20 {
+			t.Errorf("width %d: view has %d lines, want 20", w, len(lines))
+		}
+	}
+}
+
+func TestScanViewModelSwapDropsStaleAnswers(t *testing.T) {
+	block := make(chan struct{})
+	old := func(context.Context, heur.Report) (llm.Assessment, error) {
+		<-block
+		return llm.Assessment{Verdict: llm.Malicious, Confidence: 0.9, Model: "old"}, nil
+	}
+	v := newTestScan(t, Assessor{Label: "anthropic · old", Assess: old})
+	cmd := pressS(v, keySpace, runeKey('l'))
+	if !v.pending[0] {
+		t.Fatal("call should be in flight")
+	}
+	// The model changes while the old call is still running.
+	v.Update(assessorMsg{a: Assessor{Label: "anthropic · new", Assess: old, Cached: cachedFor("evil.stealer", llm.Assessment{Verdict: llm.Benign, Confidence: 0.8, Model: "new"})}})
+	if got := v.results[0]; !got.Cached || got.Model != "new" {
+		t.Fatalf("new model's saved answer should be preloaded: %+v", got)
+	}
+	close(block)
+	feedAssess(v, cmd)
+	if got := v.results[0]; got.Model != "new" {
+		t.Fatalf("the old model's late answer must not replace the new model's: %+v", got)
+	}
+	if len(v.pending) != 0 {
+		t.Fatal("the stale call must not stay pending")
+	}
+	if strings.Contains(viewS(v), "asking the LLM") {
+		t.Fatal("no pending indicator after the stale answer")
+	}
+}
+
+func TestScanViewDetailTopResetsOnPaneSwitch(t *testing.T) {
+	v := NewScanView(scanFixture(), Assessor{Assess: func(context.Context, heur.Report) (llm.Assessment, error) { return llm.Assessment{}, nil }})
+	v.Update(tea.WindowSizeMsg{Width: 80, Height: 12})
+	v.results[0] = llm.Assessment{Verdict: llm.Malicious, Confidence: 0.9, Reasoning: "Steals keys. More."}
+	v.results[1] = llm.Assessment{Verdict: llm.Benign, Confidence: 0.9, Reasoning: "Fine. More."}
+	pressS(v, keySpace, keyDown, keySpace) // summary pane
+	if !strings.Contains(viewS(v), "AI summary") {
+		t.Fatalf("summary expected:\n%s", viewS(v))
+	}
+	pressS(v, tea.KeyPressMsg{Code: tea.KeyTab}, keyDown, keyDown, keyDown)
+	if v.detailTop == 0 {
+		t.Fatal("summary should have scrolled")
+	}
+	pressS(v, tea.KeyPressMsg{Code: tea.KeyTab}, keySpace) // untick: back to the single detail
+	if v.detailTop != 0 || strings.Contains(viewS(v), "AI summary") {
+		t.Fatalf("switching panes should reset the scroll: detailTop=%d", v.detailTop)
+	}
+}

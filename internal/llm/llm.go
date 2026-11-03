@@ -23,15 +23,15 @@ const (
 
 // Assessment is the model's structured answer.
 type Assessment struct {
-	Verdict    string   `json:"verdict"`    // benign | suspicious | malicious | unknown
-	Confidence float64  `json:"confidence"` // 0..1
-	Reasoning  string   `json:"reasoning"`  // two to five sentences
-	IOCs       []string `json:"iocs"`       // hosts, paths, hashes the model considers indicators
-	Provider   string   `json:"provider"`   // filled by the caller, not the model
+	Verdict    string   `json:"verdict"`          // benign | suspicious | malicious | unknown
+	Confidence float64  `json:"confidence"`       // 0..1
+	Reasoning  string   `json:"reasoning"`        // two to five sentences
+	IOCs       []string `json:"iocs"`             // hosts, paths, hashes the model considers indicators
+	Cached     bool     `json:"cached,omitempty"` // answered from the saved assessments, not the model
+	Provider   string   `json:"provider"`         // filled by the caller, not the model
 	Model      string   `json:"model"`
 }
 
-// Provider is one model backend.
 // ConfidenceThreshold is the confidence from which a verdict is shown as
 // settled (a tick or a cross in the scan list); below it the row is marked
 // unsure whatever the verdict.
@@ -51,6 +51,7 @@ type ModelInfo struct {
 	Deprecated  bool      `json:"deprecated,omitempty"`
 }
 
+// Provider is one model backend.
 type Provider interface {
 	Name() string  // "anthropic" | "openai" | "ollama" | "fake"
 	Model() string // model id in use

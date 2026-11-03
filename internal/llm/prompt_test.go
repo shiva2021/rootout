@@ -1,6 +1,8 @@
 package llm
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"os"
 	"path/filepath"
@@ -146,5 +148,39 @@ func TestNormalize(t *testing.T) {
 		if a.Verdict != tt.want || a.Confidence != 1 || a.IOCs == nil || a.Provider != "p" || a.Model != "m" {
 			t.Errorf("%q -> %+v", tt.in, a)
 		}
+	}
+}
+
+// TestPromptVersionBumped pins the system prompt and the user-message layout
+// (through the golden file): a change to either must bump PromptVersion, so
+// saved assessments made with the old prompt are not reused.
+func TestPromptVersionBumped(t *testing.T) {
+	golden, err := os.ReadFile(filepath.Join("testdata", "prompt.golden"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(append([]byte(systemPrompt+"\n"), golden...))
+	if got := hex.EncodeToString(sum[:8]); got != promptFingerprint {
+		t.Fatalf("the prompt changed (fingerprint %s, pinned %s): bump PromptVersion (now %d) and set promptFingerprint to %q", got, promptFingerprint, PromptVersion, got)
+	}
+	if PromptVersion < 1 {
+		t.Fatal("PromptVersion starts at 1")
+	}
+}
+
+func TestFingerprintStable(t *testing.T) {
+	r := fixtureReport()
+	a, b := Fingerprint(r), Fingerprint(fixtureReport())
+	if a != b || len(a) != 16 {
+		t.Fatalf("same report: %q vs %q", a, b)
+	}
+	r.Score = 12
+	if c := Fingerprint(r); c == a {
+		t.Fatal("a different score should change the fingerprint")
+	}
+	r = fixtureReport()
+	r.Findings = r.Findings[:2]
+	if c := Fingerprint(r); c == a {
+		t.Fatal("different findings should change the fingerprint")
 	}
 }

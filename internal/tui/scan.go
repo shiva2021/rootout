@@ -32,12 +32,13 @@ const (
 	assessWorkers       = 2
 	nothingTickedAssess = "tick rows with space, then l"
 	summaryHidden       = "(hidden)"
+	savedTag            = "saved" // an answer from a previous run
 
 	// Verdict icons shown after the editor tag; iconW is the slot width
 	// (⚠ is drawn 1 or 2 cells wide depending on the terminal).
 	iconBenign    = "✓"
 	iconMalicious = "✗"
-	iconUnsure    = "⚠"
+	iconUnsure    = "⚠\ufe0e" // text presentation: one cell, not the two-cell emoji
 	iconError     = "!"
 	iconW         = 2
 )
@@ -60,9 +61,16 @@ type Assessor struct {
 	// key; nil = unavailable (no key). Built in cmd/ with the key resolved.
 	HostedModels func(ctx context.Context) ([]llm.ModelInfo, error)
 	// OnModel is called after the user picks a model for provider and
-	// returns the replacement Assessor (Provider, Label, Assess, Models and
-	// HostedModels are taken from it).
+	// returns the replacement Assessor (every field but OnModel is taken
+	// from it, OnModel only when set).
 	OnModel func(ctx context.Context, provider, model string) (Assessor, error)
+	// Cached answers from the saved assessments without a model call; nil
+	// = nothing saved (local models, --no-cache). Results it returns carry
+	// Cached and are preloaded when the screen opens.
+	Cached func(r heur.Report) (llm.Assessment, bool)
+	// Reassess asks the model ignoring saved answers (the L key); nil
+	// falls back to Assess.
+	Reassess AssessFunc
 }
 
 // ReviewScan shows the scan results full screen and returns the extensions
@@ -83,9 +91,12 @@ func ReviewScan(ctx context.Context, reports []heur.Report, a Assessor) (ScanRes
 	return res, ok, nil
 }
 
-// assessMsg carries one finished LLM assessment back to the view.
+// assessMsg carries one finished LLM assessment back to the view; gen is
+// the assessor generation the call was made under, so an answer from a
+// model the user has since replaced is dropped.
 type assessMsg struct {
 	report int
+	gen    int
 	a      llm.Assessment
 	err    error
 }
@@ -150,7 +161,10 @@ type ScanView struct {
 	results  map[int]llm.Assessment
 	errs     map[int]error
 	pending  map[int]bool
-	queue    []int // reports waiting for a worker, in ask order
+	queue    []int        // reports waiting for a worker, in ask order
+	force    map[int]bool // queued by L: ask even if answered, ignoring saved answers
+	gen      int          // bumped on every model swap; in-flight calls carry the old value
+	summary  bool         // the details pane showed the summary at the last update
 	hideLow  bool
 	detailsF bool // details pane has focus
 
@@ -179,11 +193,25 @@ func NewScanView(reports []heur.Report, a Assessor) *ScanView {
 		results:  map[int]llm.Assessment{},
 		errs:     map[int]error{},
 		pending:  map[int]bool{},
+		force:    map[int]bool{},
 		width:    defaultWidth,
 		height:   defaultHeight,
 	}
 	v.filter()
+	v.preload()
 	return v
+}
+
+// preload fills results with the saved answers for this assessor.
+func (v *ScanView) preload() {
+	if v.assessor.Cached == nil {
+		return
+	}
+	for i, r := range v.reports {
+		if a, ok := v.assessor.Cached(r); ok {
+			v.results[i] = a
+		}
+	}
 }
 
 // Result returns the reports ticked for removal once the program has quit;
@@ -222,21 +250,41 @@ func (v *ScanView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			v.errLine = "model: " + msg.err.Error()
 			return v, nil
 		}
+		v.gen++ // calls in flight keep running; their answers are kept only where nothing newer exists
 		v.assessor.Provider, v.assessor.Label, v.assessor.Assess = msg.a.Provider, msg.a.Label, msg.a.Assess
 		v.assessor.Models, v.assessor.HostedModels = msg.a.Models, msg.a.HostedModels
+		v.assessor.Cached, v.assessor.Reassess = msg.a.Cached, msg.a.Reassess
 		if msg.a.OnModel != nil {
 			v.assessor.OnModel = msg.a.OnModel
 		}
+		// Saved answers belong to the model that gave them; this screen's
+		// own answers stay, labelled with their model.
+		for i, a := range v.results {
+			if a.Cached {
+				delete(v.results, i)
+			}
+		}
+		v.preload()
 		return v, nil
 
 	case assessMsg:
 		delete(v.pending, msg.report)
+		if msg.gen != v.gen {
+			// From a model the user has since replaced: a real answer, kept
+			// (labelled with its model) unless the new model already has one.
+			_, has := v.results[msg.report]
+			if msg.err != nil || has {
+				v.syncPane()
+				return v, v.startNext()
+			}
+		}
 		if msg.err != nil {
 			v.errs[msg.report] = msg.err
 		} else {
 			delete(v.errs, msg.report)
 			v.results[msg.report] = msg.a
 		}
+		v.syncPane()
 		return v, v.startNext()
 
 	case spinner.TickMsg:
@@ -272,9 +320,23 @@ func (v *ScanView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return v, v.confirmUpdate(msg)
 	}
 	if k, ok := msg.(tea.KeyPressMsg); ok {
-		return v.key(k)
+		m, cmd := v.key(k)
+		v.syncPane()
+		return m, cmd
 	}
 	return v, nil
+}
+
+// summaryShown reports whether the details pane is the AI summary.
+func (v *ScanView) summaryShown() bool { return v.tickedCount() > 1 && v.anyTickedAsked() }
+
+// syncPane resets the details scroll when the pane switches between the
+// summary and a single report, so neither opens mid-scroll.
+func (v *ScanView) syncPane() {
+	if s := v.summaryShown(); s != v.summary {
+		v.summary = s
+		v.detailTop = 0
+	}
 }
 
 func (v *ScanView) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -301,7 +363,9 @@ func (v *ScanView) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		v.hideLow = !v.hideLow
 		v.filter()
 	case "l":
-		return v, v.enqueueAssess()
+		return v, v.enqueueAssess(false)
+	case "L":
+		return v, v.enqueueAssess(true)
 	case "m":
 		return v, v.openPicker()
 	case "?":
@@ -421,8 +485,10 @@ func (v *ScanView) View() tea.View {
 
 // enqueueAssess queues the ticked reports for the model, skipping the ones
 // already answered or in flight (an errored one is asked again), and
-// starts as many as the worker bound allows. Nothing ticked is a hint.
-func (v *ScanView) enqueueAssess() tea.Cmd {
+// starts as many as the worker bound allows. With force (the L key) the
+// answered ones are asked again, ignoring saved answers. Nothing ticked is
+// a hint.
+func (v *ScanView) enqueueAssess(force bool) tea.Cmd {
 	if v.assessor.Assess == nil {
 		return nil
 	}
@@ -431,26 +497,33 @@ func (v *ScanView) enqueueAssess() tea.Cmd {
 		v.flash = nothingTickedAssess
 		return nil
 	}
-	answered, asked := 0, 0
+	answered, asking, asked := 0, 0, 0
 	for _, r := range order {
-		if _, ok := v.results[r]; ok {
+		if v.pending[r] || slices.Contains(v.queue, r) {
+			asking++
+			continue
+		}
+		if _, ok := v.results[r]; ok && !force {
 			answered++
 			continue
 		}
-		if v.pending[r] || slices.Contains(v.queue, r) {
-			continue
-		}
 		v.queue = append(v.queue, r)
+		if force {
+			v.force[r] = true
+		}
 		asked++
 	}
-	switch {
-	case asked == 0:
-		v.flash = fmt.Sprintf("%d already answered", answered)
-	case answered > 0:
-		v.flash = fmt.Sprintf("asking %d · %d already answered", asked, answered)
-	default:
-		v.flash = fmt.Sprintf("asking %d", asked)
+	var parts []string
+	if asked > 0 {
+		parts = append(parts, fmt.Sprintf("asking %d", asked))
 	}
+	if answered > 0 {
+		parts = append(parts, fmt.Sprintf("%d already answered", answered))
+	}
+	if asking > 0 {
+		parts = append(parts, fmt.Sprintf("%d already asking", asking))
+	}
+	v.flash = strings.Join(parts, labelSep)
 	return v.startNext()
 }
 
@@ -463,12 +536,25 @@ func (v *ScanView) startNext() tea.Cmd {
 	for len(v.pending) < assessWorkers && len(v.queue) > 0 {
 		r := v.queue[0]
 		v.queue = v.queue[1:]
+		if !v.ticked[r] {
+			// Unticked while waiting: the user changed their mind before it
+			// cost anything.
+			delete(v.force, r)
+			continue
+		}
 		v.pending[r] = true
 		delete(v.errs, r)
-		ctx, assess, rep := v.ctx, v.assessor.Assess, v.reports[r]
+		assess := v.assessor.Assess
+		if v.force[r] {
+			delete(v.force, r)
+			if v.assessor.Reassess != nil {
+				assess = v.assessor.Reassess
+			}
+		}
+		ctx, rep, gen := v.ctx, v.reports[r], v.gen
 		cmds = append(cmds, func() tea.Msg {
 			a, err := assess(ctx, rep)
-			return assessMsg{report: r, a: a, err: err}
+			return assessMsg{report: r, gen: gen, a: a, err: err}
 		})
 	}
 	if len(cmds) == 0 {
@@ -625,17 +711,38 @@ func (v *ScanView) render() string {
 	return out
 }
 
-// footerHelp lists the keys that currently do something.
+// footerHelp lists the keys that currently do something, dropping the
+// least important ones until the line fits the width; "? help" always stays.
 func (v *ScanView) footerHelp() string {
 	parts := []string{"↑/↓ move", "space tick", "tab focus", "f hide low"}
 	if v.assessor.Assess != nil {
-		parts = append(parts, "l ask AI (ticked)")
+		parts = append(parts, "l ask AI (ticked)", "L re-ask")
 	}
 	if v.assessor.Models != nil || (v.hosted() && v.assessor.HostedModels != nil) {
 		parts = append(parts, "m model")
 	}
 	parts = append(parts, "enter uninstall", "esc back", "ctrl+x quit", "? help")
-	return strings.Join(parts, " · ")
+	return fitFooter(parts, v.width)
+}
+
+// footerDropOrder is the order in which footer entries give way on a
+// narrow terminal (they all remain in the ? overlay).
+var footerDropOrder = []string{"tab focus", "f hide low", "ctrl+x quit", "esc back", "space tick", "enter uninstall", "L re-ask", "m model", "l ask AI (ticked)", "↑/↓ move"}
+
+// fitFooter joins parts with the separator, removing entries in
+// footerDropOrder until the result fits width.
+func fitFooter(parts []string, width int) string {
+	line := strings.Join(parts, labelSep)
+	for _, drop := range footerDropOrder {
+		if lipgloss.Width(line) <= width {
+			break
+		}
+		if i := slices.Index(parts, drop); i >= 0 {
+			parts = slices.Delete(parts, i, i+1)
+			line = strings.Join(parts, labelSep)
+		}
+	}
+	return output.Truncate(line, max(width, 1))
 }
 
 // helpKeys is the ? overlay table.
@@ -646,6 +753,7 @@ func (v *ScanView) helpKeys() []keyHelp {
 		{"tab", "switch focus between the list and the details"},
 		{"f", "hide / show extensions scoring under " + fmt.Sprint(lowScore)},
 		{"l", "ask the configured AI about every ticked extension, " + fmt.Sprint(assessWorkers) + " at a time; rows already answered are skipped, errors are retried"},
+		{"L", "ask again for the ticked extensions, ignoring saved answers (paid providers keep answers across runs)"},
 		{"m", "pick a model: the provider's hosted list (Claude, OpenAI) or a local Ollama model"},
 		{iconBenign + " " + iconMalicious + " " + iconUnsure + " " + iconError, fmt.Sprintf("AI verdict: benign · malicious (both at %.0f%% confidence or more) · suspicious, unknown or unsure · error", llm.ConfidenceThreshold*100)},
 		{"enter", "uninstall the ticked extensions (asks you to type " + plan.ConfirmWord + ")"},
@@ -792,7 +900,7 @@ func (v *ScanView) renderDetails(width, rows int) string {
 // at least one has been asked.
 func (v *ScanView) detailLines(width int) []string {
 	width = max(width, 10)
-	if v.tickedCount() > 1 && v.anyTickedAsked() {
+	if v.summaryShown() {
 		return v.summaryLines(width)
 	}
 	ri, ok := v.current()
@@ -907,6 +1015,9 @@ func (v *ScanView) summaryLines(width int) []string {
 					vs = s.dim
 				}
 				status = vs.Render(fmt.Sprintf("%s %.0f%%", strings.ToUpper(a.Verdict), a.Confidence*100))
+				if a.Cached {
+					status += s.dim.Render(" " + savedTag)
+				}
 				reason = firstSentence(a.Reasoning)
 			} else {
 				status = s.dim.Render("not asked")
@@ -977,6 +1088,9 @@ func (v *ScanView) assessBox(ri, width int) string {
 	head := vs.Render(strings.ToUpper(a.Verdict)) + s.dim.Render(fmt.Sprintf("  %.0f%% confidence", a.Confidence*100))
 	if a.Model != "" {
 		head += s.dim.Render(" · " + a.Model)
+	}
+	if a.Cached {
+		head += s.dim.Render(" · " + savedTag)
 	}
 	parts := []string{head}
 	if a.Reasoning != "" {

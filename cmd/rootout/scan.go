@@ -33,6 +33,7 @@ type scanFlags struct {
 	pickModel bool
 	uninstall []string
 	yes       bool
+	noCache   bool
 }
 
 // scanItem is one JSON row: the heuristic report plus the model's opinion.
@@ -62,8 +63,15 @@ counts from the registry. --llm asks the configured AI model (Claude, OpenAI
 or a local Ollama model) for a second opinion; it sees only the findings and
 short snippets, never the whole extension.
 
+Answers from Claude or OpenAI are saved under ~/.cache/rootout and reused on
+the next run for the same extension version, provider, model and prompt, so
+a paid model is not asked twice; --no-cache neither reads nor writes them,
+"rootout config cache clear" forgets them, and L in the review screen asks
+again. Local Ollama answers are never saved.
+
 --json prints one object per extension: the findings, the score and, with
---llm, the model's verdict. It never opens the review screen.`,
+--llm, the model's verdict ("cached": true when it was a saved answer). It
+never opens the review screen.`,
 		Example: `  rootout scan                          # score extensions, review on screen
   rootout scan --all --no-tui           # print every extension and its score
   rootout scan --editor cursor          # only Cursor's extensions
@@ -86,6 +94,7 @@ short snippets, never the whole extension.
 	fl.StringVar(&f.model, "model", "", "model id for this run (implies --llm)")
 	fl.BoolVar(&f.noTUI, "no-tui", false, "print results instead of opening the review screen")
 	fl.BoolVar(&f.pickModel, "pick-model", false, "choose a local Ollama model before scanning (terminal only)")
+	fl.BoolVar(&f.noCache, "no-cache", false, "neither read nor save answers from Claude/OpenAI for this run")
 	fl.StringArrayVar(&f.uninstall, "uninstall", nil, "extension id to uninstall without the review screen (repeatable; asks for the typed word unless --yes)")
 	fl.BoolVarP(&f.yes, "yes", "y", false, "do not ask for confirmation (only with --uninstall)")
 	return cmd
@@ -157,7 +166,7 @@ func runScan(ctx context.Context, g *globalFlags, f scanFlags) error {
 		// In the review screen the model is asked on demand; only build it
 		// eagerly when --llm was requested or a provider is configured.
 		if wantsAI || c.LLM.Provider != "" || interactive {
-			assessor, err = buildAssessor(ctx, c, f.provider, f.model, interactive)
+			assessor, err = buildAssessor(ctx, c, f.provider, f.model, interactive, f.noCache)
 			if err != nil {
 				return declinedOnQuit(err, "no model chosen")
 			}
@@ -179,6 +188,13 @@ func runScan(ctx context.Context, g *globalFlags, f scanFlags) error {
 	for i, r := range shown {
 		items[i].Report = r
 		if assessor.Assess != nil && wantsAI {
+			if assessor.Cached != nil {
+				if a, ok := assessor.Cached(r); ok {
+					fmt.Fprintf(os.Stderr, "rootout: %s: using the saved assessment\n", r.Ext.ID)
+					items[i].Assessment = &a
+					continue
+				}
+			}
 			fmt.Fprintf(os.Stderr, "rootout: asking the model about %s...\n", r.Ext.ID)
 			a, err := assessor.Assess(ctx, r)
 			if err != nil {
@@ -344,7 +360,11 @@ func printReports(w *output.Writer, items []scanItem, total, min int) error {
 	for _, it := range items {
 		r := it.Report
 		if it.Assessment != nil {
-			w.Printf("\n%s: AI verdict %s (%d%%, %s)\n  %s\n", r.Ext.ID, it.Assessment.Verdict, int(it.Assessment.Confidence*100), it.Assessment.Model, it.Assessment.Reasoning)
+			model := it.Assessment.Model
+			if it.Assessment.Cached {
+				model += ", saved"
+			}
+			w.Printf("\n%s: AI verdict %s (%d%%, %s)\n  %s\n", r.Ext.ID, it.Assessment.Verdict, int(it.Assessment.Confidence*100), model, it.Assessment.Reasoning)
 		} else if it.AssessErr != "" {
 			w.Printf("\n%s: AI assessment failed: %s\n", r.Ext.ID, it.AssessErr)
 		}

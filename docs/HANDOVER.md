@@ -1,13 +1,20 @@
 # Handover
 
-_Updated: 2026-11-04 · Session: scan/LLM enhancements in four phases; Phase 1 (hosted model choice, D-035) on branch `m7/hosted-model`_
+_Updated: 2026-11-04 · Session: scan/LLM enhancements in four phases (D-035…D-038) on four stacked branches_
 
 ## Status
 **Four enhancements are being shipped as four stacked branches/PRs** (plan: `~/.claude/plans/declarative-frolicking-patterson.md`, summarised here): (1) hosted model choice, (2) `l` assesses the ticked rows only with a bounded queue and a multi-result pane, (3) ✓/✗/⚠ verdict icons in the list, (4) assessments from paid providers persisted across runs. Decisions taken with Shivang: ticked rows are the uninstall tick and `l` refuses with a hint when nothing is ticked; icons come from the LLM verdict only (threshold 70 %); model choice in the wizard plus `m` and `config models`, no one-time prompt; one PR per phase, later branches stack on the earlier one until Shivang merges.
 
-**Phase 1 (D-035, v0.7.0) is code-complete on `m7/hosted-model`**: `anthropic/openai.ListModels` (`Verify` wraps them), `providers.ListModels`, `tui.HostedPicker` + the `embeddedPicker` interface, the wizard's model step after a verified key, `m` on the scan screen for hosted providers, `config models --provider anthropic|openai [--pick]`, generic `saveModel`, home AI line refreshed after a scan. `make test`/`make lint` green. Live on this Mac: `rootout config models --provider anthropic` listed the real catalogue with the stored key (Haiku 5.5 … Sonnet 4.6, current marked). Not yet run in a real terminal: the wizard's model step and `m` → hosted picker (unit tests cover both).
+**All four phases are code-complete, each on its own branch stacked on the previous one** (`m7/hosted-model` → `m7/assess-ticked` → `m7/verdict-icons` → `m7/assess-cache`), `make test`/`make lint` green at every tip, one DECISIONS entry each (D-035…D-038), CHANGELOG "Unreleased" carries all four, `docs/kb/assessments.md` is the kb page.
 
-**Next**: review findings folded in, push, PR to `main`, then Phase 2 on `m7/assess-ticked` cut from this branch. `docs/kb/assessments.md` is the kb page for all four phases.
+- **Phase 1 (D-035, v0.7.0)**: `anthropic/openai.ListModels` (`Verify` wraps them), `providers.ListModels`, `tui.HostedPicker` + `embeddedPicker`, the wizard's model step after a verified key, `m` on the scan screen for hosted providers, `config models --provider anthropic|openai [--pick]`, generic `saveModel`, home AI line refreshed after a scan. Live: `config models --provider anthropic` listed the real catalogue with the stored key.
+- **Phase 2 (D-036, v0.8.0)**: `l` asks about the ticked rows only, two at a time (`assessWorkers`), skips answered rows, retries errors, hint when nothing is ticked; "AI summary" pane once more than one row is ticked and one asked.
+- **Phase 3 (D-037, v0.9.0)**: ✓/✗/⚠/! after the editor tag from `llm.Assessment` only (`llm.ConfidenceThreshold` 0.70, `Confident()`); legend on the AI line and in `?`; rows too narrow for the editor tag drop it.
+- **Phase 4 (D-038, v0.10.0)**: `internal/assesscache` (JSON under `~/.cache/rootout`, `ROOTOUT_CACHE`), `llm.PromptVersion` + `Fingerprint` with a pinning test, cache wired in `cmd/rootout/assess.go` only, preload + `L` on the scan screen, `scan --no-cache`, `config cache clear`, `config show` line, "saved"/`"cached": true` markers. Live on this Mac: `scan --no-tui --llm --min-score 30` asked Claude about 9 extensions; the second run answered all 9 from the file; `--json` shows 9 cached rows.
+
+Driven through a pty against a fake local model: tick two rows → `l` → "asking 2" → summary pane with both verdicts, ✓ icons and the legend, `?` lists `L` and the icon key. Not yet run in a real terminal: the wizard's model step and `m` → hosted picker (view tests cover them). Two fresh reviewers read the branches; their findings are fixed in the last commit of `m7/hosted-model` (stale cancelled-fetch message, Responses-incompatible OpenAI ids, blank-Keychain panic, `--pick` after a failed fetch) and of `m7/assess-cache` (`config cache clear` refuses anything that is not a rootout cache file, ⚠ with U+FE0E, unticked queued rows are not sent, one cache instance per run, footer fits 80 columns). Every review finding, minors included, is fixed (see "Review follow-ups").
+
+**Next**: PRs #10 (→ `main`), #11 (→ `m7/hosted-model`), #12 (→ `m7/assess-ticked`), #13 (→ `m7/verdict-icons`) are open. Shivang merges #10, retargets #11 to `main`, merges, and so on; tag v0.7.0 … v0.10.0 after each merge (`make release-check NEXT=…`). Each phase has a CHANGELOG line under Unreleased; move them into the version section at tag time.
 
 ## Done earlier (onboarding, 2026-11-03)
 - Brainstormed with Shivang: TUI wizard + `rootout setup`; status line + "Set up AI" row; live key check with save-anyway. Plan reviewed by a Plan agent and the advisor; findings folded in: key paste trimming, `CharLimit = 0`, input blurred in the error state, per-call timeout, Keychain read once per launch, empty file on skip.
@@ -56,6 +63,9 @@ _Updated: 2026-11-04 · Session: scan/LLM enhancements in four phases; Phase 1 (
 - `rootout remove Spotify -n`: bundle + 7 leftovers, 3.8 GB; `Mail` refused.
 - `rootout scan --all`: scores 5–30; the 30 is `ms-python.vscode-python-envs` piping the uv installer into `sh` (true finding).
 - Live removal and live LLM calls have not been run.
+
+## Review follow-ups (all fixed)
+Both reviewers' findings, including the minors, are fixed: the hosted-picker polish on `m7/hosted-model` (`?` opens help while typing, truncated id/name columns, narrow widths, silent `saveModel`, clearer `--provider` error) and, on `m7/assess-cache`, stale old-model answers kept only where nothing newer exists, scroll reset on pane switch, `XDG_CACHE_HOME`, and an unreadable cache file reported once on stderr and in `config show` instead of a log warning. PRs 10–12 still carry the transient Phase 2/3 issues fixed on the Phase 4 tip; `main` is right once all four merge.
 
 ## Blockers and open questions
 - Unsigned binary relies on the cask's quarantine-clearing step (D-030); a future macOS may block it.
