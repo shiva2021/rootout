@@ -4,6 +4,8 @@ All notable changes to rootout. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-04
+
 ### Added
 - Choose the Claude or OpenAI model you pay for: the setup screen lists the models your key can use right after the key check (the check is the same request) and saves the choice; `m` in the scan screen and `rootout config models --provider anthropic|openai [--pick]` change it later. Type an id by hand when the list cannot be fetched (D-035).
 - Answers from Claude and OpenAI are saved under `~/.cache/rootout/assessments.json` and reused on later runs for the same extension version, provider, model and prompt, so a paid model is not asked twice; `L` in the scan screen asks again, `scan --no-cache` skips the file for one run, `config cache clear` forgets it and `config show` reports it. Saved answers are marked "saved" (and `"cached": true` in `--json`). Local Ollama answers are never saved (D-038).
