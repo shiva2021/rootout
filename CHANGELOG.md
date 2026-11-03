@@ -4,6 +4,8 @@ All notable changes to rootout. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-04
+
 ### Added
 - rootout tells you when a newer release exists. `rootout doctor` gains an `Update` row right after the version: it asks GitHub for the latest release (one request, 5 s timeout) and shows `!` with the upgrade command (`brew update && brew upgrade --cask rootout` for a Homebrew install, else the release page) when yours is older. The home screen shows `vX.Y.Z available · …` after the version in the title, from a daily record at `~/.cache/rootout/update.json` (`XDG_CACHE_HOME` honoured), so GitHub is asked at most once a day and the screen never waits. `rootout config set updates.check false` turns both off; builds without a release version (`go install`, `dev`) never check (D-039).
 
