@@ -4,6 +4,11 @@ All notable changes to rootout. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-04
+
+### Changed
+- Dependencies: anthropic-sdk-go 1.82.0 → 1.84.0, openai-go 3.82.0 → 3.91.0, bubbletea 2.1.0 → 2.1.1 (Dependabot PRs #5, #4, #3). The model-list fields D-035 relies on (`ModelInfo.Lifecycle`, `Model.ShutdownDate`) are unchanged; no behaviour change.
+
 ## [0.8.1] - 2026-11-04
 
 ### Fixed
