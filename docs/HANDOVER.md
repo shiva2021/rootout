@@ -1,9 +1,11 @@
 # Handover
 
-_Updated: 2026-11-04 · Session: README release diagram (PR #15) and release runbook aligned with the PR flow, after the v0.7.0 release_
+_Updated: 2026-11-04 · Session: update-check plan filed to the backlog (`docs/plans/update-check.md`), after the README release diagram (PR #15) and the v0.7.0 release_
 
 ## Status
-**README now has a "Releases" section** with a mermaid diagram of the release flow as the git history shows it: feature PRs → `release/X.Y.Z` branch with the CHANGELOG move → `make release-check` → release PR merged → tag on `main` → Release workflow (notes from CHANGELOG, GoReleaser) → GitHub Release and cask → `brew upgrade`. CHANGELOG Unreleased has the line. Docs only; `make test`/`make lint` green. `docs/kb/release.md` "Cut a release" now describes the PR flow (release branch, PR, tag on the merge commit) and names `install_steps` as `.goreleaser.yaml` does. No tag for these docs merges (Shivang's call); the Unreleased line rolls into the next release.
+**Update check is planned, not built.** Shivang asked how users learn that a new release exists; today nothing tells them (no in-app check, no announce step; Homebrew users need `brew update` + `brew outdated`, others must watch the repo). Shivang chose "doctor row plus home-screen banner" and approved the plan in plan review. It is filed as `docs/plans/update-check.md`: new `internal/update` package (GitHub `releases/latest`, 5 s timeout, three-int version compare, `dev` builds never check), a daily record at `~/.cache/rootout/update.json` (failures recorded too, so one attempt per day), `updates.check` config key (default true, turns off both), an `Update` row inserted by doctor's `RunE` only (not in `runChecks`, because `rootout guide` shares that list and must stay offline), an async one-line notice on the home title via a `func() string` passed into `PickAction`, and D-039 to record the first network call made without an explicit flag or key. The plan was checked against the code by a builder-check agent and the advisor; both catches (guide sharing `runChecks`; a corrupt config loading as zero `Config{}` and reading as "off") are folded in. No code written. The two docs files are PR #17 (`docs/update-check-plan`); no tag for the docs merge.
+
+**README has a "Releases" section** with a mermaid diagram of the release flow as the git history shows it: feature PRs → `release/X.Y.Z` branch with the CHANGELOG move → `make release-check` → release PR merged → tag on `main` → Release workflow (notes from CHANGELOG, GoReleaser) → GitHub Release and cask → `brew upgrade`. CHANGELOG Unreleased has the line. Docs only; `make test`/`make lint` green. `docs/kb/release.md` "Cut a release" now describes the PR flow (release branch, PR, tag on the merge commit) and names `install_steps` as `.goreleaser.yaml` does. No tag for these docs merges (Shivang's call); the Unreleased line rolls into the next release.
 
 ## Previous session (v0.7.0)
 **v0.7.0 covers all four scan/LLM enhancements** (D-035…D-038), merged into `main` in order as PRs #10 (hosted model choice), #11 (`l` on ticked rows, bounded queue, summary pane), #12 (verdict icons), #13 (saved assessments, `L`, `--no-cache`, `config cache clear`). One tag instead of the four the plan assumed, because all four landed together; the CHANGELOG `0.7.0` section carries the five lines. Both review passes (one per stack half) are fully folded in, minors included. `make test`/`make lint` and CI on `main` green.
@@ -29,12 +31,13 @@ Verified: unit/view tests throughout (TDD), a pty run of the scan screen against
 - `REPORT.md:47` login scrubbed at HEAD (stays in history since `90ba3fb`, Shivang's call). `.gitignore`: `/service/`, `/.idea/`. Repo topics, private vulnerability reporting on.
 
 ## Next steps
-1. `brew update && brew upgrade --cask rootout` on this Mac once the Release workflow is green, then `rootout version` → v0.7.0. Then manual: `rootout setup` → Claude → enter (keeps the stored key, live check) → model list → choose → home shows `AI: Claude · <model>`; scan → tick rows → `l` → summary and icons → `m` → hosted picker → `L`.
-2. `~/.local/bin/rootout` (an old `make install` build) is still on this Mac and may shadow the brew copy: `rm ~/.local/bin/rootout` (`docs/kb/release.md`, "Which binary am I running").
-3. Earlier manual checks still open: model grid and home loop in a real terminal; Full Disk Access denied path; v0.2 interactive flows; M2 QA on a throwaway account; live `scan --llm`.
-4. Optional: signing and notarisation (D-030 / D-015 quill flow); homebrew-cask submission once the project meets Homebrew's notability bar.
-5. One-time history scan: `brew install gitleaks && gitleaks git .`.
-6. Dependabot PRs #3–#5 (anthropic-sdk-go, openai-go, bubbletea) are open; review, merge and tag patch releases.
+1. **Build the update check** from `docs/plans/update-check.md` (approved; read it first, then `docs/kb/conventions.md`). Branch `feat/update-check`, TDD per package in the plan's order (`internal/update` → `config` → doctor → home screen → docs), log D-039 and the CHANGELOG line, PR to `main`; it is a feature, so the release after it is `v0.8.0`. Before starting, re-check `cmd/rootout/guide.go` still calls `runChecks` (the reason the row is added in doctor's `RunE`) and that `config.Load` still returns a zero `Config{}` on error (the reason the doctor row falls back to the default when the config is unreadable).
+2. `brew update && brew upgrade --cask rootout` on this Mac once the Release workflow is green, then `rootout version` → v0.7.0. Then manual: `rootout setup` → Claude → enter (keeps the stored key, live check) → model list → choose → home shows `AI: Claude · <model>`; scan → tick rows → `l` → summary and icons → `m` → hosted picker → `L`.
+3. `~/.local/bin/rootout` (an old `make install` build) is still on this Mac and may shadow the brew copy: `rm ~/.local/bin/rootout` (`docs/kb/release.md`, "Which binary am I running").
+4. Earlier manual checks still open: model grid and home loop in a real terminal; Full Disk Access denied path; v0.2 interactive flows; M2 QA on a throwaway account; live `scan --llm`.
+5. Optional: signing and notarisation (D-030 / D-015 quill flow); homebrew-cask submission once the project meets Homebrew's notability bar.
+6. One-time history scan: `brew install gitleaks && gitleaks git .`.
+7. Dependabot PRs #3–#5 (anthropic-sdk-go, openai-go, bubbletea) are open; review, merge and tag patch releases.
 
 ## Done before this session
 ### M5 release pipeline (D-030…D-032), 2026-10-22
