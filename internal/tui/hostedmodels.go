@@ -240,13 +240,16 @@ func (p *HostedPicker) key(msg tea.KeyPressMsg) tea.Cmd {
 		p.help = false
 		return nil
 	}
+	if k == "?" {
+		// Also while typing: a model id never contains "?".
+		p.help = true
+		return nil
+	}
 	if p.typing {
 		return p.typeKey(msg, k)
 	}
 	p.hint = ""
 	switch k {
-	case "?":
-		p.help = true
 	case "esc", "q":
 		p.cancel()
 		p.ok = false
@@ -422,13 +425,13 @@ func (p *HostedPicker) render() string {
 	case p.typing:
 		help = hostedTypeHelp
 		in := p.input
-		in.SetWidth(max(min(width, typedBoxWidth)-lipgloss.Width(typedPrompt), 1))
+		in.SetWidth(max(min(width, typedBoxWidth)-lipgloss.Width(typedPrompt)-1, 1)) // -1: the cursor cell
 		lines = append(lines, output.Truncate("Model id (as the provider names it):", width), in.View())
 		if p.hint != "" {
 			status = s.flash.Render(output.Truncate(p.hint, width))
 		}
 	case p.loading:
-		lines = append(lines, p.spin.View()+" listing models…")
+		lines = append(lines, output.Truncate(p.spin.View()+" listing models…", width))
 	default:
 		lines = append(lines, s.dim.Render(output.Truncate("  "+padTo("MODEL", hostedIDW)+" "+padTo("NAME", hostedNameW)+" RELEASED", width)))
 		rows := p.listRows()
@@ -465,12 +468,12 @@ func (p *HostedPicker) renderRow(i, width int) string {
 		if !m.Created.IsZero() {
 			released = m.Created.Format("2006-01-02")
 		}
-		text = padTo(id, hostedIDW) + " " + padTo(m.DisplayName, hostedNameW) + " " + released
+		text = padTo(output.Truncate(id, hostedIDW), hostedIDW) + " " + padTo(output.Truncate(m.DisplayName, hostedNameW), hostedNameW) + " " + released
 		if m.Deprecated {
 			note = "deprecated"
 		}
 	case i == len(p.models) && p.hasSynthetic():
-		text, note = padTo(p.current+" (current)", hostedIDW), "not in the list"
+		text, note = padTo(output.Truncate(p.current+" (current)", hostedIDW), hostedIDW), "not in the list"
 	default:
 		text = hostedTypeRow
 	}

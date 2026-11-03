@@ -142,6 +142,20 @@ installed and running; "rootout config models --pick" can do both.`,
 	return cmd
 }
 
+// checkModelsProvider validates "config models --provider".
+func checkModelsProvider(p string) error {
+	for _, h := range hostedProviders {
+		if p == h {
+			return nil
+		}
+	}
+	msg := fmt.Sprintf("--provider %q: want %s", p, strings.Join(hostedProviders, " or "))
+	if p == "ollama" {
+		msg += " (Ollama models are listed without --provider)"
+	}
+	return &exitErr{code: exitBadInput, msg: msg}
+}
+
 func checkHosted(p string) error {
 	for _, h := range hostedProviders {
 		if p == h {
@@ -253,7 +267,7 @@ or {provider, current, models} with --provider.
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if provider != "" {
-				if err := checkHosted(provider); err != nil {
+				if err := checkModelsProvider(provider); err != nil {
 					return err
 				}
 				return declinedOnQuit(hostedModels(cmd.Context(), g, provider, pick), "no model chosen")
@@ -484,11 +498,13 @@ func saveModel(provider, model string) error {
 		return fmt.Errorf("config: unknown provider %q (anthropic, openai, ollama)", provider)
 	}
 	c.LLM.Provider = provider
-	if err := config.Save(path, c); err != nil {
-		return err
-	}
+	return config.Save(path, c)
+}
+
+// announceModel is the one-line confirmation for the CLI paths; the scan
+// screen's m key saves silently (a stderr line would land on the screen).
+func announceModel(provider, model string) {
 	fmt.Fprintf(os.Stderr, "using %s model %s for assessments\n", providerNames[provider], model)
-	return nil
 }
 
 // hostedModels lists (or, with pick, picks and saves) a hosted provider's
@@ -524,7 +540,11 @@ func hostedModels(ctx context.Context, g *globalFlags, provider string, pick boo
 	if !ok {
 		return &exitErr{code: exitDeclined, msg: "no model chosen"}
 	}
-	return saveModel(provider, model)
+	if err := saveModel(provider, model); err != nil {
+		return err
+	}
+	announceModel(provider, model)
+	return nil
 }
 
 // resolveHostedKey is keychain.Resolve with a blank item (edited outside
@@ -592,7 +612,11 @@ func pickAndSaveModel(ctx context.Context) (string, error) {
 	if !ok {
 		return "", &exitErr{code: exitDeclined, msg: "no model chosen"}
 	}
-	return model, saveOllamaModel(model)
+	if err := saveOllamaModel(model); err != nil {
+		return "", err
+	}
+	announceModel("ollama", model)
+	return model, nil
 }
 
 func configPull(ctx context.Context, model string) error {
