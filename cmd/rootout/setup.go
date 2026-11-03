@@ -32,8 +32,8 @@ func newSetupCmd(g *globalFlags) *cobra.Command {
 		Long: `Open the setup screen: pick a free local model through Ollama, paste a
 Claude or OpenAI API key, or choose "Not now". Nothing is required: without
 a model, scans still score extensions with the built-in rules. With one,
-pressing l on an extension in the scan screen asks the model whether to
-keep or uninstall it.
+tick extensions in the scan screen and press l to ask the model whether
+to keep or uninstall them.
 
 A pasted key is checked with one free request (the provider's model list)
 before it is stored in the macOS Keychain; the same list then lets you pick

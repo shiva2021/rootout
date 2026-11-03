@@ -43,8 +43,9 @@ The first `rootout` opens a short setup screen: pick a free local model
 through Ollama, paste a Claude or OpenAI API key (checked with one free
 request, then stored in the macOS Keychain, after which you pick the model
 the key may use), or choose "Not now". AI is optional: without it, scans
-still score extensions with the built-in rules; with it, `l` on an extension
-in the scan screen asks the model whether to keep or uninstall it. The home
+still score extensions with the built-in rules; with it, tick extensions in
+the scan screen and press `l` to ask the model whether to keep or uninstall
+them (two at a time; the right pane lists every answer). The home
 screen always shows the current AI status and model, and `rootout setup`
 reopens the screen.
 

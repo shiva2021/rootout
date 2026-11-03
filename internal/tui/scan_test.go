@@ -211,7 +211,7 @@ func TestScanViewAssess(t *testing.T) {
 	if !strings.Contains(viewS(v), "l ask AI") {
 		t.Error("help should show the AI key")
 	}
-	cmd := pressS(v, runeKey('l'))
+	cmd := pressS(v, keySpace, runeKey('l'))
 	if cmd == nil {
 		t.Fatal("l should return a Cmd")
 	}
@@ -244,7 +244,7 @@ func TestScanViewAssessError(t *testing.T) {
 		return llm.Assessment{}, llm.ErrNoKey
 	}
 	v := newTestScan(t, Assessor{Assess: assess})
-	for _, msg := range runCmd(pressS(v, runeKey('l'))) {
+	for _, msg := range runCmd(pressS(v, keySpace, runeKey('l'))) {
 		v.Update(msg)
 	}
 	if !strings.Contains(viewS(v), "LLM unavailable: no API key configured") {
@@ -257,7 +257,7 @@ func TestScanViewAssessError(t *testing.T) {
 
 func TestScanViewAssessNil(t *testing.T) {
 	v := newTestScan(t, Assessor{})
-	if cmd := pressS(v, runeKey('l')); cmd != nil {
+	if cmd := pressS(v, keySpace, runeKey('l')); cmd != nil {
 		t.Fatal("l without assess should do nothing")
 	}
 	if len(v.pending) != 0 {
@@ -555,5 +555,217 @@ func TestScanViewModelKeyHostedWithoutFetchFallsBackToOllama(t *testing.T) {
 	openEmbeddedPicker(t, v)
 	if _, ok := v.picker.(*ModelPicker); !ok {
 		t.Fatal("expected the Ollama picker")
+	}
+}
+
+// recordingAssess answers every report with a benign verdict and records the
+// ids in call order.
+func recordingAssess() (AssessFunc, *[]string) {
+	var ids []string
+	return func(_ context.Context, r heur.Report) (llm.Assessment, error) {
+		ids = append(ids, r.Ext.ID)
+		return llm.Assessment{Verdict: llm.Benign, Confidence: 0.8, Reasoning: "Nothing unusual. Looks fine."}, nil
+	}, &ids
+}
+
+// feedAssess runs cmd and feeds its assessMsgs back into v, returning what
+// the view wants to run next.
+func feedAssess(v *ScanView, cmd tea.Cmd) tea.Cmd {
+	var next []tea.Cmd
+	for _, msg := range runCmd(cmd) {
+		if _, ok := msg.(assessMsg); ok {
+			if _, c := v.Update(msg); c != nil {
+				next = append(next, c)
+			}
+		}
+	}
+	if len(next) == 0 {
+		return nil
+	}
+	return tea.Batch(next...)
+}
+
+func TestScanViewAssessNothingTicked(t *testing.T) {
+	assess, ids := recordingAssess()
+	v := newTestScan(t, Assessor{Assess: assess})
+	if cmd := pressS(v, runeKey('l')); cmd != nil {
+		t.Fatal("l with nothing ticked should send nothing")
+	}
+	if !strings.Contains(viewS(v), nothingTickedAssess) || len(v.pending) != 0 || len(*ids) != 0 {
+		t.Fatalf("hint missing or something started:\n%s", viewS(v))
+	}
+}
+
+func TestScanViewAssessTickedInVisibleOrder(t *testing.T) {
+	assess, ids := recordingAssess()
+	v := newTestScan(t, Assessor{Assess: assess})
+	pressS(v, keySpace, keyDown, keyDown, keySpace, keyUp) // tick 0 and 2, cursor on 1
+	cmd := pressS(v, runeKey('l'))
+	if cmd == nil {
+		t.Fatal("l should return a Cmd")
+	}
+	if !strings.Contains(viewS(v), "asking 2") {
+		t.Fatalf("flash should count the questions:\n%s", viewS(v))
+	}
+	feedAssess(v, cmd)
+	if want := "evil.stealer good.theme"; strings.Join(*ids, " ") != want {
+		t.Fatalf("assessed %v, want %q (ticked rows, never the cursor row)", *ids, want)
+	}
+	if len(v.results) != 2 || len(v.pending) != 0 {
+		t.Fatalf("results %d pending %d", len(v.results), len(v.pending))
+	}
+}
+
+func TestScanViewAssessBounded(t *testing.T) {
+	assess, ids := recordingAssess()
+	v := newTestScan(t, Assessor{Assess: assess})
+	pressS(v, keySpace, keyDown, keySpace, keyDown, keySpace) // tick all three
+	cmd := pressS(v, runeKey('l'))
+	if len(v.pending) != assessWorkers || len(v.queue) != 1 {
+		t.Fatalf("pending %d queue %d, want %d and 1", len(v.pending), len(v.queue), assessWorkers)
+	}
+	// The first batch carries exactly the two workers (plus the spinner).
+	next := feedAssess(v, cmd)
+	if len(*ids) != 2 || next == nil {
+		t.Fatalf("after the first batch: asked %v, next cmd %v", *ids, next != nil)
+	}
+	if len(v.queue) != 0 || len(v.pending) != 1 {
+		t.Fatalf("third should have started: pending %d queue %d", len(v.pending), len(v.queue))
+	}
+	feedAssess(v, next)
+	if len(*ids) != 3 || len(v.pending) != 0 || len(v.results) != 3 {
+		t.Fatalf("all three should be answered: asked %v, pending %d, results %d", *ids, len(v.pending), len(v.results))
+	}
+}
+
+func TestScanViewAssessSkipsAnswered(t *testing.T) {
+	assess, ids := recordingAssess()
+	v := newTestScan(t, Assessor{Assess: assess})
+	v.results[0] = llm.Assessment{Verdict: llm.Malicious, Confidence: 0.9}
+	pressS(v, keySpace, keyDown, keySpace) // tick 0 and 1
+	cmd := pressS(v, runeKey('l'))
+	if !strings.Contains(viewS(v), "1 already answered") {
+		t.Fatalf("flash should say what was skipped:\n%s", viewS(v))
+	}
+	feedAssess(v, cmd)
+	if want := "mid.tool"; strings.Join(*ids, " ") != want {
+		t.Fatalf("assessed %v, want %q", *ids, want)
+	}
+	// Everything answered: l says so and sends nothing.
+	if cmd := pressS(v, runeKey('l')); cmd != nil || !strings.Contains(viewS(v), "2 already answered") {
+		t.Fatalf("second l should send nothing:\n%s", viewS(v))
+	}
+}
+
+func TestScanViewAssessRetriesErrored(t *testing.T) {
+	assess, ids := recordingAssess()
+	v := newTestScan(t, Assessor{Assess: assess})
+	v.errs[0] = errors.New("boom")
+	pressS(v, keySpace)
+	feedAssess(v, pressS(v, runeKey('l')))
+	if len(*ids) != 1 || v.errs[0] != nil {
+		t.Fatalf("errored row should be asked again: %v, err %v", *ids, v.errs[0])
+	}
+}
+
+func TestScanViewAssessHiddenTicked(t *testing.T) {
+	assess, ids := recordingAssess()
+	v := newTestScan(t, Assessor{Assess: assess})
+	pressS(v, keyDown, keyDown, keySpace, runeKey('f')) // tick good.theme, then hide it
+	pressS(v, keyUp, keyUp, keySpace)                   // tick evil.stealer
+	cmd := pressS(v, runeKey('l'))
+	if len(v.pending) != 2 {
+		t.Fatalf("hidden ticked rows are asked too: pending %d", len(v.pending))
+	}
+	if out := viewS(v); !strings.Contains(out, "good.theme") || !strings.Contains(out, "(hidden)") {
+		t.Fatalf("summary should list the hidden row and say so:\n%s", out)
+	}
+	feedAssess(v, cmd)
+	if want := "evil.stealer good.theme"; strings.Join(*ids, " ") != want {
+		t.Fatalf("assessed %v, want %q (visible first, then hidden)", *ids, want)
+	}
+}
+
+func TestScanViewSummaryPane(t *testing.T) {
+	var release = make(chan struct{})
+	assess := func(_ context.Context, r heur.Report) (llm.Assessment, error) {
+		if r.Ext.ID == "mid.tool" {
+			<-release
+			return llm.Assessment{Verdict: llm.Suspicious, Confidence: 0.6, Reasoning: "Spawns a shell. Could be fine."}, nil
+		}
+		return llm.Assessment{Verdict: llm.Malicious, Confidence: 0.92, Reasoning: "Sends SSH keys to a remote host. More text here.", Model: "claude-x"}, nil
+	}
+	v := newTestScan(t, Assessor{Assess: assess})
+	pressS(v, keySpace, keyDown, keySpace) // tick 0 and 1
+	cmd := pressS(v, runeKey('l'))
+	// Run only the first worker's Cmd so the second stays pending.
+	batch, _ := cmd().(tea.BatchMsg)
+	for _, c := range batch {
+		if msg := c(); msg != nil {
+			if am, ok := msg.(assessMsg); ok && am.report == 0 {
+				v.Update(am)
+			}
+		}
+		if len(v.results) == 1 {
+			break
+		}
+	}
+	out := viewS(v)
+	for _, want := range []string{"AI summary", "2 ticked", "evil.stealer", "MALICIOUS 92%", "Sends SSH keys to a remote host.", "mid.tool", "asking…"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("summary missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Intent") || strings.Contains(out, "More text here") {
+		t.Errorf("summary should replace the single detail and keep the first sentence only:\n%s", out)
+	}
+	close(release)
+	// Finish the second worker.
+	for _, c := range batch {
+		if msg := c(); msg != nil {
+			if am, ok := msg.(assessMsg); ok && am.report == 1 {
+				v.Update(am)
+			}
+		}
+	}
+	out = viewS(v)
+	if strings.Contains(out, "asking…") || !strings.Contains(out, "SUSPICIOUS 60%") {
+		t.Fatalf("second result not shown:\n%s", out)
+	}
+	// The pane scrolls with tab focus at a small height.
+	v.Update(tea.WindowSizeMsg{Width: 80, Height: 12})
+	pressS(v, tea.KeyPressMsg{Code: tea.KeyTab}, keyDown, keyDown)
+	if v.detailTop == 0 {
+		t.Fatal("summary pane should scroll when focused")
+	}
+}
+
+func TestScanViewSummaryFallsBackToSingle(t *testing.T) {
+	assess, _ := recordingAssess()
+	v := newTestScan(t, Assessor{Assess: assess})
+	// Two ticked but nothing asked: the cursor row's detail stays.
+	pressS(v, keySpace, keyDown, keySpace)
+	if out := viewS(v); !strings.Contains(out, "Capabilities") || strings.Contains(out, "AI summary") {
+		t.Fatalf("ticking for uninstall must not hide the findings:\n%s", out)
+	}
+	// One ticked and asked: still the single detail, with the verdict box.
+	pressS(v, keySpace) // untick 1
+	feedAssess(v, pressS(v, runeKey('l')))
+	pressS(v, keyUp)
+	if out := viewS(v); !strings.Contains(out, "Intent") || !strings.Contains(out, "BENIGN") || strings.Contains(out, "AI summary") {
+		t.Fatalf("single ticked row keeps the full detail:\n%s", out)
+	}
+}
+
+func TestScanViewModelSwapMidQueue(t *testing.T) {
+	first, firstIDs := recordingAssess()
+	second, secondIDs := recordingAssess()
+	v := newTestScan(t, Assessor{Assess: first})
+	pressS(v, keySpace, keyDown, keySpace, keyDown, keySpace)
+	cmd := pressS(v, runeKey('l'))
+	v.Update(assessorMsg{a: Assessor{Label: "ollama · other", Assess: second}})
+	feedAssess(v, feedAssess(v, cmd))
+	if len(*firstIDs) != 2 || len(*secondIDs) != 1 || (*secondIDs)[0] != "good.theme" {
+		t.Fatalf("queued item should use the new model: first %v second %v", *firstIDs, *secondIDs)
 	}
 }
