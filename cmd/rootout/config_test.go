@@ -168,3 +168,21 @@ func TestResolveHostedKeyEmptyIsNotFound(t *testing.T) {
 		t.Fatalf("key = %q, %v", k, err)
 	}
 }
+
+func TestCheckModelsProvider(t *testing.T) {
+	for _, ok := range []string{"anthropic", "openai"} {
+		if err := checkModelsProvider(ok); err != nil {
+			t.Errorf("%s: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"ollama", "gemini", "Anthropic"} {
+		err := checkModelsProvider(bad)
+		var ee *exitErr
+		if !errors.As(err, &ee) || ee.code != exitBadInput || !strings.Contains(ee.msg, "--provider") {
+			t.Errorf("%q: err = %v, want exit %d naming --provider", bad, err, exitBadInput)
+		}
+		if bad == "ollama" && !strings.Contains(ee.msg, "without --provider") {
+			t.Errorf("ollama should be pointed at the plain listing: %v", ee.msg)
+		}
+	}
+}
