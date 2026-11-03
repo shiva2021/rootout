@@ -4,6 +4,8 @@ All notable changes to rootout. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-03
+
 ### Added
 - First-launch setup screen and `rootout setup`: choose a local Ollama model, paste a Claude or OpenAI key (checked with one free request, then stored in the Keychain; retry, go back or save anyway on failure), or skip. AI stays optional (D-034).
 - The home screen shows a one-line AI status under the title.
