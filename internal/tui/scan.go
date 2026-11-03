@@ -91,9 +91,12 @@ func ReviewScan(ctx context.Context, reports []heur.Report, a Assessor) (ScanRes
 	return res, ok, nil
 }
 
-// assessMsg carries one finished LLM assessment back to the view.
+// assessMsg carries one finished LLM assessment back to the view; gen is
+// the assessor generation the call was made under, so an answer from a
+// model the user has since replaced is dropped.
 type assessMsg struct {
 	report int
+	gen    int
 	a      llm.Assessment
 	err    error
 }
@@ -160,6 +163,8 @@ type ScanView struct {
 	pending  map[int]bool
 	queue    []int        // reports waiting for a worker, in ask order
 	force    map[int]bool // queued by L: ask even if answered, ignoring saved answers
+	gen      int          // bumped on every model swap; in-flight calls carry the old value
+	summary  bool         // the details pane showed the summary at the last update
 	hideLow  bool
 	detailsF bool // details pane has focus
 
@@ -245,6 +250,7 @@ func (v *ScanView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			v.errLine = "model: " + msg.err.Error()
 			return v, nil
 		}
+		v.gen++ // calls in flight keep running; their answers are kept only where nothing newer exists
 		v.assessor.Provider, v.assessor.Label, v.assessor.Assess = msg.a.Provider, msg.a.Label, msg.a.Assess
 		v.assessor.Models, v.assessor.HostedModels = msg.a.Models, msg.a.HostedModels
 		v.assessor.Cached, v.assessor.Reassess = msg.a.Cached, msg.a.Reassess
@@ -263,12 +269,22 @@ func (v *ScanView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case assessMsg:
 		delete(v.pending, msg.report)
+		if msg.gen != v.gen {
+			// From a model the user has since replaced: a real answer, kept
+			// (labelled with its model) unless the new model already has one.
+			_, has := v.results[msg.report]
+			if msg.err != nil || has {
+				v.syncPane()
+				return v, v.startNext()
+			}
+		}
 		if msg.err != nil {
 			v.errs[msg.report] = msg.err
 		} else {
 			delete(v.errs, msg.report)
 			v.results[msg.report] = msg.a
 		}
+		v.syncPane()
 		return v, v.startNext()
 
 	case spinner.TickMsg:
@@ -304,9 +320,23 @@ func (v *ScanView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return v, v.confirmUpdate(msg)
 	}
 	if k, ok := msg.(tea.KeyPressMsg); ok {
-		return v.key(k)
+		m, cmd := v.key(k)
+		v.syncPane()
+		return m, cmd
 	}
 	return v, nil
+}
+
+// summaryShown reports whether the details pane is the AI summary.
+func (v *ScanView) summaryShown() bool { return v.tickedCount() > 1 && v.anyTickedAsked() }
+
+// syncPane resets the details scroll when the pane switches between the
+// summary and a single report, so neither opens mid-scroll.
+func (v *ScanView) syncPane() {
+	if s := v.summaryShown(); s != v.summary {
+		v.summary = s
+		v.detailTop = 0
+	}
 }
 
 func (v *ScanView) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -521,10 +551,10 @@ func (v *ScanView) startNext() tea.Cmd {
 				assess = v.assessor.Reassess
 			}
 		}
-		ctx, rep := v.ctx, v.reports[r]
+		ctx, rep, gen := v.ctx, v.reports[r], v.gen
 		cmds = append(cmds, func() tea.Msg {
 			a, err := assess(ctx, rep)
-			return assessMsg{report: r, a: a, err: err}
+			return assessMsg{report: r, gen: gen, a: a, err: err}
 		})
 	}
 	if len(cmds) == 0 {
@@ -870,7 +900,7 @@ func (v *ScanView) renderDetails(width, rows int) string {
 // at least one has been asked.
 func (v *ScanView) detailLines(width int) []string {
 	width = max(width, 10)
-	if v.tickedCount() > 1 && v.anyTickedAsked() {
+	if v.summaryShown() {
 		return v.summaryLines(width)
 	}
 	ri, ok := v.current()

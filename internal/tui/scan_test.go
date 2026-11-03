@@ -1012,3 +1012,51 @@ func TestScanViewFooterFitsWidth(t *testing.T) {
 		}
 	}
 }
+
+func TestScanViewModelSwapDropsStaleAnswers(t *testing.T) {
+	block := make(chan struct{})
+	old := func(context.Context, heur.Report) (llm.Assessment, error) {
+		<-block
+		return llm.Assessment{Verdict: llm.Malicious, Confidence: 0.9, Model: "old"}, nil
+	}
+	v := newTestScan(t, Assessor{Label: "anthropic · old", Assess: old})
+	cmd := pressS(v, keySpace, runeKey('l'))
+	if !v.pending[0] {
+		t.Fatal("call should be in flight")
+	}
+	// The model changes while the old call is still running.
+	v.Update(assessorMsg{a: Assessor{Label: "anthropic · new", Assess: old, Cached: cachedFor("evil.stealer", llm.Assessment{Verdict: llm.Benign, Confidence: 0.8, Model: "new"})}})
+	if got := v.results[0]; !got.Cached || got.Model != "new" {
+		t.Fatalf("new model's saved answer should be preloaded: %+v", got)
+	}
+	close(block)
+	feedAssess(v, cmd)
+	if got := v.results[0]; got.Model != "new" {
+		t.Fatalf("the old model's late answer must not replace the new model's: %+v", got)
+	}
+	if len(v.pending) != 0 {
+		t.Fatal("the stale call must not stay pending")
+	}
+	if strings.Contains(viewS(v), "asking the LLM") {
+		t.Fatal("no pending indicator after the stale answer")
+	}
+}
+
+func TestScanViewDetailTopResetsOnPaneSwitch(t *testing.T) {
+	v := NewScanView(scanFixture(), Assessor{Assess: func(context.Context, heur.Report) (llm.Assessment, error) { return llm.Assessment{}, nil }})
+	v.Update(tea.WindowSizeMsg{Width: 80, Height: 12})
+	v.results[0] = llm.Assessment{Verdict: llm.Malicious, Confidence: 0.9, Reasoning: "Steals keys. More."}
+	v.results[1] = llm.Assessment{Verdict: llm.Benign, Confidence: 0.9, Reasoning: "Fine. More."}
+	pressS(v, keySpace, keyDown, keySpace) // summary pane
+	if !strings.Contains(viewS(v), "AI summary") {
+		t.Fatalf("summary expected:\n%s", viewS(v))
+	}
+	pressS(v, tea.KeyPressMsg{Code: tea.KeyTab}, keyDown, keyDown, keyDown)
+	if v.detailTop == 0 {
+		t.Fatal("summary should have scrolled")
+	}
+	pressS(v, tea.KeyPressMsg{Code: tea.KeyTab}, keySpace) // untick: back to the single detail
+	if v.detailTop != 0 || strings.Contains(viewS(v), "AI summary") {
+		t.Fatalf("switching panes should reset the scroll: detailTop=%d", v.detailTop)
+	}
+}

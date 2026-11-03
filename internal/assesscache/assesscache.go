@@ -34,11 +34,15 @@ const fileVersion = 1
 // parses as a rootout assessments file: Clear deletes nothing else.
 var ErrNotCache = errors.New("assesscache: not a rootout assessments file")
 
-// Path returns $ROOTOUT_CACHE if set, else ~/.cache/rootout/assessments.json.
+// Path returns $ROOTOUT_CACHE if set, else $XDG_CACHE_HOME/rootout/assessments.json
+// if that is set, else ~/.cache/rootout/assessments.json.
 func Path(env fsx.Env, getenv func(string) string) string {
 	if getenv != nil {
 		if p := getenv(EnvVar); p != "" {
 			return p
+		}
+		if x := getenv("XDG_CACHE_HOME"); x != "" {
+			return filepath.Join(x, "rootout", "assessments.json")
 		}
 	}
 	return env.User(".cache", "rootout", "assessments.json")
@@ -85,9 +89,10 @@ type file struct {
 // Cache is the in-memory view of the file. Store writes through, so a
 // quit mid-scan loses nothing; a mutex guards concurrent workers.
 type Cache struct {
-	path    string
-	mu      sync.Mutex
-	entries map[string]Entry
+	path       string
+	mu         sync.Mutex
+	entries    map[string]Entry
+	unreadable bool // the file existed but was not a cache; replaced on the next Store
 }
 
 // Open reads path. A missing file is an empty cache; an unreadable or
@@ -104,7 +109,8 @@ func Open(path string) (*Cache, error) {
 	}
 	var f file
 	if err := json.Unmarshal(raw, &f); err != nil || f.Version != fileVersion {
-		slog.Warn("assesscache: ignoring unreadable cache file", "path", path, "err", err, "version", f.Version)
+		slog.Debug("assesscache: ignoring unreadable cache file", "path", path, "err", err, "version", f.Version)
+		c.unreadable = true
 		return c, nil
 	}
 	if f.Entries != nil {
@@ -115,6 +121,11 @@ func Open(path string) (*Cache, error) {
 
 // Path is the file the cache reads and writes.
 func (c *Cache) Path() string { return c.path }
+
+// Unreadable reports that the file existed but was not a rootout cache
+// (corrupt or another layout); it is treated as empty and replaced on the
+// next Store. Callers tell the user once instead of logging.
+func (c *Cache) Unreadable() bool { return c.unreadable }
 
 // Len is the number of saved assessments.
 func (c *Cache) Len() int {
@@ -144,7 +155,11 @@ func (c *Cache) Store(id EntryID, a llm.Assessment) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.entries[id.String()] = Entry{Assessment: a, At: time.Now().UTC()}
-	return c.write()
+	if err := c.write(); err != nil {
+		return err
+	}
+	c.unreadable = false
+	return nil
 }
 
 // write is the atomic save; the caller holds mu.

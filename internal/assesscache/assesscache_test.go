@@ -43,6 +43,27 @@ func TestPathDefaultAndEnv(t *testing.T) {
 	if got := Path(env, getenv); got != "/elsewhere/a.json" {
 		t.Errorf("Path with %s = %q", EnvVar, got)
 	}
+	xdg := func(name string) string {
+		if name == "XDG_CACHE_HOME" {
+			return "/xdg/cache"
+		}
+		return ""
+	}
+	if got := Path(env, xdg); got != "/xdg/cache/rootout/assessments.json" {
+		t.Errorf("Path with XDG_CACHE_HOME = %q", got)
+	}
+	both := func(name string) string {
+		switch name {
+		case EnvVar:
+			return "/elsewhere/a.json"
+		case "XDG_CACHE_HOME":
+			return "/xdg/cache"
+		}
+		return ""
+	}
+	if got := Path(env, both); got != "/elsewhere/a.json" {
+		t.Errorf("%s should win over XDG_CACHE_HOME: %q", EnvVar, got)
+	}
 }
 
 func TestOpenMissingIsEmpty(t *testing.T) {
@@ -106,8 +127,8 @@ func TestStoreLookupRoundTrip(t *testing.T) {
 	}
 	// A fresh Cache over the same file sees the entry.
 	c2, err := Open(path)
-	if err != nil || c2.Len() != 1 {
-		t.Fatalf("reopen: %v, len %d", err, c2.Len())
+	if err != nil || c2.Len() != 1 || c2.Unreadable() {
+		t.Fatalf("reopen: %v, len %d, unreadable %v", err, c2.Len(), c2.Unreadable())
 	}
 	if _, ok := c2.Lookup(id); !ok {
 		t.Fatal("reopened cache should hit")
@@ -161,8 +182,8 @@ func TestOpenCorruptFileIsEmpty(t *testing.T) {
 			t.Fatal(err)
 		}
 		c, err := Open(path)
-		if err != nil || c.Len() != 0 {
-			t.Fatalf("%q: Open = %v, len %d; want an empty cache", body, err, c.Len())
+		if err != nil || c.Len() != 0 || !c.Unreadable() {
+			t.Fatalf("%q: Open = %v, len %d, unreadable %v; want an empty cache flagged unreadable", body, err, c.Len(), c.Unreadable())
 		}
 		if err := c.Store(IDFor(report(), "anthropic", "m"), llm.Assessment{Verdict: llm.Benign}); err != nil {
 			t.Fatal(err)

@@ -103,6 +103,9 @@ func openCache(provider string, noCache bool) *assesscache.Cache {
 		fmt.Fprintln(os.Stderr, "rootout: saved assessments unavailable:", err)
 		return nil
 	}
+	if c.Unreadable() {
+		fmt.Fprintf(os.Stderr, "rootout: %s is not a rootout assessments file; it will be replaced by the next answer\n", c.Path())
+	}
 	return c
 }
 

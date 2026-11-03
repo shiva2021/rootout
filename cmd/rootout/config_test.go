@@ -219,3 +219,21 @@ func TestCacheClearRefusesForeignFile(t *testing.T) {
 		t.Fatal("foreign file must be left alone")
 	}
 }
+
+func TestCacheLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "assessments.json")
+	if got := cacheLine(path); !strings.Contains(got, "0 entries") || !strings.Contains(got, path) {
+		t.Errorf("absent: %q", got)
+	}
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := cacheLine(path); !strings.Contains(got, "unreadable") {
+		t.Errorf("corrupt: %q", got)
+	}
+	c, _ := assesscache.Open(filepath.Join(t.TempDir(), "x.json"))
+	_ = c.Store(assesscache.EntryID{ExtID: "a"}, llm.Assessment{})
+	if got := cacheLine(c.Path()); !strings.Contains(got, "1 entries") {
+		t.Errorf("one: %q", got)
+	}
+}

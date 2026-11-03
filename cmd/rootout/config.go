@@ -195,13 +195,13 @@ func configShow(g *globalFlags) error {
 		return err
 	}
 	cachePath := assesscache.Path(env, os.Getenv)
-	cacheN := 0
+	cacheN, cacheBad := 0, false
 	if cc, err := assesscache.Open(cachePath); err == nil {
-		cacheN = cc.Len()
+		cacheN, cacheBad = cc.Len(), cc.Unreadable()
 	}
 	w := output.New(os.Stdout, g.json)
 	if g.json {
-		return w.Emit(map[string]any{"path": path, "config": c, "keys": keys, "cache": map[string]any{"path": cachePath, "entries": cacheN}})
+		return w.Emit(map[string]any{"path": path, "config": c, "keys": keys, "cache": map[string]any{"path": cachePath, "entries": cacheN, "unreadable": cacheBad}})
 	}
 	fmt.Printf("config file: %s\n\n", path)
 	for _, k := range config.Keys() {
@@ -216,8 +216,21 @@ func configShow(g *globalFlags) error {
 			fmt.Printf("  %-10s %s (from %s)\n", k.Provider, k.Masked, k.Source)
 		}
 	}
-	fmt.Printf("\nsaved assessments: %s (%d entries; rootout config cache clear forgets them)\n", cachePath, cacheN)
+	fmt.Println()
+	fmt.Println(cacheLine(cachePath))
 	return nil
+}
+
+// cacheLine is "config show"'s one line about the saved assessments.
+func cacheLine(path string) string {
+	c, err := assesscache.Open(path)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("saved assessments: %s (cannot be read: %v)", path, err)
+	case c.Unreadable():
+		return fmt.Sprintf("saved assessments: %s (unreadable: not a rootout assessments file; replaced by the next answer, or delete it yourself)", path)
+	}
+	return fmt.Sprintf("saved assessments: %s (%d entries; rootout config cache clear forgets them)", path, c.Len())
 }
 
 // newCacheCmd is "config cache" with its one action, clear.
