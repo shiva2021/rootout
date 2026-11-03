@@ -36,14 +36,16 @@ pressing l on an extension in the scan screen asks the model whether to
 keep or uninstall it.
 
 A pasted key is checked with one free request (the provider's model list)
-before it is stored in the macOS Keychain. If the check fails you can retry,
-go back, or save the key anyway.
+before it is stored in the macOS Keychain; the same list then lets you pick
+the model you want to pay for (or type an id). If the check fails you can
+retry, go back, or save the key anyway.
 
 The same screen opens on the first launch of rootout. Run it again any time
 to change the provider. Scripts use "rootout config" instead.`,
-		Example: `  rootout setup                      # the setup screen
-  rootout config set-key anthropic   # the scripted equivalent
-  rootout config models --pick       # just the local model picker`,
+		Example: `  rootout setup                                 # the setup screen
+  rootout config set-key anthropic              # the scripted equivalent
+  rootout config models --provider anthropic    # models your key can use
+  rootout config models --pick                  # just the local model picker`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if g.json {

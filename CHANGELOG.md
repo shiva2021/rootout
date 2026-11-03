@@ -4,6 +4,12 @@ All notable changes to rootout. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added
+- Choose the Claude or OpenAI model you pay for: the setup screen lists the models your key can use right after the key check (the check is the same request) and saves the choice; `m` in the scan screen and `rootout config models --provider anthropic|openai [--pick]` change it later. Type an id by hand when the list cannot be fetched (D-035).
+
+### Changed
+- `rootout config models` gained `--provider`; the home screen refreshes its AI line after a scan, since `m` can change the saved model.
+
 ## [0.6.1] - 2026-11-03
 
 ### Changed
