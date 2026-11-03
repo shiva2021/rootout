@@ -59,6 +59,7 @@ func TestRecordRoundTrip(t *testing.T) {
 
 func TestRecordEmptyTagIsFreshWithoutRelease(t *testing.T) {
 	env := testutil.FakeHome(t, testutil.Spec{})
+	testutil.RequireSandbox(t, env)
 	path := Path(env, nil)
 	if err := WriteRecord(path, Release{}, now); err != nil {
 		t.Fatal(err)
@@ -85,6 +86,7 @@ func TestReadRecordNotOK(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			env := testutil.FakeHome(t, testutil.Spec{})
+			testutil.RequireSandbox(t, env)
 			path := Path(env, nil)
 			if tt.content != "" {
 				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -103,6 +105,7 @@ func TestReadRecordNotOK(t *testing.T) {
 
 func TestReadRecordJustInsideMaxAge(t *testing.T) {
 	env := testutil.FakeHome(t, testutil.Spec{})
+	testutil.RequireSandbox(t, env)
 	path := Path(env, nil)
 	if err := WriteRecord(path, Release{Tag: "v0.8.0"}, now); err != nil {
 		t.Fatal(err)

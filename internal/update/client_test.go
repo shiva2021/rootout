@@ -84,3 +84,17 @@ func TestNewDefaults(t *testing.T) {
 		t.Errorf("New = %+v", c)
 	}
 }
+
+func TestLatestTransportErrorNamesURLOnce(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	srv.Close()
+	c := New("v0.7.0")
+	c.URL = srv.URL
+	_, err := c.Latest(context.Background())
+	if err == nil {
+		t.Fatal("want an error from a closed server")
+	}
+	if n := strings.Count(err.Error(), srv.URL); n != 1 {
+		t.Errorf("URL appears %d times in %q, want once", n, err)
+	}
+}

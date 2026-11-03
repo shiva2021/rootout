@@ -72,7 +72,7 @@ func buildGuide(ctx context.Context) []guideStep {
 			fixN++
 		}
 	}
-	text := "rootout doctor lists what it found on this Mac: the Trash backend, Homebrew, your editors, the config file and any AI providers."
+	text := "rootout doctor lists what it found on this Mac: the Trash backend, Homebrew, your editors, the config file and any AI providers, and whether a newer rootout release exists."
 	if fixN > 0 {
 		text += fmt.Sprintf(" Right now %d item(s) need attention; each line shows the fix.", fixN)
 	}

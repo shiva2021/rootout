@@ -54,7 +54,8 @@ func (c *Client) Latest(ctx context.Context) (Release, error) {
 	req.Header.Set("User-Agent", c.UserAgent)
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return Release{}, fmt.Errorf("update: GET %s: %w", c.URL, err)
+		// A transport error from net/http already names the method and URL.
+		return Release{}, fmt.Errorf("update: %w", err)
 	}
 	defer resp.Body.Close() //nolint:errcheck // read-only body; nothing to do with a close error
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
