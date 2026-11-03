@@ -7,6 +7,8 @@ All notable changes to rootout. Format: [Keep a Changelog](https://keepachangelo
 ### Added
 - Choose the Claude or OpenAI model you pay for: the setup screen lists the models your key can use right after the key check (the check is the same request) and saves the choice; `m` in the scan screen and `rootout config models --provider anthropic|openai [--pick]` change it later. Type an id by hand when the list cannot be fetched (D-035).
 
+- Scan list: a green ✓ (benign), red ✗ (malicious) or yellow ⚠ (suspicious, unknown, or under 70 % confidence) after each assessed extension, `!` when the model call failed, with a legend on the AI line and in `?` (D-037). Text output (`--no-tui`) is unchanged.
+
 ### Changed
 - `rootout config models` gained `--provider`; the home screen refreshes its AI line after a scan, since `m` can change the saved model.
 - Scan screen: `l` now asks the model about every ticked extension (the same tick as uninstall), two at a time, instead of the cursor row; with nothing ticked it shows a hint and sends nothing. Rows already answered are skipped and failed ones retried; re-asking an answered row arrives with the saved-answers feature. With several ticked and at least one asked, the right pane lists every ticked extension with its verdict, confidence and first sentence of reasoning (D-036).

@@ -267,6 +267,14 @@ Append-only. Newest at the bottom. Never edit an old entry; add a new one that s
 **Consequences.** Supersedes D-008, D-024 and D-031. D-030 stands: the binary is still unsigned. Releases v0.4.0 and v0.4.1 keep their token-only casks; v0.5.0 is the first token-free one. The parked branch carries its own D-033 (public releases repo) and D-034 (gate mechanics); neither was accepted on `main`, and this entry takes the number. The personal login in `docs/research/vscode-extension-audit/REPORT.md` was scrubbed at HEAD only; it remains in history (Shivang's call, no rewrite).
 **Status.** Accepted
 
+## D-037 · 2026-11-04 · Verdict icons in the scan list, from the model's verdict and confidence only
+
+**Context.** After asking the model about several extensions the list looked the same as before; the only place a verdict showed was the details pane of the cursor row.
+**Decision.** Each list row ends with a two-cell icon slot after the editor tag: green `✓` for benign and red `✗` for malicious when confidence is at least `llm.ConfidenceThreshold` (0.70), yellow `⚠` for every other assessment (suspicious, unknown, or a confident-sounding verdict under the threshold), dim `!` when the call failed, the spinner while asking, blank when not asked. The icon comes from `llm.Assessment` only: heuristics have a 0–100 score and no verdict, and a score-derived icon would contradict the model's later answer. The slot is padded by measured width because `⚠` is drawn one or two cells wide depending on the terminal. A legend joins the AI line once anything has been assessed and the `?` overlay explains the icons and the threshold. In a pane too narrow for the editor tag the tag is dropped before the id is (this also fixes a pre-existing overflow at very narrow widths). Text output and `--json` are unchanged: the `ai verdict` column already prints `verdict NN%` and glyphs are noise in piped text.
+**Alternatives.** Heuristic-band icons before any call (rejected: they would flip when the model answers); a colour-only cue (rejected: unreadable in monochrome terminals and with colour-blindness); icons in `--no-tui` text (rejected, see above).
+**Consequences.** `(Assessment) Confident()` is the one place the threshold lives; Phase 4 reuses it. Rows in a 40-column terminal lose the editor tag.
+**Status.** Accepted
+
 ## D-036 · 2026-11-04 · `l` asks about the ticked rows only, two at a time; a summary pane once several are asked
 
 **Context.** `l` sent the cursor row to the model with no confirmation, so a stray key press spent credits, and asking about several extensions meant pressing `l` on each with every answer visible only one at a time.

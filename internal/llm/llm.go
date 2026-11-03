@@ -32,6 +32,15 @@ type Assessment struct {
 }
 
 // Provider is one model backend.
+// ConfidenceThreshold is the confidence from which a verdict is shown as
+// settled (a tick or a cross in the scan list); below it the row is marked
+// unsure whatever the verdict.
+const ConfidenceThreshold = 0.70
+
+// Confident reports whether the assessment's confidence reaches
+// ConfidenceThreshold.
+func (a Assessment) Confident() bool { return a.Confidence >= ConfidenceThreshold }
+
 // ModelInfo is one entry of a hosted provider's model list, as shown by the
 // model picker. Deprecated models are still callable but headed for
 // retirement; retired ones are never listed.
