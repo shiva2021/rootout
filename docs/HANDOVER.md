@@ -1,13 +1,12 @@
 # Handover
 
-_Updated: 2026-11-03 · Session: open-source release (D-033): MIT, public tap, token-free install; membership gate dropped_
+_Updated: 2026-11-03 · Session: open-source release (D-033) shipped as v0.5.0: MIT, public tap, token-free install; membership gate dropped_
 
 ## Status
-rootout is open source under MIT. Branch `release/open-source` (this PR) carries everything: `LICENSE`, the plain public cask on GoReleaser 2.19.0, the licence seam removed, README/runbook/plan/decision updates, `CHANGELOG.md` 0.5.0, Dependabot and `SECURITY.md`. `make release-check NEXT=v0.5.0` and `make snapshot` pass locally (cask has a plain `url`, no download strategy, `postflight_steps`; archives contain LICENSE). The membership gate is **dropped for good**: PR #1 (`m6/membership`, 31 commits: Patreon gate, Cloudflare Worker, proprietary LICENSE) is closed with a note and the branch is kept as an archive, unmerged. Its `service/` leftovers (local `.dev.vars` with placeholder values only, `.wrangler`, `node_modules`) were moved to `../rootout-m6-service.bak`, outside the repo.
-
-Ship sequence after this PR merges (runbook `docs/kb/release.md`): tag `v0.5.0` → Release workflow → confirm the tap's `Casks/rootout.rb` has the plain URL → **then** `gh repo edit shiva2021/homebrew-rootout --visibility public --accept-visibility-change-consequences` → update the tap README → token-free install test. The tap goes public last so it never serves the old token-only cask.
+**v0.5.0 is released and verified.** rootout is open source under MIT, the tap `shiva2021/homebrew-rootout` is public, and the cask is a plain download: in a shell with no `HOMEBREW_GITHUB_API_TOKEN`, `brew tap shiva2021/rootout && brew trust shiva2021/rootout && brew install --cask rootout` installed `/opt/homebrew/bin/rootout` v0.5.0 with no quarantine attribute, and `doctor` runs (2026-11-03). PR #2 merged, Release workflow green, release has two archives + `checksums.txt` + CHANGELOG notes, tap cask has the plain URL and `postflight_steps`, tap README carries the install steps, GitHub shows "MIT License", private vulnerability reporting is on. The membership gate is **dropped for good**: PR #1 (`m6/membership`) is closed, branch kept as an archive; its `service/` leftovers are in `../rootout-m6-service.bak`, outside the repo.
 
 ## Done this session (2026-11-03)
+- Shipped v0.5.0 and verified the token-free install (see Status). The tap went public only after the release had rewritten its cask.
 - Found the repo already public with no licence; the handover on `main` (2026-10-22) and the branch handover (2026-10-30) were both written for a private repo with a paywall. Shivang chose: keep public, MIT, drop the gate, park the branch, scrub the LeetCode login at HEAD only.
 - D-033 logged (supersedes D-008, D-024, D-031). The parked branch has its own D-033/D-034 drafts; `main` takes the number.
 - `.goreleaser.yaml`: no `url`/`custom_block`; GoReleaser's default release URL; `install_steps` hook; LICENSE in archives; new caveats. Workflow pin `v2.19.0`. Verified: `goreleaser check`, snapshot cask passes `ruby -c`, `actionlint` clean.
@@ -16,11 +15,11 @@ Ship sequence after this PR merges (runbook `docs/kb/release.md`): tag `v0.5.0` 
 - `.gitignore`: `/service/`, `/.idea/`. Repo topics and homepage set on GitHub.
 
 ## Next steps
-1. Merge this PR, then the ship sequence above. In a shell with `HOMEBREW_GITHUB_API_TOKEN` unset: `brew uninstall --cask rootout || true; brew untap shiva2021/rootout || true; brew tap shiva2021/rootout; brew trust shiva2021/rootout; brew install --cask rootout; rootout --version` → `v0.5.0`. Record the result here.
-2. Enable "Private vulnerability reporting" in the repo's Security settings so the `SECURITY.md` link works (web UI only).
-3. Earlier manual checks still open: model grid and home loop in a real terminal; Full Disk Access denied path; v0.2 interactive flows; M2 QA on a throwaway account; live `scan --llm`.
-4. Optional: signing and notarisation (D-030 / D-015 quill flow); homebrew-cask submission once the project meets Homebrew's notability bar (own tap until then).
-5. One-time history scan: `brew install gitleaks && gitleaks git .` (grep for token patterns found only test values).
+1. `~/.local/bin/rootout` (a `make install` build, `v0.4.1-3-gb7dbb2e`) is still on this Mac and may shadow the brew copy depending on `PATH` order: `rm ~/.local/bin/rootout` (`docs/kb/release.md`, "Which binary am I running").
+2. Earlier manual checks still open: model grid and home loop in a real terminal; Full Disk Access denied path; v0.2 interactive flows; M2 QA on a throwaway account; live `scan --llm`.
+3. Optional: signing and notarisation (D-030 / D-015 quill flow); homebrew-cask submission once the project meets Homebrew's notability bar (own tap until then).
+4. One-time history scan: `brew install gitleaks && gitleaks git .` (grep for token patterns found only test values).
+5. Dependabot will open its first PRs for Go modules and Actions; review and tag patch releases as they merge.
 
 ## Done before this session
 ### M5 release pipeline (D-030…D-032), 2026-10-22

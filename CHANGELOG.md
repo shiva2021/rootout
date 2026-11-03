@@ -4,6 +4,11 @@ All notable changes to rootout. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-03
+
+### Changed
+- Docs: handover records the verified v0.5.0 release and the public tap; no code changes.
+
 ## [0.5.0] - 2026-11-03
 
 ### Added
