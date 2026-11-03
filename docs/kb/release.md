@@ -8,10 +8,12 @@ lint on every push to `main` and every pull request. Decisions: D-030, D-032,
 D-033.
 
 ## Cut a release
-- Move the Unreleased items under a new `## [X.Y.Z] - YYYY-MM-DD` heading in `CHANGELOG.md` and commit.
+The README "Releases" section has a diagram of this flow. `main` is PR-only (see below), so the CHANGELOG move lands through a pull request and the tag goes on its merge commit.
+- Branch from `main` as `release/X.Y.Z`. Move the Unreleased items under a new `## [X.Y.Z] - YYYY-MM-DD` heading in `CHANGELOG.md`, update `docs/HANDOVER.md`, and commit.
 - `make release-check NEXT=vX.Y.Z`. It checks the CHANGELOG section first, then runs test, lint and `goreleaser check`. Always run it: the release job does not run the tests.
-- `git tag -a vX.Y.Z -m "vX.Y.Z: <one line>"`
-- `git push origin main vX.Y.Z`
+- Open a pull request and merge it once CI is green (the ruleset requires the PR and the checks).
+- `git switch main && git pull --ff-only`, then on the merge commit: `git tag -a vX.Y.Z -m "vX.Y.Z: <one line>"`
+- `git push origin vX.Y.Z`
 - Watch the `Release` workflow: `gh run list --workflow Release --limit 1`, then `gh run watch --exit-status <id>`.
 - Check the release page (two archives, `checksums.txt`, the CHANGELOG notes) and that `Casks/rootout.rb` in `homebrew-rootout` moved to the new version.
 - To try the pipeline without publishing: `make snapshot` builds both archives and the cask into `dist/`. The snapshot names the last tag in the cask URL; a real release names the new one.
@@ -37,7 +39,7 @@ If `brew upgrade` says the latest version is already installed but `rootout --ve
 
 ## Repair a failed release
 - Never move or delete a tag.
-- Fix the cause on `main`, add a CHANGELOG entry for the next patch version, run `make release-check`, and cut the patch tag.
+- Fix the cause and add a CHANGELOG entry for the next patch version through a pull request, run `make release-check`, and cut the patch tag on the merge commit.
 - A tag with no CHANGELOG section (or an empty one) fails before GoReleaser runs; that is intended.
 - If GoReleaser left a half-made GitHub Release behind, delete that release by hand on GitHub (keep the tag).
 - `homebrew cask: could not get default branch: ... homebrew-rootout: 404 Not Found` means `TAP_GITHUB_TOKEN` cannot see the tap: the token's repository access does not include `homebrew-rootout` (or its owner is not shiva2021). The GitHub Release is already published at that point; fix the token, then cut a patch tag so the cask is written (happened on v0.4.0).
@@ -48,5 +50,5 @@ If `brew upgrade` says the latest version is already installed but `rootout --ve
 - Users need no token.
 
 ## Known limits
-- The binary is not code-signed or notarized (D-030). The cask clears the quarantine flag after install (`postflight_steps`); a direct download needs `xattr -d com.apple.quarantine rootout`. A future macOS may block this; signing is the fix.
+- The binary is not code-signed or notarized (D-030). The cask clears the quarantine flag after install (`install_steps`); a direct download needs `xattr -d com.apple.quarantine rootout`. A future macOS may block this; signing is the fix.
 - Releases v0.4.0 and v0.4.1 were cut while the repo was private; their casks needed `HOMEBREW_GITHUB_API_TOKEN`. From v0.5.0 the cask is a plain download (D-033).
