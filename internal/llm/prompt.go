@@ -1,6 +1,8 @@
 package llm
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"html"
 	"regexp"
@@ -13,6 +15,24 @@ import (
 
 // DefaultMaxPromptBytes caps the user message when BuildPrompt gets maxBytes <= 0.
 const DefaultMaxPromptBytes = 24 << 10
+
+// PromptVersion is part of every saved assessment's identity: bump it
+// whenever systemPrompt or the user-message layout changes, so answers
+// made with the old prompt are asked again. TestPromptVersionBumped pins
+// both through promptFingerprint and says what to set.
+const PromptVersion = 1
+
+// promptFingerprint is sha256(systemPrompt + "\n" + testdata/prompt.golden)[:8] in hex.
+const promptFingerprint = "5d343ffb3a757be0"
+
+// Fingerprint identifies what the model would see for r: the first 16 hex
+// characters of the sha256 of the user message. A rescore, a rule change
+// or an --online lookup that alters the prompt changes it.
+func Fingerprint(r heur.Report) string {
+	_, user := BuildPrompt(r, 0)
+	sum := sha256.Sum256([]byte(user))
+	return hex.EncodeToString(sum[:8])
+}
 
 // fieldMax caps any single metadata value (description, a script, ...) so a
 // hostile manifest cannot crowd out the findings.
