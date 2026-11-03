@@ -37,6 +37,11 @@ make install
 
 The binary is not code-signed; Homebrew clears the quarantine flag for you.
 
+rootout tells you when a newer release exists: `rootout doctor` checks
+GitHub and prints the upgrade command, and the home screen shows a one-line
+notice after the version, looked up at most once a day.
+`rootout config set updates.check false` turns both off.
+
 ## First launch
 
 The first `rootout` opens a short setup screen: pick a free local model

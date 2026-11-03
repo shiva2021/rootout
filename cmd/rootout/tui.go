@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/shiva2021/rootout/internal/app"
+	"github.com/shiva2021/rootout/internal/config"
 	"github.com/shiva2021/rootout/internal/fsx"
 	"github.com/shiva2021/rootout/internal/output"
 	"github.com/shiva2021/rootout/internal/plan"
@@ -15,6 +19,7 @@ import (
 	"github.com/shiva2021/rootout/internal/progress"
 	"github.com/shiva2021/rootout/internal/run"
 	"github.com/shiva2021/rootout/internal/tui"
+	"github.com/shiva2021/rootout/internal/update"
 )
 
 // runTUI is the bare `rootout` command: the home screen, one action, back to
@@ -41,8 +46,11 @@ func runTUI(ctx context.Context, g *globalFlags) error {
 		}
 	}
 	ai := currentAIStatus()
+	// After setup, so the first screen never waits and a fresh config is
+	// what the check reads.
+	notice := currentUpdateNotice(ctx, env)
 	for {
-		a, err := tui.PickAction(ctx, version, flash, ai)
+		a, err := tui.PickAction(ctx, version, flash, ai, notice)
 		if errors.Is(err, tui.ErrQuit) {
 			return nil
 		}
@@ -66,6 +74,61 @@ func runTUI(ctx context.Context, g *globalFlags) error {
 			ai = currentAIStatus()
 		}
 	}
+}
+
+// currentUpdateNotice wires updateNotice to the real config, cache and binary.
+func currentUpdateNotice(ctx context.Context, env fsx.Env) func() string {
+	enabled := config.Default().Updates.Check
+	if c, _, err := loadConfig(); err == nil {
+		enabled = c.Updates.Check
+	}
+	return updateNotice(ctx, update.New(version), enabled, version, update.Path(env, os.Getenv), executable(), time.Now)
+}
+
+// updateNotice returns a func that yields the home screen's update notice:
+// "v0.8.0 available · <how to upgrade>" when a newer release exists, else
+// "". The answer is computed once (the home screen is rebuilt after every
+// action) from the daily record when it is fresh, otherwise from one GitHub
+// request with a 5 s timeout; the answer, or the failure, is recorded so
+// GitHub is asked at most once a day. Errors never reach the screen.
+func updateNotice(ctx context.Context, cl *update.Client, enabled bool, installed, recordPath, exe string, now func() time.Time) func() string {
+	var once sync.Once
+	var text string
+	return func() string {
+		once.Do(func() {
+			if !enabled {
+				return
+			}
+			if _, ok := update.Installed(installed); !ok {
+				return
+			}
+			rel, ok := update.ReadRecord(recordPath, now())
+			if !ok {
+				fctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				defer cancel()
+				var err error
+				if rel, err = cl.Latest(fctx); err != nil {
+					slog.Debug("update check", "err", err)
+					rel = update.Release{}
+				}
+				if err := update.WriteRecord(recordPath, rel, now()); err != nil {
+					slog.Debug("update check: record", "path", recordPath, "err", err)
+				}
+			}
+			if rel.Tag != "" && update.Newer(rel.Tag, installed) {
+				text = rel.Tag + " available · " + noticeHint(exe)
+			}
+		})
+		return text
+	}
+}
+
+// noticeHint is upgradeHint's short form for the title line.
+func noticeHint(exe string) string {
+	if upgradeHint(exe, "") == brewUpgrade {
+		return brewUpgrade
+	}
+	return "github.com/shiva2021/rootout/releases"
 }
 
 // runAction runs one home-screen action and returns what to show on the flash.

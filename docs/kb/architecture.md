@@ -19,6 +19,7 @@ internal/
   heur/      walker with size caps, rule registry (pure funcs), Finding, Report{Score 0-100}
   llm/       Provider interface, Assessment, ModelInfo, BuildPrompt, PromptVersion/Fingerprint, fake + anthropic/openai/ollama adapters (ListModels/Verify per hosted adapter)
   assesscache/ saved hosted-model answers (JSON under ~/.cache/rootout), used only by cmd/ (D-038)
+  update/    latest GitHub release, version compare, daily record under ~/.cache/rootout; doctor row + home notice wired in cmd/ (D-039)
   llm/ollama/ Detect, ListInstalled, Recommend (catalog.go), Pull, Hardware probe
   keychain/  Get/Set/Delete via zalando/go-keyring behind an interface
   config/    ~/.config/rootout/config.toml: provider, model, defaults (never secrets)
