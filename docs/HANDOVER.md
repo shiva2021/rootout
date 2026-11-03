@@ -14,7 +14,7 @@ _Updated: 2026-11-04 · Session: scan/LLM enhancements in four phases (D-035…D
 
 Driven through a pty against a fake local model: tick two rows → `l` → "asking 2" → summary pane with both verdicts, ✓ icons and the legend, `?` lists `L` and the icon key. Not yet run in a real terminal: the wizard's model step and `m` → hosted picker (view tests cover them). Two fresh reviewers read the branches; their findings are fixed in the last commit of `m7/hosted-model` (stale cancelled-fetch message, Responses-incompatible OpenAI ids, blank-Keychain panic, `--pick` after a failed fetch) and of `m7/assess-cache` (`config cache clear` refuses anything that is not a rootout cache file, ⚠ with U+FE0E, unticked queued rows are not sent, one cache instance per run, footer fits 80 columns). Deferred minors are listed in the session's final message and below.
 
-**Next**: push the four branches, open PR 1 against `main` and PRs 2–4 each against the previous branch (retarget to `main` as Shivang merges), tag v0.7.0 … v0.10.0 in order after each merge (`make release-check NEXT=…`).
+**Next**: PRs #10 (→ `main`), #11 (→ `m7/hosted-model`), #12 (→ `m7/assess-ticked`), #13 (→ `m7/verdict-icons`) are open. Shivang merges #10, retargets #11 to `main`, merges, and so on; tag v0.7.0 … v0.10.0 after each merge (`make release-check NEXT=…`). Each phase has a CHANGELOG line under Unreleased; move them into the version section at tag time.
 
 ## Done earlier (onboarding, 2026-11-03)
 - Brainstormed with Shivang: TUI wizard + `rootout setup`; status line + "Set up AI" row; live key check with save-anyway. Plan reviewed by a Plan agent and the advisor; findings folded in: key paste trimming, `CharLimit = 0`, input blurred in the error state, per-call timeout, Keychain read once per launch, empty file on skip.
@@ -63,6 +63,12 @@ Driven through a pty against a fake local model: tick two rows → `l` → "aski
 - `rootout remove Spotify -n`: bundle + 7 leftovers, 3.8 GB; `Mail` refused.
 - `rootout scan --all`: scores 5–30; the 30 is `ms-python.vscode-python-envs` piping the uv installer into `sh` (true finding).
 - Live removal and live LLM calls have not been run.
+
+## Deferred review minors (m7 branches, not fixed)
+- Hosted picker: `?` while typing inserts the character though the footer says `? help`; long ids push the NAME column right (the CLI grid truncates); "listing models…" not truncated under ~17 columns; `saveModel` prints "using … model" to stderr over the alt screen when called from `OnModel` (pre-existing for Ollama); `checkHosted` message reads oddly for `--provider ollama`.
+- Scan screen: after `m`, an old model's in-flight answer can overwrite the new model's preloaded saved answer for that row; `detailTop` is not reset when the pane switches between the summary and a single detail.
+- Cache: `XDG_CACHE_HOME` not honoured (D-038 chose `~/.cache`); the `slog.Warn` for a corrupt file prints without `--verbose` (pre-existing logger setup).
+- PRs 10–12 carry the transient issues fixed only on the Phase 4 tip (PR 13): DECISIONS order, the Phase 2/3 minors above; `main` is right once all four merge.
 
 ## Blockers and open questions
 - Unsigned binary relies on the cask's quarantine-clearing step (D-030); a future macOS may block it.
