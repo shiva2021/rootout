@@ -973,78 +973,22 @@ func (v *AppsView) detailLines(width int) []string {
 	return out
 }
 
-// factLines renders the gathered facts, one label per line.
+// factLines renders the gathered facts, one label per line, styled by
+// tone: warnings in the flash colour, missing evidence dim.
 func (v *AppsView) factLines(f app.Facts, label func(k, val string) string) []string {
 	s := v.styles
-	unavailable := map[string]bool{}
-	for _, u := range f.Unavailable {
-		unavailable[u] = true
-	}
 	var lines []string
-	sig := f.Signature
-	switch {
-	case unavailable["codesign"]:
-		lines = append(lines, label("Signature", s.dim.Render("not available")))
-	case !sig.Signed:
-		lines = append(lines, label("Signature", s.flash.Render("unsigned")))
-	case sig.AdHoc:
-		lines = append(lines, label("Signature", s.flash.Render("ad-hoc (no developer identity)")))
-	default:
-		who := sig.TeamID
-		if len(sig.Authority) > 0 {
-			who = sig.Authority[0] + " · team " + orDash(sig.TeamID)
+	for _, l := range f.Summary() {
+		val := l.Value
+		switch l.Tone {
+		case app.Warn:
+			val = s.flash.Render(val)
+		case app.Dim:
+			val = s.dim.Render(val)
 		}
-		lines = append(lines, label("Signature", who))
-	}
-	g := f.Gatekeeper
-	switch {
-	case unavailable["spctl"]:
-		lines = append(lines, label("Gatekeeper", s.dim.Render("not available")))
-	case g.Accepted:
-		lines = append(lines, label("Gatekeeper", "accepted · "+g.Source))
-	default:
-		lines = append(lines, label("Gatekeeper", s.flash.Render("rejected · "+g.Source)))
-	}
-	switch {
-	case unavailable["mdls"]:
-		lines = append(lines, label("Origin", s.dim.Render("not available")))
-	case len(f.Origin.WhereFroms) > 0:
-		lines = append(lines, label("Where from", strings.Join(f.Origin.WhereFroms, ", ")))
-	default:
-		lines = append(lines, label("Where from", s.dim.Render("unknown")))
-	}
-	if f.AppStore {
-		lines = append(lines, label("App Store", "receipt present"))
-	}
-	if !f.Origin.DateAdded.IsZero() {
-		lines = append(lines, label("Added", f.Origin.DateAdded.Local().Format("2006-01-02")))
-	}
-	if !f.Origin.LastUsed.IsZero() {
-		lines = append(lines, label("Last used", f.Origin.LastUsed.Local().Format("2006-01-02")))
-	}
-	if f.Plist.UIElement || f.Plist.BackgroundOnly {
-		lines = append(lines, label("Runs", "hidden from the Dock"))
-	}
-	if len(f.Plist.UsageKeys) > 0 {
-		lines = append(lines, label("Permissions", strings.Join(permissionNames(f.Plist.UsageKeys), ", ")))
-	}
-	if len(f.Plist.PrivilegedHelpers) > 0 {
-		lines = append(lines, label("Helper", s.flash.Render(strings.Join(f.Plist.PrivilegedHelpers, ", "))))
-	}
-	if len(f.LaunchItems) > 0 {
-		lines = append(lines, label("Launch items", strings.Join(f.LaunchItems, ", ")))
+		lines = append(lines, label(l.Label, val))
 	}
 	return lines
-}
-
-// permissionNames turns NSCameraUsageDescription into "Camera".
-func permissionNames(keys []string) []string {
-	out := make([]string, 0, len(keys))
-	for _, k := range keys {
-		k = strings.TrimSuffix(strings.TrimPrefix(k, "NS"), "UsageDescription")
-		out = append(out, k)
-	}
-	return out
 }
 
 // assessBox renders the AI answer, the pending error, or "" when neither.

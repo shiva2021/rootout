@@ -29,8 +29,7 @@ type assessFlags struct {
 // assessItem is one JSON row: the app, what rootout found out about it and
 // the model's answer.
 type assessItem struct {
-	App        app.App            `json:"app"`
-	Facts      app.Facts          `json:"facts"`
+	Facts      app.Facts          `json:"facts"` // carries the app itself
 	Assessment *llm.AppAssessment `json:"assessment,omitempty"`
 	AssessErr  string             `json:"assessment_error,omitempty"`
 }
@@ -89,11 +88,11 @@ configured, the answer ("cached": true when it was a saved answer).`,
 
 func runAssess(ctx context.Context, g *globalFlags, f assessFlags, arg string) error {
 	interactive := !g.json && !f.noTUI && isTerminal(os.Stdin) && isTerminal(os.Stdout)
-	if arg == "" && !f.all && !interactive {
-		return &exitErr{code: exitBadInput, msg: "name an app or pass --all (the review screen needs a terminal)"}
-	}
 	if f.pickModel && !interactive {
 		return &exitErr{code: exitBadInput, msg: "--pick-model needs a terminal; use `rootout config models` and `--model <name>` in scripts"}
+	}
+	if arg == "" && !f.all && !interactive {
+		return &exitErr{code: exitBadInput, msg: "name an app or pass --all (the review screen needs a terminal)"}
 	}
 	c, _, err := loadConfig()
 	if err != nil {
@@ -178,7 +177,7 @@ func assessOne(ctx context.Context, a tui.AppAssessor, target app.App) assessIte
 	if a.Inspect != nil {
 		facts = a.Inspect(ctx, target)
 	}
-	item := assessItem{App: facts.App, Facts: facts}
+	item := assessItem{Facts: facts}
 	if a.Assess == nil {
 		return item
 	}
@@ -221,7 +220,8 @@ func reviewAndUninstallApps(ctx context.Context, env fsx.Env, apps []app.App, a 
 	if !ok || len(res.Uninstall) == 0 {
 		return tui.Flash{Text: "No changes"}, nil
 	}
-	var done, skipped, failed int
+	var done, skipped int
+	var failed []string
 	for _, x := range res.Uninstall {
 		f, confirmed, err := uninstallOne(ctx, env, x, rep)
 		if err != nil {
@@ -231,22 +231,27 @@ func reviewAndUninstallApps(ctx context.Context, env fsx.Env, apps []app.App, a 
 		case !confirmed:
 			skipped++
 		case f.Err:
-			failed++
+			// Each outcome is printed between screens, as the removal
+			// report is, so the reason survives the summary.
+			fmt.Fprintln(os.Stderr, "rootout:", f.Text)
+			failed = append(failed, x.Name)
 		default:
+			fmt.Fprintln(os.Stderr, "rootout:", f.Text)
 			done++
 		}
 	}
 	return assessFlash(done, skipped, failed), nil
 }
 
-// assessFlash summarises the removals that followed the review screen.
-func assessFlash(done, skipped, failed int) tui.Flash {
-	f := tui.Flash{Text: fmt.Sprintf("Removed %d of %d apps", done, done+skipped+failed)}
+// assessFlash summarises the removals that followed the review screen,
+// naming the apps that failed.
+func assessFlash(done, skipped int, failed []string) tui.Flash {
+	f := tui.Flash{Text: fmt.Sprintf("Removed %d of %d apps", done, done+skipped+len(failed))}
 	if skipped > 0 {
 		f.Text += fmt.Sprintf(" · %d skipped", skipped)
 	}
-	if failed > 0 {
-		f.Text += fmt.Sprintf(" · %d failed", failed)
+	if len(failed) > 0 {
+		f.Text += fmt.Sprintf(" · %d failed (%s)", len(failed), strings.Join(failed, ", "))
 		f.Err = true
 	}
 	return f
@@ -263,110 +268,43 @@ func printAssessItems(w *output.Writer, items []assessItem) error {
 		ai, purpose := "", ""
 		switch {
 		case it.Assessment != nil:
-			ai = fmt.Sprintf("%s %d%%", it.Assessment.Recommendation, int(it.Assessment.Confidence*100))
+			ai = fmt.Sprintf("%s %.0f%%", it.Assessment.Recommendation, it.Assessment.Confidence*100)
 			purpose = it.Assessment.Purpose
 		case it.AssessErr != "":
 			ai = "error"
 		}
-		t.Cells = append(t.Cells, []string{it.App.Name, it.App.Version, source(it.App), ai, purpose})
+		t.Cells = append(t.Cells, []string{it.Facts.App.Name, it.Facts.App.Version, it.Facts.Source(), ai, purpose})
 	}
 	if err := w.Print(t); err != nil {
 		return err
 	}
 	for _, it := range items {
-		w.Printf("\n%s (%s)\n", it.App.Name, orNone(it.App.BundleID))
-		for _, line := range factsLines(it.Facts) {
-			w.Printf("  %s\n", line)
+		a := it.Facts.App
+		id := a.BundleID
+		if id == "" {
+			id = "no bundle id"
+		}
+		w.Printf("\n%s (%s)\n", a.Name, id)
+		for _, line := range it.Facts.Summary() {
+			w.Printf("  %s: %s\n", strings.ToLower(line.Label), line.Value)
 		}
 		switch {
 		case it.Assessment != nil:
-			a := it.Assessment
-			model := a.Model
-			if a.Cached {
+			r := it.Assessment
+			model := r.Model
+			if r.Cached {
 				model += ", saved"
 			}
-			w.Printf("  AI: %s (%d%%, %s) · source %s\n", strings.ToUpper(a.Recommendation), int(a.Confidence*100), model, a.Source)
-			if a.Purpose != "" {
-				w.Printf("    %s\n", a.Purpose)
+			w.Printf("  AI: %s (%.0f%%, %s) · source %s\n", strings.ToUpper(r.Recommendation), r.Confidence*100, model, r.Source)
+			if r.Purpose != "" {
+				w.Printf("    %s\n", r.Purpose)
 			}
-			if a.Reasoning != "" {
-				w.Printf("    %s\n", a.Reasoning)
+			if r.Reasoning != "" {
+				w.Printf("    %s\n", r.Reasoning)
 			}
 		case it.AssessErr != "":
 			w.Printf("  AI assessment failed: %s\n", it.AssessErr)
 		}
 	}
 	return nil
-}
-
-// factsLines is the plain-text rendering of an app's facts.
-func factsLines(f app.Facts) []string {
-	unavailable := map[string]bool{}
-	for _, u := range f.Unavailable {
-		unavailable[u] = true
-	}
-	var lines []string
-	s := f.Signature
-	switch {
-	case unavailable["codesign"]:
-		lines = append(lines, "signature: not available")
-	case !s.Signed:
-		lines = append(lines, "signature: unsigned")
-	case s.AdHoc:
-		lines = append(lines, "signature: ad-hoc (no developer identity)")
-	default:
-		who := orNone(s.TeamID)
-		if len(s.Authority) > 0 {
-			who = s.Authority[0] + " · team " + orNone(s.TeamID)
-		}
-		lines = append(lines, "signature: "+who)
-	}
-	switch {
-	case unavailable["spctl"]:
-		lines = append(lines, "gatekeeper: not available")
-	case f.Gatekeeper.Accepted:
-		lines = append(lines, "gatekeeper: accepted · "+f.Gatekeeper.Source)
-	default:
-		lines = append(lines, "gatekeeper: rejected · "+f.Gatekeeper.Source)
-	}
-	switch {
-	case unavailable["mdls"]:
-		lines = append(lines, "origin: not available")
-	case len(f.Origin.WhereFroms) > 0:
-		lines = append(lines, "where from: "+strings.Join(f.Origin.WhereFroms, ", "))
-	default:
-		lines = append(lines, "where from: unknown")
-	}
-	if f.AppStore {
-		lines = append(lines, "app store: receipt present")
-	}
-	if !f.Origin.DateAdded.IsZero() {
-		lines = append(lines, "added: "+f.Origin.DateAdded.Local().Format("2006-01-02"))
-	}
-	if !f.Origin.LastUsed.IsZero() {
-		lines = append(lines, "last used: "+f.Origin.LastUsed.Local().Format("2006-01-02"))
-	}
-	if f.Plist.UIElement || f.Plist.BackgroundOnly {
-		lines = append(lines, "runs: hidden from the Dock")
-	}
-	if len(f.Plist.UsageKeys) > 0 {
-		lines = append(lines, "permissions declared: "+strings.Join(f.Plist.UsageKeys, ", "))
-	}
-	if len(f.Plist.PrivilegedHelpers) > 0 {
-		lines = append(lines, "privileged helpers: "+strings.Join(f.Plist.PrivilegedHelpers, ", "))
-	}
-	if len(f.LaunchItems) > 0 {
-		lines = append(lines, "launch items: "+strings.Join(f.LaunchItems, ", "))
-	}
-	if len(f.Unavailable) > 0 {
-		lines = append(lines, "could not run: "+strings.Join(f.Unavailable, ", "))
-	}
-	return lines
-}
-
-func orNone(s string) string {
-	if s == "" {
-		return "none"
-	}
-	return s
 }
