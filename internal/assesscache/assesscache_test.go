@@ -3,12 +3,14 @@ package assesscache
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/shiva2021/rootout/internal/app"
 	"github.com/shiva2021/rootout/internal/ext"
 	"github.com/shiva2021/rootout/internal/heur"
 	"github.com/shiva2021/rootout/internal/llm"
@@ -271,5 +273,151 @@ func TestClearRefusesForeignFiles(t *testing.T) {
 	_ = c.Store(IDFor(report(), "anthropic", "m"), llm.Assessment{})
 	if removed, err := Clear(path); err != nil || !removed {
 		t.Fatalf("real cache: Clear = %v, %v", removed, err)
+	}
+}
+
+func facts() app.Facts {
+	return app.Facts{
+		App:        app.App{Name: "Foo", BundleID: "com.example.foo", Version: "1.2", Path: "/Applications/Foo.app"},
+		Signature:  app.Signature{Signed: true, TeamID: "ABCDE12345"},
+		Gatekeeper: app.Gatekeeper{Accepted: true, Source: "Notarized Developer ID"},
+	}
+}
+
+func TestAppStoreLookupRoundTrip(t *testing.T) {
+	path, _ := fakeEnv(t)
+	c, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := IDForApp(facts(), "anthropic", "claude-x")
+	a := llm.AppAssessment{Purpose: "Edits text.", Source: llm.SourceLegitimate, Confidence: 0.9, Recommendation: llm.Keep, Reasoning: "Signed.", Provider: "anthropic", Model: "claude-x"}
+	if err := c.StoreApp(id, a); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := c.LookupApp(id)
+	if !ok || !got.Cached || got.Purpose != "Edits text." || got.Recommendation != llm.Keep {
+		t.Fatalf("LookupApp = %+v, %v", got, ok)
+	}
+	// An app entry never answers an extension lookup and vice versa.
+	if _, ok := c.Lookup(IDFor(report(), "anthropic", "claude-x")); ok {
+		t.Error("extension lookup hit an app entry")
+	}
+	if err := c.Store(IDFor(report(), "anthropic", "claude-x"), llm.Assessment{Verdict: llm.Benign}); err != nil {
+		t.Fatal(err)
+	}
+	if c.Len() != 2 {
+		t.Errorf("Len = %d, want 2 (both kinds)", c.Len())
+	}
+	raw, _ := os.ReadFile(path)
+	if strings.Contains(string(raw), `"cached":true`) {
+		t.Error("Cached must not be written to disk")
+	}
+	// Reopen: both kinds survive and the file is still version 1.
+	c2, err := Open(path)
+	if err != nil || c2.Len() != 2 {
+		t.Fatalf("reopen: %v, len %d", err, c2.Len())
+	}
+	if _, ok := c2.LookupApp(id); !ok {
+		t.Error("app entry lost on reopen")
+	}
+	if _, ok := c2.Lookup(IDFor(report(), "anthropic", "claude-x")); !ok {
+		t.Error("extension entry lost on reopen")
+	}
+	var file struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(raw, &file); err != nil || file.Version != 1 {
+		t.Errorf("file version = %d, want 1 (additive layout)", file.Version)
+	}
+}
+
+// TestOldLayoutStillReads opens a file written before app entries existed,
+// where "assessment" is a plain object on every entry.
+func TestOldLayoutStillReads(t *testing.T) {
+	path, _ := fakeEnv(t)
+	id := IDFor(report(), "anthropic", "claude-x")
+	raw := `{"version":1,"entries":{"` + id.String() + `":{"assessment":{"verdict":"malicious","confidence":0.9,"reasoning":"r","iocs":[],"provider":"anthropic","model":"claude-x"},"at":"2026-11-04T00:00:00Z"}}}`
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Open(path)
+	if err != nil || c.Unreadable() {
+		t.Fatalf("Open: %v unreadable=%v", err, c.Unreadable())
+	}
+	got, ok := c.Lookup(id)
+	if !ok || got.Verdict != llm.Malicious || !got.Cached {
+		t.Fatalf("Lookup = %+v, %v", got, ok)
+	}
+}
+
+func TestAppIDIncludesEveryField(t *testing.T) {
+	base := IDForApp(facts(), "anthropic", "claude-x")
+	if !strings.HasPrefix(base.String(), "app|com.example.foo|1.2|anthropic|claude-x|a1|") {
+		t.Errorf("String = %q", base.String())
+	}
+	seen := map[string]bool{base.String(): true}
+	variants := []AppEntryID{
+		IDForApp(facts(), "openai", "claude-x"),
+		IDForApp(facts(), "anthropic", "other"),
+	}
+	f := facts()
+	f.App.Version = "1.3"
+	variants = append(variants, IDForApp(f, "anthropic", "claude-x"))
+	f = facts()
+	f.Signature.TeamID = "ZZZZZ99999"
+	variants = append(variants, IDForApp(f, "anthropic", "claude-x"))
+	f = facts()
+	f.App.BundleID = ""
+	noID := IDForApp(f, "anthropic", "claude-x")
+	if noID.BundleID != "/Applications/Foo.app" {
+		t.Errorf("empty bundle id should fall back to the path, got %q", noID.BundleID)
+	}
+	variants = append(variants, noID)
+	for _, v := range variants {
+		if seen[v.String()] {
+			t.Errorf("duplicate key %q", v.String())
+		}
+		seen[v.String()] = true
+	}
+}
+
+// TestAppKeysCannotCollide pins the "app|" prefix against the editor ids an
+// extension key starts with.
+func TestAppKeysCannotCollide(t *testing.T) {
+	env := testutil.FakeHome(t, testutil.Spec{})
+	for _, ed := range ext.Editors(env, ext.Options{}) {
+		if ed.ID == "app" {
+			t.Fatalf("editor id %q would collide with app entries", ed.ID)
+		}
+	}
+	if strings.HasPrefix(IDFor(report(), "p", "m").String(), "app|") {
+		t.Fatal("extension key starts with app|")
+	}
+}
+
+func TestConcurrentStoreBothKinds(t *testing.T) {
+	path, _ := fakeEnv(t)
+	c, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Go(func() {
+			r := report()
+			r.Ext.ID = fmt.Sprintf("ext%d", i)
+			_ = c.Store(IDFor(r, "p", "m"), llm.Assessment{Verdict: llm.Benign})
+			f := facts()
+			f.App.BundleID = fmt.Sprintf("com.example.%d", i)
+			_ = c.StoreApp(IDForApp(f, "p", "m"), llm.AppAssessment{Recommendation: llm.Keep})
+		})
+	}
+	wg.Wait()
+	if c.Len() != 16 {
+		t.Errorf("Len = %d, want 16", c.Len())
 	}
 }
