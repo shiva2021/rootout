@@ -732,8 +732,13 @@ var footerDropOrder = []string{"tab focus", "f hide low", "ctrl+x quit", "esc ba
 // fitFooter joins parts with the separator, removing entries in
 // footerDropOrder until the result fits width.
 func fitFooter(parts []string, width int) string {
+	return fitFooterWith(parts, width, footerDropOrder)
+}
+
+// fitFooterWith is fitFooter with the screen's own drop order.
+func fitFooterWith(parts []string, width int, order []string) string {
 	line := strings.Join(parts, labelSep)
-	for _, drop := range footerDropOrder {
+	for _, drop := range order {
 		if lipgloss.Width(line) <= width {
 			break
 		}

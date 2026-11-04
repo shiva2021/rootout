@@ -98,6 +98,7 @@ Getting started
 		newListCmd(&g),
 		newRemoveCmd(&g),
 		newScanCmd(&g),
+		newAssessCmd(&g),
 		newConfigCmd(&g),
 		newDoctorCmd(&g),
 		newOrphansCmd(&g),

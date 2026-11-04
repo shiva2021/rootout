@@ -4,8 +4,11 @@ All notable changes to rootout. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added
+- Ask the AI about installed apps (D-040). `rootout assess` (and "Assess apps" on the home screen) lists every app; resting the cursor on one gathers its facts locally (code signature and Team ID, Gatekeeper verdict, download origin, App Store receipt, launch agents and daemons, declared permissions, privileged helpers), tick apps and press `l` to ask the configured model what each is for, whether its source is legitimate, how confident it is and whether to keep or drop it (✓ keep, ✗ drop, ⚠ unsure); enter sends each ticked app through the usual file review. `rootout assess <app>` prints the facts and the answer for one app, `--all` does every app, `--json` for scripts; without a configured model the facts are still shown. Answers from Claude and OpenAI are saved beside the extension answers and reused (`L` asks again, `--no-cache` skips the file). `rootout guide` gains the step.
+
 ### Changed
-- Groundwork for AI assessment of installed apps (D-040, `docs/plans/app-assess.md`): `app.Inspect` gathers an app's code signature, Gatekeeper verdict, download origin, App Store receipt, Info.plist facts and launch items; `llm.Provider` is now transport only (`Complete`) with `llm.Assess` and `llm.AssessApp` sharing one pipeline; the saved-assessments file takes app entries beside extension entries without a version change. No user-visible change yet.
+- Groundwork for AI assessment of installed apps (D-040, `docs/plans/app-assess.md`): `app.Inspect` gathers an app's code signature, Gatekeeper verdict, download origin, App Store receipt, Info.plist facts and launch items; `llm.Provider` is now transport only (`Complete`) with `llm.Assess` and `llm.AssessApp` sharing one pipeline; the saved-assessments file takes app entries beside extension entries without a version change. `llm.Provider` implementations outside this repo must now implement `Complete`.
 
 ## [0.8.2] - 2026-11-04
 

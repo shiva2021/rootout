@@ -37,6 +37,7 @@ const (
 	ActionUninstall
 	ActionOrphans
 	ActionScan
+	ActionAssess
 	ActionSetup
 	ActionQuit // never returned by PickAction: the Quit row yields ErrQuit
 )
@@ -51,6 +52,7 @@ var homeRows = []homeRow{
 	{ActionUninstall, "Uninstall an app", "pick an installed app, review every file it left behind, remove it"},
 	{ActionOrphans, "Remove orphaned leftovers", "find files left by apps that are already gone"},
 	{ActionScan, "Scan editor extensions", "score VS Code-family extensions for malicious behaviour"},
+	{ActionAssess, "Assess apps", "ask the AI what each installed app is and whether its source is legitimate"},
 	{ActionSetup, "Set up AI", "optional: a local model or a Claude/OpenAI key for keep/uninstall recommendations"},
 	{ActionQuit, "Quit", "leave rootout (ctrl+x works on every screen)"},
 }

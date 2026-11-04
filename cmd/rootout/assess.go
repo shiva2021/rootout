@@ -38,7 +38,7 @@ func buildProvider(ctx context.Context, c config.Config, provider, model string,
 	}
 	switch provider {
 	case "":
-		fmt.Fprintln(os.Stderr, "rootout: no AI provider configured; run `rootout setup` or press m in the scan screen (continuing with heuristics only)")
+		fmt.Fprintln(os.Stderr, "rootout: no AI provider configured; run `rootout setup` or press m in the scan screen (continuing without AI)")
 		return nil, "", nil
 	case "ollama":
 		if model == "" {
@@ -46,7 +46,7 @@ func buildProvider(ctx context.Context, c config.Config, provider, model string,
 		}
 		if model == "" {
 			if !interactive {
-				fmt.Fprintln(os.Stderr, "rootout: no Ollama model selected; run `rootout config models --pick` (continuing with heuristics only)")
+				fmt.Fprintln(os.Stderr, "rootout: no Ollama model selected; run `rootout config models --pick` (continuing without AI)")
 				return nil, "", nil
 			}
 			m, err := pickAndSaveModel(ctx)
@@ -63,7 +63,7 @@ func buildProvider(ctx context.Context, c config.Config, provider, model string,
 		}
 		key, _, err := keychain.Resolve(keychain.New(), provider, os.Getenv)
 		if errors.Is(err, keychain.ErrNotFound) {
-			fmt.Fprintf(os.Stderr, "rootout: no %s API key; run `rootout setup` (continuing with heuristics only)\n", provider)
+			fmt.Fprintf(os.Stderr, "rootout: no %s API key; run `rootout setup` (continuing without AI)\n", provider)
 			return nil, "", nil
 		}
 		if err != nil {

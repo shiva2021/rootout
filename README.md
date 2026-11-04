@@ -4,12 +4,14 @@ Uninstall macOS apps completely, and find risky extensions in VS Code, Cursor,
 VSCodium, Windsurf and VS Code Insiders.
 
 ```bash
-rootout                       # home screen: uninstall an app, remove orphans, scan extensions, pick a model
+rootout                       # home screen: uninstall an app, remove orphans, scan extensions, assess apps
 rootout list [--search q]     # installed apps
 rootout remove <app> -n       # dry run: show the bundle and every leftover file
 rootout remove <app>          # move them to the Trash after you confirm
 rootout scan                  # score installed extensions; review and uninstall on a terminal
 rootout scan --llm            # also ask Claude, OpenAI or a local Ollama model
+rootout assess                # every app with its signature and origin; ask the AI what to keep
+rootout assess <app>          # one app: is the source legitimate, what is it for, keep or drop
 rootout orphans               # leftovers of apps you already deleted, grouped by old app id
 rootout setup                 # optional: a local model or a Claude/OpenAI key for recommendations
 rootout config models --pick  # choose or download a local model that fits this Mac
@@ -53,6 +55,16 @@ the scan screen and press `l` to ask the model whether to keep or uninstall
 them (two at a time; the right pane lists every answer). The home
 screen always shows the current AI status and model, and `rootout setup`
 reopens the screen.
+
+The same model can look at installed apps. `rootout assess` lists every app
+and, as the cursor rests on one, gathers its facts locally: who signed it
+(Team ID), whether Gatekeeper accepts it, where it was downloaded from, the
+App Store receipt, launch agents and the permissions it declares. Tick apps
+and press `l` to ask the model what each app is for, whether its source is
+legitimate, how confident it is and whether to keep or drop it; `rootout
+assess <app>` does one app from the command line. The answer is advice: a
+ticked app still gets the usual review of its files before anything moves to
+the Trash. Answers from Claude and OpenAI are saved and reused.
 
 Nothing is uninstalled until you type `delete`. In every screen `?` lists the
 keys; in the scan screen `m` changes the model without leaving the scan (the
