@@ -4,6 +4,9 @@ All notable changes to rootout. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Changed
+- Groundwork for AI assessment of installed apps (D-040, `docs/plans/app-assess.md`): `app.Inspect` gathers an app's code signature, Gatekeeper verdict, download origin, App Store receipt, Info.plist facts and launch items; `llm.Provider` is now transport only (`Complete`) with `llm.Assess` and `llm.AssessApp` sharing one pipeline; the saved-assessments file takes app entries beside extension entries without a version change. No user-visible change yet.
+
 ## [0.8.2] - 2026-11-04
 
 ### Changed
