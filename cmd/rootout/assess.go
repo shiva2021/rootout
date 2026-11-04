@@ -125,11 +125,10 @@ func assessFunc(p llm.Provider, cache *assesscache.Cache, force bool) tui.Assess
 		}
 		ctx, cancel := context.WithTimeout(ctx, assessTimeout)
 		defer cancel()
-		a, err := p.Assess(ctx, r)
+		a, err := llm.Assess(ctx, p, r)
 		if err != nil {
 			return a, err
 		}
-		a = llm.Normalize(a, p.Name(), p.Model())
 		if cache != nil {
 			if err := cache.Store(id, a); err != nil {
 				fmt.Fprintln(os.Stderr, "rootout: could not save the assessment:", err)

@@ -1,15 +1,18 @@
 // Package llm asks a language model for a second opinion on an extension the
-// heuristics flagged. The model sees only the extension's metadata, the
-// findings and short code snippets (BuildPrompt), never the whole extension.
-// Providers: Anthropic, OpenAI, Ollama (decisions D-004, D-013).
+// heuristics flagged, or on an installed app. The model sees only the
+// extension's metadata, the findings and short code snippets (BuildPrompt),
+// never the whole extension; for an app it sees the locally gathered facts
+// (BuildAppPrompt). Providers: Anthropic, OpenAI, Ollama (D-004, D-013).
 package llm
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
+	"github.com/shiva2021/rootout/internal/app"
 	"github.com/shiva2021/rootout/internal/heur"
 )
 
@@ -51,11 +54,42 @@ type ModelInfo struct {
 	Deprecated  bool      `json:"deprecated,omitempty"`
 }
 
-// Provider is one model backend.
+// Provider is one model backend: pure transport. Complete sends the system
+// and user messages with a JSON schema the reply must follow and returns the
+// reply text; it maps its own authentication, refusal and transport errors.
+// Assess and AssessApp build the prompt, call Complete, decode and normalise.
 type Provider interface {
 	Name() string  // "anthropic" | "openai" | "ollama" | "fake"
 	Model() string // model id in use
-	Assess(ctx context.Context, r heur.Report) (Assessment, error)
+	Complete(ctx context.Context, system, user string, schema map[string]any) (string, error)
+}
+
+// Assess asks p about an extension report.
+func Assess(ctx context.Context, p Provider, r heur.Report) (Assessment, error) {
+	system, user := BuildPrompt(r, 0)
+	text, err := p.Complete(ctx, system, user, Schema())
+	if err != nil {
+		return Assessment{}, err
+	}
+	a, err := Decode(text)
+	if err != nil {
+		return Assessment{}, fmt.Errorf("%s: %w", p.Name(), err)
+	}
+	return Normalize(a, p.Name(), p.Model()), nil
+}
+
+// AssessApp asks p about an installed app.
+func AssessApp(ctx context.Context, p Provider, f app.Facts) (AppAssessment, error) {
+	system, user := BuildAppPrompt(f)
+	text, err := p.Complete(ctx, system, user, AppSchema())
+	if err != nil {
+		return AppAssessment{}, err
+	}
+	a, err := DecodeApp(text)
+	if err != nil {
+		return AppAssessment{}, fmt.Errorf("%s: %w", p.Name(), err)
+	}
+	return NormalizeApp(a, p.Name(), p.Model()), nil
 }
 
 var (

@@ -12,6 +12,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go/option"
 
+	"github.com/shiva2021/rootout/internal/app"
 	"github.com/shiva2021/rootout/internal/ext"
 	"github.com/shiva2021/rootout/internal/heur"
 	"github.com/shiva2021/rootout/internal/llm"
@@ -93,7 +94,7 @@ func TestAssess(t *testing.T) {
 			}))
 			defer srv.Close()
 			p := New("sk-test", "claude-test", option.WithBaseURL(srv.URL), option.WithMaxRetries(0))
-			got, err := p.Assess(context.Background(), report)
+			got, err := llm.Assess(context.Background(), p, report)
 			if tt.wantErr != nil {
 				if err == nil || !tt.wantErr(err) {
 					t.Fatalf("err = %v", err)
@@ -113,7 +114,40 @@ func TestAssess(t *testing.T) {
 }
 
 func TestNoKey(t *testing.T) {
-	if _, err := New("", "m").Assess(context.Background(), report); !errors.Is(err, llm.ErrNoKey) {
+	if _, err := llm.Assess(context.Background(), New("", "m"), report); !errors.Is(err, llm.ErrNoKey) {
 		t.Errorf("err = %v", err)
+	}
+}
+
+func TestAssessApp(t *testing.T) {
+	var schema map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			OutputConfig struct {
+				Format struct {
+					Schema map[string]any `json:"schema"`
+				} `json:"format"`
+			} `json:"output_config"`
+		}
+		data, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(data, &req)
+		schema = req.OutputConfig.Format.Schema
+		if !strings.Contains(string(data), "com.google.Chrome") {
+			t.Errorf("request body lacks the app facts: %s", data)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, messageBody(`{"purpose":"Browses the web.","source":"legitimate","confidence":0.95,"recommendation":"keep","reasoning":"Signed by Google."}`))
+	}))
+	defer srv.Close()
+	p := New("sk-test", "claude-test", option.WithBaseURL(srv.URL), option.WithMaxRetries(0))
+	a, err := llm.AssessApp(context.Background(), p, app.Facts{App: app.App{Name: "Chrome", BundleID: "com.google.Chrome"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if props, _ := schema["properties"].(map[string]any); props["purpose"] == nil || props["verdict"] != nil {
+		t.Errorf("request schema = %v, want the app schema", schema)
+	}
+	if a.Recommendation != llm.Keep || a.Source != llm.SourceLegitimate || a.Provider != "anthropic" || a.Model != "claude-test" {
+		t.Errorf("a = %+v", a)
 	}
 }

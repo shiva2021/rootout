@@ -1,6 +1,14 @@
 package llm
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/shiva2021/rootout/internal/app"
+	"github.com/shiva2021/rootout/internal/heur"
+)
 
 func TestConfident(t *testing.T) {
 	tests := []struct {
@@ -18,5 +26,24 @@ func TestConfident(t *testing.T) {
 		if got := (Assessment{Confidence: tt.confidence}).Confident(); got != tt.want {
 			t.Errorf("Confident(%v) = %v, want %v", tt.confidence, got, tt.want)
 		}
+	}
+}
+
+// textProvider answers every Complete with a fixed text.
+type textProvider struct{ text string }
+
+func (textProvider) Name() string  { return "stub" }
+func (textProvider) Model() string { return "m" }
+func (p textProvider) Complete(context.Context, string, string, map[string]any) (string, error) {
+	return p.text, nil
+}
+
+func TestAssessWrapsDecodeErrors(t *testing.T) {
+	p := textProvider{text: "no json here"}
+	if _, err := Assess(context.Background(), p, heur.Report{}); !errors.Is(err, ErrBadResponse) || !strings.HasPrefix(err.Error(), "stub: ") {
+		t.Errorf("Assess err = %v", err)
+	}
+	if _, err := AssessApp(context.Background(), p, app.Facts{}); !errors.Is(err, ErrBadResponse) || !strings.HasPrefix(err.Error(), "stub: ") {
+		t.Errorf("AssessApp err = %v", err)
 	}
 }
