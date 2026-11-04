@@ -74,17 +74,9 @@ func runRemove(ctx context.Context, g *globalFlags, f removeFlags, arg string) e
 	if err != nil {
 		return err
 	}
-	target, err := app.Resolve(apps, arg)
+	target, err := resolveApp(apps, arg)
 	if err != nil {
-		var amb *app.AmbiguousError
-		if errors.As(err, &amb) {
-			fmt.Fprintf(os.Stderr, "rootout: %q matches several apps:\n", arg)
-			for _, m := range amb.Candidates {
-				fmt.Fprintf(os.Stderr, "  %s (%s)\n", m.App.Name, m.App.BundleID)
-			}
-			return &exitErr{code: exitBadInput, msg: "be more specific, or use the bundle id"}
-		}
-		return &exitErr{code: exitBadInput, msg: fmt.Sprintf("no application matches %q (try: rootout list --search %q)", arg, arg)}
+		return err
 	}
 
 	mode := plan.Trash
