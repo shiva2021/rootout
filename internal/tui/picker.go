@@ -52,11 +52,11 @@ var pickerKeys = []keyHelp{
 // pickerAskKey is the ? row added when an AI model is configured.
 var pickerAskKey = keyHelp{"ctrl+l", "ask the configured AI what the highlighted app is for, whether its source is legitimate and whether to keep it (shown in the preview)"}
 
-// pickerAssessMsg carries one app's facts and the model's answer back to
-// the picker, keyed by bundle path.
+// pickerAssessMsg carries the model's answer about one app back to the
+// picker, keyed by bundle path.
 type pickerAssessMsg struct {
 	path string
-	f    app.Facts
+	name string
 	a    llm.AppAssessment
 	err  error
 }
@@ -101,6 +101,10 @@ func PickApp(ctx context.Context, apps []app.App) (chosen app.App, ok bool, err 
 // cancelled (ctrl+x and ctrl+c return ErrQuit); a load failure is shown on
 // screen and returned once the user leaves.
 func PickAppLoad(ctx context.Context, load LoadFunc, a *AppAssessor) (app.App, bool, error) {
+	// Cancelled on return so a ctrl+l call still in flight stops with the
+	// screen instead of finishing (and paying) for nobody.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	p := NewPickerLoading(load)
 	p.ctx = ctx
 	p.SetAssessor(a)
@@ -276,9 +280,14 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			delete(p.errs, msg.path)
 			p.results[msg.path] = msg.a
-			if _, right := p.columns(); right == 0 {
-				// No preview pane: the answer goes on the flash line.
-				p.flash = p.answerLine(msg.a)
+		}
+		if p.narrow() {
+			// No preview pane: the outcome goes on the flash line, named,
+			// since the cursor may have moved on.
+			if msg.err != nil {
+				p.flash = msg.name + ": AI error: " + strings.TrimPrefix(msg.err.Error(), "llm: ")
+			} else {
+				p.flash = msg.name + ": " + answerLine(msg.a)
 			}
 		}
 		return p, nil
@@ -375,16 +384,19 @@ func (p *Picker) ask() tea.Cmd {
 	idle := len(p.asking) == 0
 	p.asking[path] = true
 	delete(p.errs, path)
+	if p.narrow() {
+		p.flash = a.Name + ": " + askingLabel
+	}
 	ctx, as := p.ctx, *p.assessor
 	cmd := func() tea.Msg {
 		f := as.inspect(ctx, a)
 		if as.Cached != nil {
 			if r, ok := as.Cached(f); ok {
-				return pickerAssessMsg{path: path, f: f, a: r}
+				return pickerAssessMsg{path: path, name: a.Name, a: r}
 			}
 		}
 		r, err := as.Assess(ctx, f)
-		return pickerAssessMsg{path: path, f: f, a: r, err: err}
+		return pickerAssessMsg{path: path, name: a.Name, a: r, err: err}
 	}
 	if idle {
 		return tea.Batch(cmd, p.spin.Tick)
@@ -392,8 +404,14 @@ func (p *Picker) ask() tea.Cmd {
 	return cmd
 }
 
+// narrow reports whether the terminal is too narrow for the preview pane.
+func (p *Picker) narrow() bool {
+	_, right := p.columns()
+	return right == 0
+}
+
 // answerLine is the one-line form of an answer: "KEEP 85% · purpose".
-func (p *Picker) answerLine(a llm.AppAssessment) string {
+func answerLine(a llm.AppAssessment) string {
 	line := fmt.Sprintf("%s %.0f%%", strings.ToUpper(a.Recommendation), a.Confidence*100)
 	if a.Purpose != "" {
 		line += labelSep + a.Purpose
@@ -605,7 +623,7 @@ func (p *Picker) render() string {
 	b.WriteString("\n")
 
 	if p.flash != "" {
-		b.WriteString(p.styles.flash.Render(p.flash))
+		b.WriteString(p.styles.flash.Render(output.Truncate(p.flash, max(p.width, 1))))
 	}
 	b.WriteString("\n")
 

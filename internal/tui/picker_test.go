@@ -566,10 +566,30 @@ func TestPickerAskNarrowUsesFlash(t *testing.T) {
 	p.SetAssessor(a)
 	p.Update(tea.WindowSizeMsg{Width: 50, Height: 20})
 	typeText(p, "spot")
-	feedPicker(p, press(p, keyCtrlL))
+	cmd := press(p, keyCtrlL)
+	if !strings.Contains(view(p), "Spotify: "+askingLabel) {
+		t.Fatalf("narrow terminal should say who is being asked on the flash line:\n%s", view(p))
+	}
+	feedPicker(p, cmd)
 	out := view(p)
-	if !strings.Contains(out, "KEEP 85%") || !strings.Contains(out, "Plays music.") {
-		t.Fatalf("narrow terminal should put the answer on the flash line:\n%s", out)
+	if !strings.Contains(out, "Spotify: KEEP 85%") || !strings.Contains(out, "Plays music.") {
+		t.Fatalf("narrow terminal should put the named answer on the flash line:\n%s", out)
+	}
+	lines := strings.Split(out, "\n")
+	for i, l := range lines {
+		if lipgloss.Width(l) > 50 {
+			t.Errorf("line %d wider than the terminal: %q", i, l)
+		}
+	}
+	// An error is named too.
+	b, _ := pickerAssessor(llm.AppAssessment{}, errors.New("llm: boom"))
+	q := NewPicker(fixture())
+	q.SetAssessor(b)
+	q.Update(tea.WindowSizeMsg{Width: 50, Height: 20})
+	typeText(q, "zoom")
+	feedPicker(q, press(q, keyCtrlL))
+	if !strings.Contains(view(q), "Zoom: AI error: boom") {
+		t.Fatalf("narrow terminal should put the error on the flash line:\n%s", view(q))
 	}
 }
 

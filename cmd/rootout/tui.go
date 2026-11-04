@@ -165,7 +165,11 @@ func homeUninstall(ctx context.Context, env fsx.Env) (tui.Flash, error) {
 	// app. Built once per visit (it reads the Keychain), and only when a
 	// provider is configured so the picker stays quiet without AI.
 	var assessor *tui.AppAssessor
-	if c, _, err := loadConfig(); err == nil && c.LLM.Provider != "" {
+	c, _, err := loadConfig()
+	switch {
+	case err != nil:
+		fmt.Fprintln(os.Stderr, "rootout: AI unavailable in the picker:", err)
+	case c.LLM.Provider != "":
 		if a, err := buildAppAssessor(ctx, env, c, "", "", false, false); err == nil {
 			assessor = &a
 		} else {
