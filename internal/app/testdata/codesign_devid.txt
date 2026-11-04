@@ -1,0 +1,29 @@
+Executable=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+Identifier=com.google.Chrome
+Format=app bundle with Mach-O universal (x86_64 arm64)
+CodeDirectory v=20500 size=765 flags=0x12a00(kill,restrict,library-validation,runtime) hashes=13+7 location=embedded
+VersionPlatform=1
+VersionMin=851968
+VersionSDK=1705216
+Hash type=sha256 size=32
+CandidateCDHash sha256=286521ccee5dd7ad82d8490f8ee007f07e8ed74f
+CandidateCDHashFull sha256=286521ccee5dd7ad82d8490f8ee007f07e8ed74f5a8f5b5e91be4b1783842898
+Hash choices=sha256
+CMSDigest=286521ccee5dd7ad82d8490f8ee007f07e8ed74f5a8f5b5e91be4b1783842898
+CMSDigestType=2
+Executable Segment base=0
+Executable Segment limit=16384
+Executable Segment flags=0x1
+Page size=4096
+CDHash=286521ccee5dd7ad82d8490f8ee007f07e8ed74f
+Signature size=8991
+Authority=Developer ID Application: Google LLC (EQHXZ8M8AV)
+Authority=Developer ID Certification Authority
+Authority=Apple Root CA
+Timestamp=29 Oct 2026 at 13:45:15
+Notarization Ticket=stapled
+Info.plist entries=45
+TeamIdentifier=EQHXZ8M8AV
+Runtime Version=26.5.0
+Sealed Resources version=2 rules=13 files=63
+Internal requirements count=1 size=288

@@ -7,7 +7,8 @@ cmd/rootout/main.go            cobra root; bare command -> tui home screen
 internal/
   safety/    protected prefixes, generic-name denylist, Validate(path)  <- every deletion passes here, twice
   fsx/       Env{Home, Root}, size walk, lstat helpers (tests point Env at temp dirs)
-  app/       Discover() .app bundles (Info.plist via howett.net/plist), Fuzzy()
+  app/       Discover() .app bundles (Info.plist via howett.net/plist), Fuzzy(), Inspect() facts (codesign, spctl, mdls,
+             receipt, plist keys, launch items; never imports llm)
   leftover/  rules table (dir -> match key) + Find(app) -> []Leftover; FindOrphans (D-020)
   brew/      CaskFor(app), Zap(cask)
   trash/     Move(paths): /usr/bin/trash when present, else Finder via osascript
@@ -17,8 +18,10 @@ internal/
   ext/       Enumerate() extensions for 5 editors, parse package.json + extensions.json + .obsolete, Uninstall()
   registry/  optional --online enrichment: Marketplace extensionquery + Open VSX
   heur/      walker with size caps, rule registry (pure funcs), Finding, Report{Score 0-100}
-  llm/       Provider interface, Assessment, ModelInfo, BuildPrompt, PromptVersion/Fingerprint, fake + anthropic/openai/ollama adapters (ListModels/Verify per hosted adapter)
-  assesscache/ saved hosted-model answers (JSON under ~/.cache/rootout), used only by cmd/ (D-038)
+  llm/       Provider{Complete} transport interface, Assess/AssessApp pipelines, Assessment + AppAssessment, ModelInfo,
+             BuildPrompt/BuildAppPrompt with their PromptVersion/Fingerprint, fake + anthropic/openai/ollama adapters
+             (ListModels/Verify per hosted adapter)
+  assesscache/ saved hosted-model answers for extensions and apps (one JSON file under ~/.cache/rootout), used only by cmd/ (D-038, D-040)
   update/    latest GitHub release, version compare, daily record under ~/.cache/rootout; doctor row + home notice wired in cmd/ (D-039)
   llm/ollama/ Detect, ListInstalled, Recommend (catalog.go), Pull, Hardware probe
   keychain/  Get/Set/Delete via zalando/go-keyring behind an interface

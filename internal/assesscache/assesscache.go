@@ -1,8 +1,9 @@
 // Package assesscache keeps model assessments across runs so a paid
-// provider is not asked twice about the same extension. It is a plain JSON
-// file under the user's cache directory, keyed by what the model saw
-// (extension, version, provider, model, prompt version and a fingerprint of
-// the prompt). It never holds keys; it is derived data and safe to delete.
+// provider is not asked twice about the same extension or app. It is a
+// plain JSON file under the user's cache directory, keyed by what the model
+// saw (extension or app, version, provider, model, prompt version and a
+// fingerprint of the prompt). It never holds keys; it is derived data and
+// safe to delete.
 // Only cmd/ uses it: the TUI gets preloaded results and never persists.
 package assesscache
 
@@ -18,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shiva2021/rootout/internal/app"
 	"github.com/shiva2021/rootout/internal/fsx"
 	"github.com/shiva2021/rootout/internal/heur"
 	"github.com/shiva2021/rootout/internal/llm"
@@ -75,10 +77,45 @@ func (id EntryID) String() string {
 	return strings.Join([]string{id.Editor, id.ExtID, id.Version, id.Provider, id.Model, fmt.Sprintf("p%d", id.PromptVersion), id.Fingerprint}, "|")
 }
 
-// Entry is one saved assessment and when it was made.
+// AppEntryID is what a saved app assessment is keyed by. The "app" kind
+// prefix in String keeps these apart from extension keys, which start with
+// an editor id (TestAppKeysCannotCollide pins that).
+type AppEntryID struct {
+	BundleID, Version string // BundleID falls back to the bundle path for a broken bundle
+	Provider, Model   string
+	PromptVersion     int
+	Fingerprint       string
+}
+
+// IDForApp builds the id for f assessed by provider's model.
+func IDForApp(f app.Facts, provider, model string) AppEntryID {
+	id := f.App.BundleID
+	if id == "" {
+		id = f.App.Path
+	}
+	return AppEntryID{
+		BundleID:      id,
+		Version:       f.App.Version,
+		Provider:      provider,
+		Model:         model,
+		PromptVersion: llm.AppPromptVersion,
+		Fingerprint:   llm.AppFingerprint(f),
+	}
+}
+
+// String is the map key, "app|bundle id|version|provider|model|a<N>|fingerprint".
+func (id AppEntryID) String() string {
+	return strings.Join([]string{"app", id.BundleID, id.Version, id.Provider, id.Model, fmt.Sprintf("a%d", id.PromptVersion), id.Fingerprint}, "|")
+}
+
+// Entry is one saved answer and when it was made: an extension assessment
+// or an app assessment, never both. The file layout stayed at version 1
+// when App was added; older entries carry only Assessment and older
+// binaries ignore App.
 type Entry struct {
-	Assessment llm.Assessment `json:"assessment"`
-	At         time.Time      `json:"at"`
+	Assessment *llm.Assessment    `json:"assessment,omitempty"`
+	App        *llm.AppAssessment `json:"app,omitempty"`
+	At         time.Time          `json:"at"`
 }
 
 type file struct {
@@ -139,10 +176,23 @@ func (c *Cache) Lookup(id EntryID) (llm.Assessment, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.entries[id.String()]
-	if !ok {
+	if !ok || e.Assessment == nil {
 		return llm.Assessment{}, false
 	}
-	a := e.Assessment
+	a := *e.Assessment
+	a.Cached = true
+	return a, true
+}
+
+// LookupApp returns the saved app assessment for id, marked Cached.
+func (c *Cache) LookupApp(id AppEntryID) (llm.AppAssessment, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.entries[id.String()]
+	if !ok || e.App == nil {
+		return llm.AppAssessment{}, false
+	}
+	a := *e.App
 	a.Cached = true
 	return a, true
 }
@@ -152,9 +202,21 @@ func (c *Cache) Lookup(id EntryID) (llm.Assessment, bool) {
 // answer.
 func (c *Cache) Store(id EntryID, a llm.Assessment) error {
 	a.Cached = false
+	return c.put(id.String(), Entry{Assessment: &a})
+}
+
+// StoreApp is Store for an app assessment.
+func (c *Cache) StoreApp(id AppEntryID, a llm.AppAssessment) error {
+	a.Cached = false
+	return c.put(id.String(), Entry{App: &a})
+}
+
+// put records e under key with the current time and writes the file.
+func (c *Cache) put(key string, e Entry) error {
+	e.At = time.Now().UTC()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.entries[id.String()] = Entry{Assessment: a, At: time.Now().UTC()}
+	c.entries[key] = e
 	if err := c.write(); err != nil {
 		return err
 	}

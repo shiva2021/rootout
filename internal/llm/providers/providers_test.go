@@ -33,7 +33,7 @@ func TestNewNoKey(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := p.Assess(context.Background(), heur.Report{}); !errors.Is(err, llm.ErrNoKey) {
+		if _, err := llm.Assess(context.Background(), p, heur.Report{}); !errors.Is(err, llm.ErrNoKey) {
 			t.Errorf("%s: err = %v, want ErrNoKey", name, err)
 		}
 	}

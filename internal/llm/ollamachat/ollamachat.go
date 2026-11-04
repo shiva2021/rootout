@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/shiva2021/rootout/internal/heur"
 	"github.com/shiva2021/rootout/internal/llm"
 )
 
@@ -65,35 +64,30 @@ type chatResponse struct {
 	Done    bool    `json:"done"`
 }
 
-func (p *provider) Assess(ctx context.Context, r heur.Report) (llm.Assessment, error) {
+// Complete implements llm.Provider: one /api/chat call with the schema as
+// the format; when the server cannot constrain this model it is asked once
+// more without a format (the prompt already demands JSON).
+func (p *provider) Complete(ctx context.Context, system, user string, schema map[string]any) (string, error) {
 	if p.model == "" {
-		return llm.Assessment{}, ErrNoModel
+		return "", ErrNoModel
 	}
-	system, user := llm.BuildPrompt(r, 0)
 	msgs := []message{{Role: "system", Content: system}, {Role: "user", Content: user}}
-	content, err := p.chat(ctx, msgs, true)
+	content, err := p.chat(ctx, msgs, schema)
 	if errors.Is(err, errNoStructured) {
 		// Some models on some Ollama versions cannot do grammar-constrained
 		// output ("structured output is unavailable"). The prompt already
 		// demands the JSON shape, so ask again without a format and let
-		// Decode pull the object out of the reply.
-		content, err = p.chat(ctx, msgs, false)
+		// the decoder pull the object out of the reply.
+		content, err = p.chat(ctx, msgs, nil)
 	}
-	if err != nil {
-		return llm.Assessment{}, err
-	}
-	a, err := llm.Decode(content)
-	if err != nil {
-		return llm.Assessment{}, fmt.Errorf("ollama: %w", err)
-	}
-	return llm.Normalize(a, p.Name(), p.model), nil
+	return content, err
 }
 
 // errNoStructured marks Ollama's refusal to apply a format for this model.
 var errNoStructured = errors.New("ollama: structured output is unavailable for this model")
 
-// chat sends one request; withFormat attaches the JSON schema.
-func (p *provider) chat(ctx context.Context, msgs []message, withFormat bool) (string, error) {
+// chat sends one request; a non-nil format attaches the JSON schema.
+func (p *provider) chat(ctx context.Context, msgs []message, format map[string]any) (string, error) {
 	cr := chatRequest{
 		Model:    p.model,
 		Messages: msgs,
@@ -101,8 +95,8 @@ func (p *provider) chat(ctx context.Context, msgs []message, withFormat bool) (s
 		Think:    false,
 		Options:  map[string]any{"temperature": 0},
 	}
-	if withFormat {
-		cr.Format = llm.Schema()
+	if format != nil {
+		cr.Format = format
 	}
 	body, err := json.Marshal(cr)
 	if err != nil {

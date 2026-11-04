@@ -12,7 +12,6 @@ import (
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/responses"
 
-	"github.com/shiva2021/rootout/internal/heur"
 	"github.com/shiva2021/rootout/internal/llm"
 )
 
@@ -33,11 +32,12 @@ func New(key, model string, opts ...option.RequestOption) llm.Provider {
 func (p *provider) Name() string  { return "openai" }
 func (p *provider) Model() string { return p.model }
 
-func (p *provider) Assess(ctx context.Context, r heur.Report) (llm.Assessment, error) {
+// Complete implements llm.Provider: one Responses call with the schema as
+// a strict text format. Authentication failures are mapped here.
+func (p *provider) Complete(ctx context.Context, system, user string, schema map[string]any) (string, error) {
 	if p.key == "" {
-		return llm.Assessment{}, llm.ErrNoKey
+		return "", llm.ErrNoKey
 	}
-	system, user := llm.BuildPrompt(r, 0)
 	resp, err := p.client.Responses.New(ctx, responses.ResponseNewParams{
 		Model:           p.model,
 		Instructions:    sdk.String(system),
@@ -47,7 +47,7 @@ func (p *provider) Assess(ctx context.Context, r heur.Report) (llm.Assessment, e
 			Format: responses.ResponseFormatTextConfigUnionParam{
 				OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{
 					Name:   "assessment",
-					Schema: llm.Schema(),
+					Schema: schema,
 					Strict: sdk.Bool(true),
 				},
 			},
@@ -56,13 +56,9 @@ func (p *provider) Assess(ctx context.Context, r heur.Report) (llm.Assessment, e
 	if err != nil {
 		var apiErr *sdk.Error
 		if errors.As(err, &apiErr) && (apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden) {
-			return llm.Assessment{}, fmt.Errorf("openai: authentication failed, check the API key: %w", err)
+			return "", fmt.Errorf("openai: authentication failed, check the API key: %w", err)
 		}
-		return llm.Assessment{}, fmt.Errorf("openai: %w", err)
+		return "", fmt.Errorf("openai: %w", err)
 	}
-	a, err := llm.Decode(resp.OutputText())
-	if err != nil {
-		return llm.Assessment{}, fmt.Errorf("openai: %w", err)
-	}
-	return llm.Normalize(a, p.Name(), p.model), nil
+	return resp.OutputText(), nil
 }

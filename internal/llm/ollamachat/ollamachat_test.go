@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shiva2021/rootout/internal/app"
 	"github.com/shiva2021/rootout/internal/ext"
 	"github.com/shiva2021/rootout/internal/heur"
 	"github.com/shiva2021/rootout/internal/llm"
@@ -92,7 +93,7 @@ func TestAssess(t *testing.T) {
 			}))
 			defer srv.Close()
 			p := New(srv.URL+"/", "qwen3:8b", srv.Client())
-			got, err := p.Assess(context.Background(), report)
+			got, err := llm.Assess(context.Background(), p, report)
 			if tt.wantErr != nil {
 				if err == nil || !tt.wantErr(err) {
 					t.Fatalf("err = %v", err)
@@ -112,7 +113,7 @@ func TestAssess(t *testing.T) {
 }
 
 func TestNoModel(t *testing.T) {
-	_, err := New("", "", nil).Assess(context.Background(), report)
+	_, err := llm.Assess(context.Background(), New("", "", nil), report)
 	if !errors.Is(err, ErrNoModel) || !strings.Contains(err.Error(), "rootout config models") {
 		t.Errorf("err = %v", err)
 	}
@@ -138,7 +139,7 @@ func TestAssessFallsBackWithoutFormat(t *testing.T) {
 	}))
 	defer srv.Close()
 	p := New(srv.URL, "qwen3.5:4b", srv.Client())
-	a, err := p.Assess(context.Background(), report)
+	a, err := llm.Assess(context.Background(), p, report)
 	if err != nil {
 		t.Fatalf("Assess: %v", err)
 	}
@@ -146,6 +147,63 @@ func TestAssessFallsBackWithoutFormat(t *testing.T) {
 		t.Fatalf("requests with format = %v, want [true false]", formats)
 	}
 	if a.Verdict != llm.Malicious || a.Confidence != 1 || len(a.IOCs) != 1 {
+		t.Fatalf("assessment = %+v", a)
+	}
+}
+
+func TestAssessApp(t *testing.T) {
+	var format map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Format   map[string]any `json:"format"`
+			Messages []struct{ Content string }
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		format = req.Format
+		if len(req.Messages) != 2 || !strings.Contains(req.Messages[1].Content, "com.google.Chrome") {
+			t.Errorf("messages lack the app facts: %+v", req.Messages)
+		}
+		_, _ = io.WriteString(w, chatBody(`{"purpose":"Browses the web.","source":"Legitimate","confidence":95,"recommendation":"KEEP","reasoning":"Signed by Google."}`))
+	}))
+	defer srv.Close()
+	p := New(srv.URL, "qwen3:8b", srv.Client())
+	a, err := llm.AssessApp(context.Background(), p, app.Facts{App: app.App{Name: "Chrome", BundleID: "com.google.Chrome"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if props, _ := format["properties"].(map[string]any); props["purpose"] == nil || props["verdict"] != nil {
+		t.Errorf("request format = %v, want the app schema", format)
+	}
+	if a.Recommendation != llm.Keep || a.Source != llm.SourceLegitimate || a.Confidence != 0.95 || a.Provider != "ollama" {
+		t.Errorf("a = %+v", a)
+	}
+}
+
+func TestAssessAppFallsBackWithoutFormat(t *testing.T) {
+	var formats []bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		_, has := req["format"]
+		formats = append(formats, has)
+		if has {
+			w.WriteHeader(http.StatusNotImplemented)
+			_, _ = w.Write([]byte(`{"error":"structured output is unavailable"}`))
+			return
+		}
+		content := "Sure:\n```json\n{\"purpose\":\"Browses the web.\",\"source\":\"legitimate\",\"confidence\":0.9,\"recommendation\":\"keep\",\"reasoning\":\"ok\"}\n```"
+		_, _ = io.WriteString(w, chatBody(content))
+	}))
+	defer srv.Close()
+	p := New(srv.URL, "qwen3.5:4b", srv.Client())
+	a, err := llm.AssessApp(context.Background(), p, app.Facts{})
+	if err != nil {
+		t.Fatalf("AssessApp: %v", err)
+	}
+	if len(formats) != 2 || !formats[0] || formats[1] {
+		t.Fatalf("requests with format = %v, want [true false]", formats)
+	}
+	if a.Recommendation != llm.Keep || a.Confidence != 0.9 {
 		t.Fatalf("assessment = %+v", a)
 	}
 }
