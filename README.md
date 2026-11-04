@@ -62,7 +62,8 @@ and, as the cursor rests on one, gathers its facts locally: who signed it
 App Store receipt, launch agents and the permissions it declares. Tick apps
 and press `l` to ask the model what each app is for, whether its source is
 legitimate, how confident it is and whether to keep or drop it; `rootout
-assess <app>` does one app from the command line. The answer is advice: a
+assess <app>` does one app from the command line, and `ctrl+l` in the
+uninstall picker asks about the highlighted app before you decide. The answer is advice: a
 ticked app still gets the usual review of its files before anything moves to
 the Trash. Answers from Claude and OpenAI are saved and reused.
 
