@@ -6,14 +6,17 @@ package tui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
+	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/shiva2021/rootout/internal/app"
+	"github.com/shiva2021/rootout/internal/llm"
 	"github.com/shiva2021/rootout/internal/output"
 	"github.com/shiva2021/rootout/internal/progress"
 )
@@ -21,8 +24,11 @@ import (
 const (
 	searchPrompt   = "Search apps › "
 	helpText       = "↑/↓ move · enter select · esc back · ctrl+x quit"
+	helpAsk        = " · ctrl+l ask AI"
 	helpHint       = " · ? help"
 	protectedFlash = "system apps cannot be removed"
+	protectedAsk   = "system app: nothing to assess"
+	askingLabel    = "asking the AI…"
 	systemSuffix   = " (system)"
 	loadLabel      = "Scanning applications"
 	sizeWidth      = 8 // "123.4 GB"
@@ -41,6 +47,18 @@ var pickerKeys = []keyHelp{
 	{"esc", "back to the home screen"},
 	{"ctrl+x", "quit rootout"},
 	{"?", "this help (when the search is empty)"},
+}
+
+// pickerAskKey is the ? row added when an AI model is configured.
+var pickerAskKey = keyHelp{"ctrl+l", "ask the configured AI what the highlighted app is for, whether its source is legitimate and whether to keep it (shown in the preview)"}
+
+// pickerAssessMsg carries the model's answer about one app back to the
+// picker, keyed by bundle path.
+type pickerAssessMsg struct {
+	path string
+	name string
+	a    llm.AppAssessment
+	err  error
 }
 
 // LoadFunc discovers the apps while the picker is already on screen. It
@@ -78,12 +96,18 @@ func PickApp(ctx context.Context, apps []app.App) (chosen app.App, ok bool, err 
 }
 
 // PickAppLoad starts the picker immediately and runs load inside the program,
-// showing a progress bar until the apps arrive. ok=false means the user
+// showing a progress bar until the apps arrive. a, when not nil, lets
+// ctrl+l ask the AI about the highlighted app. ok=false means the user
 // cancelled (ctrl+x and ctrl+c return ErrQuit); a load failure is shown on
 // screen and returned once the user leaves.
-func PickAppLoad(ctx context.Context, load LoadFunc) (app.App, bool, error) {
+func PickAppLoad(ctx context.Context, load LoadFunc, a *AppAssessor) (app.App, bool, error) {
+	// Cancelled on return so a ctrl+l call still in flight stops with the
+	// screen instead of finishing (and paying) for nobody.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	p := NewPickerLoading(load)
 	p.ctx = ctx
+	p.SetAssessor(a)
 	if _, err := tea.NewProgram(p, tea.WithContext(ctx)).Run(); err != nil {
 		return app.App{}, false, runErr(err, "pick app")
 	}
@@ -118,6 +142,15 @@ type Picker struct {
 	loadDetail string
 	loadErr    error
 
+	// AI: nil assessor hides ctrl+l; state is keyed by bundle path so it
+	// survives re-filtering.
+	assessor *AppAssessor
+	rec      map[string]lipgloss.Style // recommendation colours
+	spin     spinner.Model
+	results  map[string]llm.AppAssessment
+	errs     map[string]error
+	asking   map[string]bool
+
 	width, height int
 	cursor, top   int // cursor indexes matches; top is the first visible row
 	flash         string
@@ -125,6 +158,16 @@ type Picker struct {
 	quitAll       bool // ctrl+x / ctrl+c: leave rootout, not just this screen
 	picked        app.App
 	ok            bool
+}
+
+// SetAssessor enables ctrl+l with a (nil disables it). An assessor without
+// a model (facts only) also disables it: the picker shows no facts.
+func (p *Picker) SetAssessor(a *AppAssessor) {
+	if a == nil || a.Assess == nil {
+		p.assessor = nil
+		return
+	}
+	p.assessor = a
 }
 
 // NewPicker builds the model with the search box focused and every app listed.
@@ -154,6 +197,7 @@ func newPicker() *Picker {
 	in.SetStyles(st)
 	in.Focus()
 
+	sc := defaultScanStyles()
 	p := &Picker{
 		input:     in,
 		styles:    s,
@@ -161,6 +205,11 @@ func newPicker() *Picker {
 		loadLabel: loadLabel,
 		width:     defaultWidth,
 		height:    defaultHeight,
+		rec:       map[string]lipgloss.Style{llm.Keep: sc.verdict[llm.Benign], llm.Drop: sc.verdict[llm.Malicious], llm.Review: sc.verdict[llm.Suspicious]},
+		spin:      spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		results:   map[string]llm.AppAssessment{},
+		errs:      map[string]error{},
+		asking:    map[string]bool{},
 	}
 	p.layout()
 	return p
@@ -224,6 +273,33 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		p.setApps(msg.apps)
 		return p, nil
 
+	case pickerAssessMsg:
+		delete(p.asking, msg.path)
+		if msg.err != nil {
+			p.errs[msg.path] = msg.err
+		} else {
+			delete(p.errs, msg.path)
+			p.results[msg.path] = msg.a
+		}
+		if p.narrow() {
+			// No preview pane: the outcome goes on the flash line, named,
+			// since the cursor may have moved on.
+			if msg.err != nil {
+				p.flash = msg.name + ": AI error: " + strings.TrimPrefix(msg.err.Error(), "llm: ")
+			} else {
+				p.flash = msg.name + ": " + answerLine(msg.a)
+			}
+		}
+		return p, nil
+
+	case spinner.TickMsg:
+		if len(p.asking) == 0 {
+			return p, nil
+		}
+		var cmd tea.Cmd
+		p.spin, cmd = p.spin.Update(msg)
+		return p, cmd
+
 	case tea.KeyPressMsg:
 		if isQuitKey(msg.String()) {
 			p.quitAll = true
@@ -241,6 +317,10 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch k {
 		case "esc":
 			return p, p.quit()
+		case "ctrl+l":
+			// Before the search box, so it works with a filter typed; the
+			// box has no binding on it.
+			return p, p.ask()
 		case "q":
 			if p.input.Value() == "" {
 				return p, p.quit()
@@ -282,6 +362,77 @@ func (p *Picker) View() tea.View {
 	v := tea.NewView(p.render())
 	v.AltScreen = true
 	return v
+}
+
+// ask asks the AI about the highlighted app: facts first (through the
+// assessor's Inspect), then the saved answer or the model. Nothing happens
+// without an assessor, without a row, for a protected app, or for an app
+// already answered or being asked; an errored app is asked again.
+func (p *Picker) ask() tea.Cmd {
+	if p.assessor == nil || p.loading || p.rowCount() == 0 {
+		return nil
+	}
+	a := p.matches[p.cursor].App
+	if a.Protected {
+		p.flash = protectedAsk
+		return nil
+	}
+	path := a.Path
+	if _, done := p.results[path]; done || p.asking[path] {
+		return nil
+	}
+	idle := len(p.asking) == 0
+	p.asking[path] = true
+	delete(p.errs, path)
+	if p.narrow() {
+		p.flash = a.Name + ": " + askingLabel
+	}
+	ctx, as := p.ctx, *p.assessor
+	cmd := func() tea.Msg {
+		f := as.inspect(ctx, a)
+		if as.Cached != nil {
+			if r, ok := as.Cached(f); ok {
+				return pickerAssessMsg{path: path, name: a.Name, a: r}
+			}
+		}
+		r, err := as.Assess(ctx, f)
+		return pickerAssessMsg{path: path, name: a.Name, a: r, err: err}
+	}
+	if idle {
+		return tea.Batch(cmd, p.spin.Tick)
+	}
+	return cmd
+}
+
+// narrow reports whether the terminal is too narrow for the preview pane.
+func (p *Picker) narrow() bool {
+	_, right := p.columns()
+	return right == 0
+}
+
+// answerLine is the one-line form of an answer: "KEEP 85% · purpose".
+func answerLine(a llm.AppAssessment) string {
+	line := fmt.Sprintf("%s %.0f%%", strings.ToUpper(a.Recommendation), a.Confidence*100)
+	if a.Purpose != "" {
+		line += labelSep + a.Purpose
+	}
+	return line
+}
+
+// helpLine is the footer text, with ctrl+l when an AI is at hand.
+func (p *Picker) helpLine() string {
+	if p.assessor != nil {
+		return helpText + helpAsk
+	}
+	return helpText
+}
+
+// helpKeys is the ? overlay table, with ctrl+l when an AI is at hand.
+func (p *Picker) helpKeys() []keyHelp {
+	if p.assessor == nil {
+		return pickerKeys
+	}
+	return append(slices.Clone(pickerKeys), pickerAskKey)
 }
 
 // startLoad runs load in a goroutine and bridges its Reporter calls to tea
@@ -447,7 +598,7 @@ func (p *Picker) columns() (left, right int) {
 
 func (p *Picker) render() string {
 	if p.showHelp {
-		return renderHelp(p.width, p.height, "Keys", pickerKeys)
+		return renderHelp(p.width, p.height, "Keys", p.helpKeys())
 	}
 	rows := p.listRows()
 	leftW, rightW := p.columns()
@@ -472,7 +623,7 @@ func (p *Picker) render() string {
 	b.WriteString("\n")
 
 	if p.flash != "" {
-		b.WriteString(p.styles.flash.Render(p.flash))
+		b.WriteString(p.styles.flash.Render(output.Truncate(p.flash, max(p.width, 1))))
 	}
 	b.WriteString("\n")
 
@@ -480,7 +631,7 @@ func (p *Picker) render() string {
 	if p.rowCount() > 0 {
 		pos = p.cursor + 1
 	}
-	help := helpText
+	help := p.helpLine()
 	if p.input.Value() == "" {
 		help += helpHint
 	}
@@ -638,7 +789,47 @@ func (p *Picker) renderPreview(width, rows int) string {
 	if a.Protected {
 		lines = append(lines, "", p.styles.danger.Render("Protected: system application, cannot be removed"))
 	}
+	if ai := p.aiLines(a.Path, width-4); len(ai) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, ai...)
+	}
 	return pane.Render(strings.Join(lines, "\n"))
+}
+
+// aiLines renders the AI state for the app at path: the spinner while
+// asking, the error, or the answer; nothing when not asked.
+func (p *Picker) aiLines(path string, width int) []string {
+	width = max(width, 10)
+	switch {
+	case p.asking[path]:
+		return []string{p.spin.View() + p.styles.dim.Render(" "+askingLabel)}
+	case p.errs[path] != nil:
+		return []string{p.styles.danger.Render(wrapLines("AI error: "+strings.TrimPrefix(p.errs[path].Error(), "llm: "), width))}
+	}
+	a, ok := p.results[path]
+	if !ok {
+		return nil
+	}
+	rec, ok := p.rec[a.Recommendation]
+	if !ok {
+		rec = p.styles.dim
+	}
+	head := rec.Render(strings.ToUpper(a.Recommendation)) + p.styles.dim.Render(fmt.Sprintf("  %.0f%% confidence", a.Confidence*100))
+	if a.Model != "" {
+		head += p.styles.dim.Render(labelSep + a.Model)
+	}
+	if a.Cached {
+		head += p.styles.dim.Render(labelSep + savedTag)
+	}
+	lines := []string{head}
+	if a.Purpose != "" {
+		lines = append(lines, wrapLines(a.Purpose, width))
+	}
+	lines = append(lines, p.styles.dim.Render("Source: ")+a.Source)
+	if a.Reasoning != "" {
+		lines = append(lines, wrapLines(a.Reasoning, width))
+	}
+	return lines
 }
 
 // padTo right-pads an already styled string with spaces to width cells.

@@ -161,8 +161,23 @@ func homeUninstall(ctx context.Context, env fsx.Env) (tui.Flash, error) {
 	load := func(r progress.Reporter) ([]app.App, error) {
 		return app.DiscoverWith(env, app.Options{Progress: r})
 	}
+	// The picker's ctrl+l asks the configured model about the highlighted
+	// app. Built once per visit (it reads the Keychain), and only when a
+	// provider is configured so the picker stays quiet without AI.
+	var assessor *tui.AppAssessor
+	c, _, err := loadConfig()
+	switch {
+	case err != nil:
+		fmt.Fprintln(os.Stderr, "rootout: AI unavailable in the picker:", err)
+	case c.LLM.Provider != "":
+		if a, err := buildAppAssessor(ctx, env, c, "", "", false, false); err == nil {
+			assessor = &a
+		} else {
+			fmt.Fprintln(os.Stderr, "rootout: AI unavailable in the picker:", err)
+		}
+	}
 	for {
-		a, ok, err := tui.PickAppLoad(ctx, load)
+		a, ok, err := tui.PickAppLoad(ctx, load, assessor)
 		if err != nil {
 			return tui.Flash{}, err
 		}

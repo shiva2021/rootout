@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -10,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/shiva2021/rootout/internal/app"
+	"github.com/shiva2021/rootout/internal/llm"
 	"github.com/shiva2021/rootout/internal/progress"
 )
 
@@ -440,5 +443,171 @@ func TestPickerHelpOverlay(t *testing.T) {
 	}
 	if v := view(p); strings.Contains(v, helpClose) || strings.Contains(v, helpHint) {
 		t.Fatalf("? with a query must not open help or show the hint:\n%s", v)
+	}
+}
+
+var keyCtrlL = tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl}
+
+// pickerAssessor records the apps inspected and asked and answers keep.
+func pickerAssessor(answer llm.AppAssessment, err error) (*AppAssessor, *[]string) {
+	var asked []string
+	return &AppAssessor{
+		Provider: "fake", Label: "fake · m",
+		Inspect: func(_ context.Context, a app.App) app.Facts {
+			return app.Facts{App: a, Signature: app.Signature{Signed: true, TeamID: "TEAM"}}
+		},
+		Assess: func(_ context.Context, f app.Facts) (llm.AppAssessment, error) {
+			asked = append(asked, f.App.Name)
+			return answer, err
+		},
+	}, &asked
+}
+
+var keepAnswer = llm.AppAssessment{Purpose: "Plays music.", Source: llm.SourceLegitimate, Confidence: 0.85, Recommendation: llm.Keep, Reasoning: "Signed by Spotify AB.", Model: "m"}
+
+// feedPicker runs cmd and feeds its pickerAssessMsgs back into p.
+func feedPicker(p *Picker, cmd tea.Cmd) {
+	for _, msg := range runCmd(cmd) {
+		if _, ok := msg.(pickerAssessMsg); ok {
+			p.Update(msg)
+		}
+	}
+}
+
+func TestPickerAskIgnoredWithoutAssessor(t *testing.T) {
+	p := newTestPicker(t)
+	typeText(p, "spot")
+	before := view(p)
+	if cmd := press(p, keyCtrlL); cmd != nil || view(p) != before {
+		t.Fatal("ctrl+l without an assessor must do nothing")
+	}
+	if strings.Contains(before, "ctrl+l") {
+		t.Fatal("footer must not offer ctrl+l without an assessor")
+	}
+	press(p, keyEsc)
+}
+
+func TestPickerAskHighlighted(t *testing.T) {
+	a, asked := pickerAssessor(keepAnswer, nil)
+	p := newTestPicker(t)
+	p.SetAssessor(a)
+	if !strings.Contains(view(p), "ctrl+l ask AI") {
+		t.Fatalf("footer should offer ctrl+l:\n%s", view(p))
+	}
+	typeText(p, "spot") // the filter keeps its text and ctrl+l still asks
+	cmd := press(p, keyCtrlL)
+	if cmd == nil || p.input.Value() != "spot" {
+		t.Fatalf("ctrl+l should ask (cmd %v) and leave the filter (%q)", cmd != nil, p.input.Value())
+	}
+	if !strings.Contains(view(p), "asking the AI") {
+		t.Fatalf("pending indicator missing:\n%s", view(p))
+	}
+	feedPicker(p, cmd)
+	if !slices.Equal(*asked, []string{"Spotify"}) {
+		t.Fatalf("asked %v", *asked)
+	}
+	out := view(p)
+	for _, want := range []string{"KEEP", "85%", "Plays music.", "Signed by Spotify AB.", "legitimate"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("preview missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "asking the AI") {
+		t.Error("pending indicator left on")
+	}
+	// Asking again for an answered app costs nothing.
+	if cmd := press(p, keyCtrlL); cmd != nil || len(*asked) != 1 {
+		t.Fatal("second ctrl+l must not ask again")
+	}
+}
+
+func TestPickerAskProtected(t *testing.T) {
+	a, asked := pickerAssessor(keepAnswer, nil)
+	p := newTestPicker(t)
+	p.SetAssessor(a)
+	typeText(p, "safari")
+	if cmd := press(p, keyCtrlL); cmd != nil || len(*asked) != 0 || !strings.Contains(view(p), protectedAsk) {
+		t.Fatalf("protected app: want a flash and no call:\n%s", view(p))
+	}
+}
+
+func TestPickerAskError(t *testing.T) {
+	a, _ := pickerAssessor(llm.AppAssessment{}, errors.New("llm: no API key configured"))
+	p := newTestPicker(t)
+	p.SetAssessor(a)
+	typeText(p, "spot")
+	feedPicker(p, press(p, keyCtrlL))
+	if out := view(p); !strings.Contains(out, "AI error: no API key configured") {
+		t.Fatalf("error not shown:\n%s", out)
+	}
+	// An errored app can be asked again.
+	if cmd := press(p, keyCtrlL); cmd == nil {
+		t.Fatal("ctrl+l after an error should retry")
+	}
+}
+
+func TestPickerAskSaved(t *testing.T) {
+	a, asked := pickerAssessor(keepAnswer, nil)
+	saved := keepAnswer
+	saved.Cached = true
+	a.Cached = func(f app.Facts) (llm.AppAssessment, bool) { return saved, true }
+	p := newTestPicker(t)
+	p.SetAssessor(a)
+	typeText(p, "spot")
+	feedPicker(p, press(p, keyCtrlL))
+	if len(*asked) != 0 || !strings.Contains(view(p), savedTag) {
+		t.Fatalf("saved answer should be used without a call (asked %v):\n%s", *asked, view(p))
+	}
+}
+
+func TestPickerAskNarrowUsesFlash(t *testing.T) {
+	a, _ := pickerAssessor(keepAnswer, nil)
+	p := NewPicker(fixture())
+	p.SetAssessor(a)
+	p.Update(tea.WindowSizeMsg{Width: 50, Height: 20})
+	typeText(p, "spot")
+	cmd := press(p, keyCtrlL)
+	if !strings.Contains(view(p), "Spotify: "+askingLabel) {
+		t.Fatalf("narrow terminal should say who is being asked on the flash line:\n%s", view(p))
+	}
+	feedPicker(p, cmd)
+	out := view(p)
+	if !strings.Contains(out, "Spotify: KEEP 85%") || !strings.Contains(out, "Plays music.") {
+		t.Fatalf("narrow terminal should put the named answer on the flash line:\n%s", out)
+	}
+	lines := strings.Split(out, "\n")
+	for i, l := range lines {
+		if lipgloss.Width(l) > 50 {
+			t.Errorf("line %d wider than the terminal: %q", i, l)
+		}
+	}
+	// An error is named too.
+	b, _ := pickerAssessor(llm.AppAssessment{}, errors.New("llm: boom"))
+	q := NewPicker(fixture())
+	q.SetAssessor(b)
+	q.Update(tea.WindowSizeMsg{Width: 50, Height: 20})
+	typeText(q, "zoom")
+	feedPicker(q, press(q, keyCtrlL))
+	if !strings.Contains(view(q), "Zoom: AI error: boom") {
+		t.Fatalf("narrow terminal should put the error on the flash line:\n%s", view(q))
+	}
+}
+
+func TestPickerAskNoModel(t *testing.T) {
+	// An assessor without a model (facts only) hides the key.
+	p := newTestPicker(t)
+	p.SetAssessor(&AppAssessor{Inspect: func(_ context.Context, a app.App) app.Facts { return app.Facts{App: a} }})
+	if cmd := press(p, keyCtrlL); cmd != nil || strings.Contains(view(p), "ctrl+l") {
+		t.Fatal("no model: ctrl+l does nothing and is not offered")
+	}
+}
+
+func TestPickerHelpListsAsk(t *testing.T) {
+	a, _ := pickerAssessor(keepAnswer, nil)
+	p := newTestPicker(t)
+	p.SetAssessor(a)
+	press(p, runeKey('?'))
+	if !strings.Contains(view(p), "ctrl+l") {
+		t.Fatalf("help should list ctrl+l:\n%s", view(p))
 	}
 }
