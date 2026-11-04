@@ -138,12 +138,18 @@ func buildGuide(ctx context.Context) []guideStep {
 	cmds = append(cmds, "rootout config set-key anthropic", "rootout config set llm.provider anthropic")
 	add("Add an AI second opinion", "ollama "+ollamaState(checks), text, cmds...)
 
-	// 5. orphans
+	// 5. assess apps
+	add("Ask the AI about an installed app", "optional",
+		"rootout assess shows every app with its code signature, Gatekeeper verdict and download origin, and asks the configured model what the app is for, whether its source is legitimate and whether to keep it. Answers from Claude or OpenAI are saved. Nothing is removed without the usual review of its files.",
+		"rootout assess "+shellArg(appName),
+		"rootout assess")
+
+	// 6. orphans
 	add("Find leftovers of apps you already deleted", "ready",
 		"Apps dragged to the Trash usually leave files behind. rootout orphans lists the candidates grouped by the old app id. Nothing is removed unless you type delete.",
 		"rootout orphans --dry-run")
 
-	// 6. scripting
+	// 7. scripting
 	add("Scripting", "optional",
 		"Every command takes --json and then prints only JSON on stdout. --yes skips the confirmation; combined with --permanent it deletes without the Trash and without asking, so use it only in scripts you trust.",
 		"rootout list --json",

@@ -70,7 +70,7 @@ func runTUI(ctx context.Context, g *globalFlags) error {
 			flash = errorFlash(err)
 		}
 		// Setup and the scan screen's m key can change the saved model.
-		if a == tui.ActionSetup || a == tui.ActionScan {
+		if a == tui.ActionSetup || a == tui.ActionScan || a == tui.ActionAssess {
 			ai = currentAIStatus()
 		}
 	}
@@ -146,6 +146,8 @@ func runAction(ctx context.Context, env fsx.Env, a tui.Action) (tui.Flash, error
 		return homeOrphans(ctx, env)
 	case tui.ActionScan:
 		return homeScan(ctx, env)
+	case tui.ActionAssess:
+		return homeAssess(ctx, env)
 	case tui.ActionSetup:
 		return runSetup(ctx)
 	}
@@ -167,28 +169,71 @@ func homeUninstall(ctx context.Context, env fsx.Env) (tui.Flash, error) {
 		if !ok {
 			return tui.Flash{}, nil
 		}
-		p, err := plan.Build(ctx, env, a, plan.Options{Mode: plan.Trash, CrashReports: true, Run: run.Default, Progress: rep})
-		if err != nil {
-			f := errorFlash(err)
-			f.Text = "could not plan " + a.Name + ": " + f.Text
-			return f, nil
-		}
-		ok, err = tui.Confirmer{}.Confirm(ctx, p)
+		f, confirmed, err := uninstallOne(ctx, env, a, rep)
 		if err != nil {
 			return tui.Flash{}, err
 		}
-		if !ok {
+		if !confirmed {
 			continue
 		}
-		res, err := plan.Execute(ctx, env, p, plan.Deps{Priv: priv.Options{}, Progress: rep})
-		if res != nil {
-			report(res)
-		}
-		if err != nil && !errors.Is(err, priv.ErrCancelled) {
-			return tui.Flash{}, err
-		}
-		return removalFlash(a.Name, p, res, err), nil
+		return f, nil
 	}
+}
+
+// uninstallOne plans one app's removal, shows the plan and removes what
+// the user confirmed; confirmed is false when they backed out (a plan
+// that cannot be built is reported on the flash and counts as confirmed,
+// so the caller does not loop on it).
+func uninstallOne(ctx context.Context, env fsx.Env, a app.App, rep progress.Reporter) (f tui.Flash, confirmed bool, err error) {
+	p, err := plan.Build(ctx, env, a, plan.Options{Mode: plan.Trash, CrashReports: true, Run: run.Default, Progress: rep})
+	if err != nil {
+		f := errorFlash(err)
+		f.Text = "could not plan " + a.Name + ": " + f.Text
+		return f, true, nil
+	}
+	ok, err := tui.Confirmer{}.Confirm(ctx, p)
+	if err != nil {
+		return tui.Flash{}, false, err
+	}
+	if !ok {
+		return tui.Flash{}, false, nil
+	}
+	res, err := plan.Execute(ctx, env, p, plan.Deps{Priv: priv.Options{}, Progress: rep})
+	if res != nil {
+		report(res)
+	}
+	if err != nil && !errors.Is(err, priv.ErrCancelled) {
+		return tui.Flash{}, true, err
+	}
+	return removalFlash(a.Name, p, res, err), true, nil
+}
+
+// homeAssess opens the apps review screen and removes the ticked apps one
+// by one through the usual plan and confirm.
+func homeAssess(ctx context.Context, env fsx.Env) (tui.Flash, error) {
+	rep := progress.Term(os.Stderr)
+	apps, err := app.DiscoverWith(env, app.Options{Progress: rep})
+	if err != nil {
+		return tui.Flash{}, err
+	}
+	if len(apps) == 0 {
+		return tui.Flash{Text: "No applications found"}, nil
+	}
+	c, _, err := loadConfig()
+	if err != nil {
+		return tui.Flash{}, err
+	}
+	assessor, err := buildAppAssessor(ctx, env, c, "", "", true, false)
+	if errors.Is(err, tui.ErrQuit) {
+		return tui.Flash{}, err
+	}
+	if isExit(err, exitDeclined) {
+		return tui.Flash{Text: "Assess cancelled: no model chosen"}, nil
+	}
+	if err != nil {
+		return tui.Flash{}, err
+	}
+	return reviewAndUninstallApps(ctx, env, apps, assessor, rep)
 }
 
 func homeOrphans(ctx context.Context, env fsx.Env) (tui.Flash, error) {

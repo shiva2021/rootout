@@ -173,7 +173,8 @@ func TestHomeEnterSelects(t *testing.T) {
 		{0, ActionUninstall},
 		{1, ActionOrphans},
 		{2, ActionScan},
-		{3, ActionSetup},
+		{3, ActionAssess},
+		{4, ActionSetup},
 	}
 	for _, tt := range tests {
 		h := newTestHome(t, Flash{})
@@ -188,7 +189,7 @@ func TestHomeEnterSelects(t *testing.T) {
 	}
 
 	h := newTestHome(t, Flash{})
-	for range 4 {
+	for range len(homeRows) - 1 {
 		pressH(h, keyDown)
 	}
 	assertQuit(t, pressH(h, keyEnter))
