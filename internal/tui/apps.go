@@ -329,6 +329,8 @@ func (v *AppsView) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "ctrl+a":
 		v.tickAll()
+	case "m":
+		return v, v.openPicker()
 	case "?":
 		v.help = true
 	case "enter":
@@ -360,11 +362,65 @@ func (v *AppsView) tickAll() {
 	}
 }
 
-// delegate forwards msg to the embedded picker; the picker itself arrives
-// with the m key.
+// openPicker embeds a model picker over the screen: the configured hosted
+// provider's list when it can be fetched, else the Ollama picker; nil when
+// neither is available.
+func (v *AppsView) openPicker() tea.Cmd {
+	var p embeddedPicker
+	switch {
+	case v.hosted() && v.assessor.HostedModels != nil:
+		p = NewHostedPicker(v.ctx, v.assessor.Provider, v.assessor.HostedModels, v.currentModel())
+	case v.assessor.Models != nil:
+		p = NewModelPicker(v.ctx, *v.assessor.Models, v.currentOllamaModel())
+	default:
+		return nil
+	}
+	p.setEmbedded(true)
+	p.Update(tea.WindowSizeMsg{Width: v.width, Height: v.height})
+	v.picker = p
+	return p.Init()
+}
+
+// pickerProvider is the provider a picked model belongs to.
+func (v *AppsView) pickerProvider() string {
+	if _, ok := v.picker.(*HostedPicker); ok {
+		return v.assessor.Provider
+	}
+	return scanProvider
+}
+
+// currentModel is the model part of the "<provider> · <model>" label.
+func (v *AppsView) currentModel() string {
+	_, model, _ := strings.Cut(v.assessor.Label, labelSep)
+	return model
+}
+
+// currentOllamaModel is the current model when the provider is Ollama.
+func (v *AppsView) currentOllamaModel() string {
+	if v.assessor.Provider != scanProvider {
+		return ""
+	}
+	return v.currentModel()
+}
+
+// delegate forwards msg to the embedded picker and, once it has finished,
+// closes it and rebuilds the AppAssessor for the chosen model.
 func (v *AppsView) delegate(msg tea.Msg) tea.Cmd {
 	_, cmd := v.picker.Update(msg)
-	return cmd
+	model, chosen, finished := v.picker.done()
+	if !finished {
+		return cmd
+	}
+	provider := v.pickerProvider()
+	v.closePicker()
+	if !chosen || v.assessor.OnModel == nil {
+		return cmd
+	}
+	ctx, on := v.ctx, v.assessor.OnModel
+	return func() tea.Msg {
+		a, err := on(ctx, provider, model)
+		return appAssessorMsg{a: a, err: err}
+	}
 }
 
 func (v *AppsView) closePicker() {

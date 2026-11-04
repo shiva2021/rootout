@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -520,5 +521,156 @@ func TestAppsViewLateFactsAfterQuit(t *testing.T) {
 	}
 	if _, ok := v.Result(); ok {
 		t.Fatal("esc result must stay cancelled")
+	}
+}
+
+// pumpA runs cmd, feeds every resulting message except spinner ticks back
+// into v and repeats until nothing is left to run.
+func pumpA(v *AppsView, cmd tea.Cmd) {
+	for _, msg := range runCmd(cmd) {
+		if _, tick := msg.(spinner.TickMsg); tick || msg == nil {
+			continue
+		}
+		_, next := v.Update(msg)
+		pumpA(v, next)
+	}
+}
+
+func TestAppsViewModelKeyWithoutDeps(t *testing.T) {
+	v := newTestApps(t, AppAssessor{})
+	if cmd := pressA(v, runeKey('m')); cmd != nil || v.picker != nil {
+		t.Fatal("m without Models should do nothing")
+	}
+	if out := viewA(v); !strings.Contains(out, "Installed apps") || strings.Contains(out, "m model") {
+		t.Fatalf("apps view should still show without the m hint:\n%s", out)
+	}
+}
+
+func TestAppsViewPickModelOllama(t *testing.T) {
+	var picked string
+	a := AppAssessor{
+		Provider: "ollama",
+		Label:    "ollama · llama3.2:3b",
+		Models:   &ModelDeps{Client: ollamaServer(t), Hardware: testHW},
+		OnModel: func(_ context.Context, provider, model string) (AppAssessor, error) {
+			picked = provider + "/" + model
+			return AppAssessor{Provider: provider, Label: "ollama · x", Assess: func(context.Context, app.Facts) (llm.AppAssessment, error) { return llm.AppAssessment{}, nil }}, nil
+		},
+	}
+	v := newTestApps(t, a)
+	cmd := pressA(v, runeKey('m'))
+	if v.picker == nil || cmd == nil || !strings.Contains(viewA(v), "looking for Ollama") {
+		t.Fatalf("m should open the Ollama picker:\n%s", viewA(v))
+	}
+	pumpA(v, cmd)
+	if mp, ok := v.picker.(*ModelPicker); !ok || mp.state != stateReady || mp.width != 140 {
+		t.Fatalf("picker did not reach the list at the screen size")
+	}
+	if out := viewA(v); !strings.Contains(out, "llama3.2:3b (current)") || strings.Contains(out, "Installed apps") {
+		t.Fatalf("picker list not shown with the current model:\n%s", out)
+	}
+	cmd = pressA(v, keyEnter)
+	if v.picker != nil || cmd == nil {
+		t.Fatal("enter should close the picker and return the OnModel Cmd")
+	}
+	pumpA(v, cmd)
+	if picked != "ollama/llama3.2:3b" {
+		t.Fatalf("OnModel got %q", picked)
+	}
+	if out := viewA(v); !strings.Contains(out, "AI: ollama · x") || !strings.Contains(out, "l ask AI") || v.assessor.OnModel == nil {
+		t.Fatalf("assessor not replaced (OnModel kept):\n%s", out)
+	}
+}
+
+func TestAppsViewPickModelHosted(t *testing.T) {
+	var picked string
+	a := AppAssessor{
+		Provider:     "anthropic",
+		Label:        "anthropic · claude-sonnet-5-5",
+		HostedModels: func(context.Context) ([]llm.ModelInfo, error) { return hostedFixture(), nil },
+	}
+	a.OnModel = func(_ context.Context, provider, model string) (AppAssessor, error) {
+		picked = provider + "/" + model
+		return AppAssessor{Provider: provider, Label: hostedLabel(provider, model), HostedModels: a.HostedModels}, nil
+	}
+	v := newTestApps(t, a)
+	if !strings.Contains(viewA(v), "m model") {
+		t.Fatalf("footer should offer m for a hosted provider:\n%s", viewA(v))
+	}
+	pumpA(v, pressA(v, runeKey('m')))
+	if out := viewA(v); !strings.Contains(out, "› claude-sonnet-5-5 (current)") {
+		t.Fatalf("hosted list not shown:\n%s", out)
+	}
+	pumpA(v, pressA(v, keyUp, keyEnter))
+	if picked != "anthropic/claude-new" || !strings.Contains(viewA(v), "AI: anthropic · claude-new") {
+		t.Fatalf("OnModel got %q:\n%s", picked, viewA(v))
+	}
+	// esc closes the picker without a pick.
+	called := false
+	v.assessor.OnModel = func(context.Context, string, string) (AppAssessor, error) { called = true; return AppAssessor{}, nil }
+	pumpA(v, pressA(v, runeKey('m')))
+	if cmd := pressA(v, keyEsc); cmd != nil || v.picker != nil || called || !strings.Contains(viewA(v), "Installed apps") {
+		t.Fatal("esc should close the picker without OnModel or quitting")
+	}
+}
+
+func TestAppsViewCtrlXClosesPickerAndQuits(t *testing.T) {
+	a := AppAssessor{Provider: "anthropic", Label: "anthropic · m",
+		HostedModels: func(context.Context) ([]llm.ModelInfo, error) { return hostedFixture(), nil }}
+	v := newTestApps(t, a)
+	pumpA(v, pressA(v, runeKey('m')))
+	if !quits(pressA(v, tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})) || !v.quitAll || v.picker != nil {
+		t.Fatal("ctrl+x inside the picker should quit everything")
+	}
+}
+
+func TestAppsViewHelpOverlay(t *testing.T) {
+	v := newTestApps(t, AppAssessor{})
+	pressA(v, runeKey('?'))
+	out := viewA(v)
+	for _, want := range []string{"ctrl+a", "tick every app", "ask the configured AI", "ignoring saved answers", "pick a model", "keep · drop", "70", "uninstall the ticked apps", "ctrl+x"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("help missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Installed apps") {
+		t.Error("help should replace the screen")
+	}
+	pressA(v, runeKey('x'))
+	if !strings.Contains(viewA(v), "Installed apps") {
+		t.Fatal("any key should close the help")
+	}
+}
+
+func TestAppsViewFooterFitsWidth(t *testing.T) {
+	for _, w := range []int{40, 80, 140} {
+		v := NewAppsView(appsFixture(), AppAssessor{Assess: func(context.Context, app.Facts) (llm.AppAssessment, error) { return llm.AppAssessment{}, nil }, Models: &ModelDeps{}})
+		v.Update(tea.WindowSizeMsg{Width: w, Height: 20})
+		lines := strings.Split(viewA(v), "\n")
+		footer := strings.TrimRight(lines[len(lines)-1], " ")
+		if got := lipgloss.Width(footer); got > w {
+			t.Errorf("width %d: footer is %d cells: %q", w, got, footer)
+		}
+		if !strings.HasSuffix(footer, "? help") {
+			t.Errorf("width %d: footer must end with ? help: %q", w, footer)
+		}
+		if len(lines) != 20 {
+			t.Errorf("width %d: view has %d lines, want 20", w, len(lines))
+		}
+	}
+}
+
+func TestAppsViewDetailsScroll(t *testing.T) {
+	inspect, _ := recordingInspect(nil)
+	v := newTestApps(t, AppAssessor{Inspect: inspect})
+	drain(v, v.Init())
+	v.Update(tea.WindowSizeMsg{Width: 60, Height: 10})
+	pressA(v, tea.KeyPressMsg{Code: tea.KeyTab}, keyDown, keyDown)
+	if v.detailTop == 0 {
+		t.Fatal("details should scroll when focused at a small height")
+	}
+	pressA(v, tea.KeyPressMsg{Code: tea.KeyTab}, keyDown)
+	if v.cursor != 1 || v.detailTop != 0 {
+		t.Fatalf("tab back: cursor %d detailTop %d", v.cursor, v.detailTop)
 	}
 }
