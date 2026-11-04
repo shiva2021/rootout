@@ -4,6 +4,8 @@ All notable changes to rootout. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-04
+
 ### Added
 - Ask the AI about installed apps (D-040). `rootout assess` (and "Assess apps" on the home screen) lists every app; resting the cursor on one gathers its facts locally (code signature and Team ID, Gatekeeper verdict, download origin, App Store receipt, launch agents and daemons, declared permissions, privileged helpers), tick apps and press `l` to ask the configured model what each is for, whether its source is legitimate, how confident it is and whether to keep or drop it (✓ keep, ✗ drop, ⚠ unsure); enter sends each ticked app through the usual file review. `rootout assess <app>` prints the facts and the answer for one app, `--all` does every app, `--json` for scripts; without a configured model the facts are still shown. Answers from Claude and OpenAI are saved beside the extension answers and reused (`L` asks again, `--no-cache` skips the file). `rootout guide` gains the step. In the uninstall picker, `ctrl+l` asks the model about the highlighted app and shows the answer in the preview pane before you decide.
 
