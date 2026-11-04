@@ -1,0 +1,2 @@
+/Applications/Unsigned.app: rejected
+source=no usable signature

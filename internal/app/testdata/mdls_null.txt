@@ -1,0 +1,3 @@
+kMDItemDateAdded    = (null)
+kMDItemLastUsedDate = (null)
+kMDItemWhereFroms   = (null)

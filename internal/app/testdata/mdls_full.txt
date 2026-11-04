@@ -1,0 +1,6 @@
+kMDItemDateAdded    = 2026-11-01 12:37:41 +0000
+kMDItemLastUsedDate = 2026-11-04 08:16:47 +0000
+kMDItemWhereFroms   = (
+    "https://dl.example.com/Foo-1.2.dmg",
+    "https://example.com/download"
+)

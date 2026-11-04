@@ -1,0 +1,3 @@
+/Applications/Google Chrome.app: accepted
+source=Notarized Developer ID
+origin=Developer ID Application: Google LLC (EQHXZ8M8AV)
