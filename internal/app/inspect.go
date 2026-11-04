@@ -56,25 +56,28 @@ func Inspect(ctx context.Context, env fsx.Env, a App, r run.Runner) Facts {
 		unavailable []string
 		wg          sync.WaitGroup
 	)
-	probe := func(name string, timeout time.Duration, parse func([]byte), args ...string) {
+	// probe runs one command and hands its output to parse, which reports
+	// whether the output was an answer. A command cut short by its timeout
+	// or by ctx is never an answer, whatever it printed before the kill:
+	// a partial codesign report would read as a weak signature.
+	probe := func(name string, timeout time.Duration, parse func([]byte) bool, args ...string) {
 		wg.Go(func() {
 			pctx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 			// run.Default returns combined output, which matters here:
-			// codesign prints its report on stderr.
+			// codesign prints its report on stderr. The exit status is
+			// not consulted: unsigned (1) and rejected (3) are answers.
 			out, _ := r(pctx, name, append(args, target)...)
-			if len(bytes.TrimSpace(out)) == 0 {
+			if pctx.Err() != nil || len(bytes.TrimSpace(out)) == 0 || !parse(out) {
 				mu.Lock()
 				unavailable = append(unavailable, name)
 				mu.Unlock()
-				return
 			}
-			parse(out)
 		})
 	}
-	probe("codesign", codesignTimeout, func(out []byte) { f.Signature = parseCodesign(out) }, "-dv", "--verbose=4")
-	probe("spctl", spctlTimeout, func(out []byte) { f.Gatekeeper = parseSpctl(out) }, "--assess", "--type", "execute", "-vv")
-	probe("mdls", mdlsTimeout, func(out []byte) { f.Origin = parseMdls(out) },
+	probe("codesign", codesignTimeout, func(out []byte) (ok bool) { f.Signature, ok = parseCodesign(out); return ok }, "-dv", "--verbose=4")
+	probe("spctl", spctlTimeout, func(out []byte) (ok bool) { f.Gatekeeper, ok = parseSpctl(out); return ok }, "--assess", "--type", "execute", "-vv")
+	probe("mdls", mdlsTimeout, func(out []byte) (ok bool) { f.Origin, ok = parseMdls(out); return ok },
 		"-name", "kMDItemWhereFroms", "-name", "kMDItemDateAdded", "-name", "kMDItemLastUsedDate")
 	wg.Wait()
 

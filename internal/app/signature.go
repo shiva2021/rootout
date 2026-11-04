@@ -29,16 +29,17 @@ type Gatekeeper struct {
 // and when it was last opened. Zero values mean Spotlight has no record.
 type Origin struct {
 	WhereFroms []string  `json:"where_froms,omitempty"` // download URLs; untrusted text
-	DateAdded  time.Time `json:"date_added,omitempty"`
-	LastUsed   time.Time `json:"last_used,omitempty"`
+	DateAdded  time.Time `json:"date_added,omitzero"`
+	LastUsed   time.Time `json:"last_used,omitzero"`
 }
 
 // parseCodesign reads codesign's key=value lines. "not signed at all" (exit
-// 1) is an answer, not a failure: the result is an unsigned Signature.
-func parseCodesign(out []byte) Signature {
-	var s Signature
+// 1) is an answer, not a failure: the result is an unsigned Signature. Any
+// other output without an Identifier line (a bundle codesign cannot read,
+// output cut short by the timeout) is not an answer: ok is false.
+func parseCodesign(out []byte) (s Signature, ok bool) {
 	if bytes.Contains(out, []byte("not signed at all")) {
-		return s
+		return s, true
 	}
 	sc := bufio.NewScanner(bytes.NewReader(out))
 	for sc.Scan() {
@@ -69,15 +70,14 @@ func parseCodesign(out []byte) Signature {
 			}
 		}
 	}
-	return s
+	return s, s.Signed
 }
 
 // parseSpctl reads spctl's verdict: "<path>: accepted" or "<path>: rejected"
-// on the first line, then "source=…". Any other first line (for example
-// "code has no resources but signature indicates they must be present") is
-// a rejection whose text becomes the source.
-func parseSpctl(out []byte) Gatekeeper {
-	var g Gatekeeper
+// on the first line, then "source=…". Any other first line (an error such
+// as "unknown error -67062" or a resource complaint) is not a verdict: ok
+// is false and the probe counts as unavailable.
+func parseSpctl(out []byte) (g Gatekeeper, ok bool) {
 	sc := bufio.NewScanner(bytes.NewReader(out))
 	first := true
 	for sc.Scan() {
@@ -86,38 +86,39 @@ func parseSpctl(out []byte) Gatekeeper {
 			first = false
 			switch {
 			case strings.HasSuffix(line, ": accepted"):
-				g.Accepted = true
+				g.Accepted, ok = true, true
 			case strings.HasSuffix(line, ": rejected"):
+				ok = true
 			default:
-				if i := strings.LastIndex(line, ": "); i >= 0 {
-					g.Source = line[i+2:]
-				} else if line != "" {
-					g.Source = line
-				}
+				return Gatekeeper{}, false
 			}
 			continue
 		}
-		if value, ok := strings.CutPrefix(line, "source="); ok {
+		if value, found := strings.CutPrefix(line, "source="); found {
 			g.Source = value
 		}
 	}
-	return g
+	return g, ok
 }
 
 // mdlsTime is the layout mdls prints dates in.
 const mdlsTime = "2006-01-02 15:04:05 -0700"
 
 // parseMdls reads `mdls -name … ` output: one "key = value" per line, where a
-// value is "(null)", a date, or a parenthesised list spread over lines.
-func parseMdls(out []byte) Origin {
-	var o Origin
+// value is "(null)", a date, or a parenthesised list spread over lines. ok
+// is false when no kMDItem line was seen (an error message, or nothing).
+func parseMdls(out []byte) (o Origin, ok bool) {
 	sc := bufio.NewScanner(bytes.NewReader(out))
 	for sc.Scan() {
-		key, value, ok := strings.Cut(sc.Text(), "=")
-		if !ok {
+		key, value, found := strings.Cut(sc.Text(), "=")
+		if !found {
 			continue
 		}
 		key, value = strings.TrimSpace(key), strings.TrimSpace(value)
+		if !strings.HasPrefix(key, "kMDItem") {
+			continue
+		}
+		ok = true
 		if value == "(null)" {
 			continue
 		}
@@ -142,7 +143,7 @@ func parseMdls(out []byte) Origin {
 			}
 		}
 	}
-	return o
+	return o, ok
 }
 
 func parseMdlsTime(s string) time.Time {

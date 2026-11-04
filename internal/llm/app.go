@@ -1,10 +1,6 @@
 package llm
 
-import (
-	"encoding/json"
-	"fmt"
-	"strings"
-)
+import "strings"
 
 // Source values the model may return for where an app comes from.
 const (
@@ -70,10 +66,7 @@ func NormalizeApp(a AppAssessment, provider, model string) AppAssessment {
 	default:
 		a.Recommendation = Review
 	}
-	if a.Confidence >= 10 && a.Confidence <= 100 {
-		a.Confidence /= 100
-	}
-	a.Confidence = max(0, min(1, a.Confidence))
+	a.Confidence = clampConfidence(a.Confidence)
 	a.Purpose = strings.Join(strings.Fields(a.Purpose), " ")
 	a.Provider, a.Model = provider, model
 	return a
@@ -82,22 +75,10 @@ func NormalizeApp(a AppAssessment, provider, model string) AppAssessment {
 // DecodeApp parses a model's JSON reply into an AppAssessment. Any failure
 // wraps ErrBadResponse. Callers still run NormalizeApp on the result.
 func DecodeApp(text string) (AppAssessment, error) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return AppAssessment{}, fmt.Errorf("%w: empty reply", ErrBadResponse)
-	}
-	var a AppAssessment
-	if err := json.Unmarshal([]byte(text), &a); err != nil {
-		obj := extractObject(text)
-		if obj == "" {
-			return AppAssessment{}, fmt.Errorf("%w: %w", ErrBadResponse, err)
+	return decode(text, func(a AppAssessment) string {
+		if a.Recommendation == "" {
+			return "recommendation"
 		}
-		if err2 := json.Unmarshal([]byte(obj), &a); err2 != nil {
-			return AppAssessment{}, fmt.Errorf("%w: %w", ErrBadResponse, err2)
-		}
-	}
-	if a.Recommendation == "" {
-		return AppAssessment{}, fmt.Errorf("%w: missing recommendation", ErrBadResponse)
-	}
-	return a, nil
+		return ""
+	})
 }

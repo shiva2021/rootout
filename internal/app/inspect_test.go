@@ -23,6 +23,7 @@ type fakeRunner struct {
 	out   map[string]string // command name -> testdata file
 	err   map[string]error  // command name -> error returned alongside the output
 	block map[string]bool
+	dir   string // where out files live; "" = testdata
 
 	mu    sync.Mutex
 	calls [][]string
@@ -34,11 +35,16 @@ func (f *fakeRunner) run(ctx context.Context, name string, args ...string) ([]by
 	f.mu.Unlock()
 	if f.block[name] {
 		<-ctx.Done()
-		return nil, ctx.Err()
+		// What a killed command leaves behind: a plausible first line.
+		return []byte("Identifier=com.partial\n/x: accepted\nkMDItemDateAdded = 2026-01-01 00:00:00 +0000\n"), ctx.Err()
 	}
 	var out []byte
 	if file, ok := f.out[name]; ok {
-		data, err := os.ReadFile(filepath.Join("testdata", file))
+		dir := f.dir
+		if dir == "" {
+			dir = "testdata"
+		}
+		data, err := os.ReadFile(filepath.Join(dir, file))
 		if err != nil {
 			f.t.Fatal(err)
 		}
@@ -252,8 +258,36 @@ func TestInspectTimeout(t *testing.T) {
 	if !slices.Contains(f.Unavailable, "spctl") {
 		t.Errorf("Unavailable = %q, want spctl", f.Unavailable)
 	}
+	if f.Gatekeeper.Accepted || f.Gatekeeper.Source != "" {
+		t.Errorf("Gatekeeper = %+v, want zero: partial output from a killed probe is not an answer", f.Gatekeeper)
+	}
 	if !f.Signature.Signed || f.Origin.DateAdded.IsZero() {
 		t.Error("the other probes should still have answered")
+	}
+}
+
+// TestInspectUnrecognisedOutput: error text from a probe is missing
+// evidence, never a verdict.
+func TestInspectUnrecognisedOutput(t *testing.T) {
+	env := testutil.FakeHome(t, inspectSpec())
+	dir := t.TempDir()
+	for name, text := range map[string]string{
+		"codesign.txt": "/Applications/Foo.app: bundle format unrecognized, invalid, or unsuitable\n",
+		"spctl.txt":    "/Applications/Foo.app: unknown error -67062\n",
+		"mdls.txt":     "/Applications/Foo.app: could not find /Applications/Foo.app.\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := &fakeRunner{t: t, dir: dir, out: map[string]string{"codesign": "codesign.txt", "spctl": "spctl.txt", "mdls": "mdls.txt"},
+		err: map[string]error{"codesign": errors.New("exit status 1"), "spctl": errors.New("exit status 1"), "mdls": errors.New("exit status 1")}}
+	f := Inspect(context.Background(), env, fooApp(env), r.run)
+	if want := []string{"codesign", "mdls", "spctl"}; !slices.Equal(f.Unavailable, want) {
+		t.Errorf("Unavailable = %q, want %q", f.Unavailable, want)
+	}
+	if f.Signature.Signed || f.Gatekeeper.Source != "" || f.Gatekeeper.Accepted {
+		t.Errorf("error text became a verdict: %+v %+v", f.Signature, f.Gatekeeper)
 	}
 }
 
