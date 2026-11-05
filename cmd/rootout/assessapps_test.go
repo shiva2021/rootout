@@ -124,32 +124,12 @@ func TestPrintAssessItems(t *testing.T) {
 
 func TestRunAssessNeedsArgOrAll(t *testing.T) {
 	t.Setenv("ROOTOUT_CONFIG", filepath.Join(t.TempDir(), "config.toml"))
-	err := runAssess(context.Background(), &globalFlags{}, assessFlags{noTUI: true}, "")
+	err := runAssess(context.Background(), &globalFlags{}, assessFlags{}, "")
 	if !isExit(err, exitBadInput) || !strings.Contains(err.Error(), "--all") {
 		t.Fatalf("err = %v, want exit 2 naming --all", err)
 	}
 	err = runAssess(context.Background(), &globalFlags{json: true}, assessFlags{pickModel: true, all: true}, "")
 	if !isExit(err, exitBadInput) || !strings.Contains(err.Error(), "--pick-model") {
 		t.Fatalf("--pick-model without a terminal: err = %v, want exit 2 naming --pick-model", err)
-	}
-}
-
-func TestAssessFlash(t *testing.T) {
-	tests := []struct {
-		done, skipped int
-		failed        []string
-		want          string
-		wantErr       bool
-	}{
-		{1, 0, nil, "Removed 1 of 1 apps", false},
-		{2, 1, nil, "Removed 2 of 3 apps · 1 skipped", false},
-		{0, 2, nil, "Removed 0 of 2 apps · 2 skipped", false},
-		{1, 0, []string{"Beta"}, "Removed 1 of 2 apps · 1 failed (Beta)", true},
-	}
-	for _, tt := range tests {
-		f := assessFlash(tt.done, tt.skipped, tt.failed)
-		if f.Text != tt.want || f.Err != tt.wantErr {
-			t.Errorf("assessFlash(%d,%d,%v) = %+v, want %q err=%v", tt.done, tt.skipped, tt.failed, f, tt.want, tt.wantErr)
-		}
 	}
 }

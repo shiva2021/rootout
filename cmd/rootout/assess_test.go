@@ -178,7 +178,7 @@ func appFixture() app.Facts {
 func TestAssessAppFuncCachesAnswers(t *testing.T) {
 	cache, _ := cacheFixture(t)
 	p := &llm.Fake{AppResult: llm.AppAssessment{Purpose: "Edits text.", Source: llm.SourceLegitimate, Confidence: 0.8, Recommendation: llm.Keep}}
-	f := assessAppFunc(p, cache, false)
+	f := assessAppFunc(p, cache)
 	first, err := f(context.Background(), appFixture())
 	if err != nil || first.Cached || first.Recommendation != llm.Keep || first.Provider != "fake" {
 		t.Fatalf("first = %+v, %v", first, err)
@@ -195,34 +195,20 @@ func TestAssessAppFuncCachesAnswers(t *testing.T) {
 	}
 	p2 := &llm.Fake{Err: errors.New("boom")}
 	cache2, _ := cacheFixture(t)
-	if _, err := assessAppFunc(p2, cache2, false)(context.Background(), appFixture()); err == nil || cache2.Len() != 0 {
+	if _, err := assessAppFunc(p2, cache2)(context.Background(), appFixture()); err == nil || cache2.Len() != 0 {
 		t.Fatalf("error: %v, stored %d", err, cache2.Len())
-	}
-}
-
-func TestAssessAppFuncForceBypassesLookupButStores(t *testing.T) {
-	cache, _ := cacheFixture(t)
-	p := &llm.Fake{AppResult: llm.AppAssessment{Recommendation: llm.Drop, Confidence: 0.9}}
-	f := assessAppFunc(p, cache, true)
-	for range 2 {
-		if a, err := f(context.Background(), appFixture()); err != nil || a.Cached {
-			t.Fatalf("forced call = %+v, %v", a, err)
-		}
-	}
-	if len(p.Calls) != 2 || cache.Len() != 1 {
-		t.Fatalf("calls %d, stored %d; want 2 and 1", len(p.Calls), cache.Len())
 	}
 }
 
 func TestAssessAppFuncWithoutCache(t *testing.T) {
 	p := &llm.Fake{AppResult: llm.AppAssessment{Recommendation: llm.Keep}}
-	f := assessAppFunc(p, nil, false)
+	f := assessAppFunc(p, nil)
 	_, _ = f(context.Background(), appFixture())
 	_, _ = f(context.Background(), appFixture())
 	if len(p.Calls) != 2 {
 		t.Fatalf("calls %d, want 2 (no cache)", len(p.Calls))
 	}
-	if assessAppFunc(nil, nil, false) != nil {
+	if assessAppFunc(nil, nil) != nil {
 		t.Fatal("no provider: want nil func")
 	}
 }
@@ -246,11 +232,11 @@ func TestWithAppCacheFillsEveryHook(t *testing.T) {
 	cache, _ := cacheFixture(t)
 	p := &llm.Fake{AppResult: llm.AppAssessment{Recommendation: llm.Keep}}
 	a := withAppCache(tui.AppAssessor{Provider: "fake", Label: "fake · fake"}, p, cache)
-	if a.Assess == nil || a.Reassess == nil || a.Cached == nil || a.Provider != "fake" {
+	if a.Assess == nil || a.Cached == nil || a.Provider != "fake" {
 		t.Fatalf("assessor = %+v", a)
 	}
 	b := withAppCache(tui.AppAssessor{}, p, nil)
-	if b.Assess == nil || b.Reassess == nil || b.Cached != nil {
+	if b.Assess == nil || b.Cached != nil {
 		t.Fatalf("no cache: %+v", b)
 	}
 }
@@ -260,7 +246,7 @@ func TestWithAppCacheFillsEveryHook(t *testing.T) {
 func TestBuildAppAssessorWithoutProvider(t *testing.T) {
 	t.Setenv("ROOTOUT_CONFIG", filepath.Join(t.TempDir(), "config.toml"))
 	env := testutil.FakeHome(t, testutil.Spec{})
-	a, err := buildAppAssessor(context.Background(), env, config.Default(), "", "", false, false)
+	a, err := buildAppAssessor(context.Background(), env, config.Default(), "", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}

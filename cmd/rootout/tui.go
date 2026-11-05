@@ -70,7 +70,7 @@ func runTUI(ctx context.Context, g *globalFlags) error {
 			flash = errorFlash(err)
 		}
 		// Setup and the scan screen's m key can change the saved model.
-		if a == tui.ActionSetup || a == tui.ActionScan || a == tui.ActionAssess {
+		if a == tui.ActionSetup || a == tui.ActionScan {
 			ai = currentAIStatus()
 		}
 	}
@@ -146,8 +146,6 @@ func runAction(ctx context.Context, env fsx.Env, a tui.Action) (tui.Flash, error
 		return homeOrphans(ctx, env)
 	case tui.ActionScan:
 		return homeScan(ctx, env)
-	case tui.ActionAssess:
-		return homeAssess(ctx, env)
 	case tui.ActionSetup:
 		return runSetup(ctx)
 	}
@@ -170,7 +168,7 @@ func homeUninstall(ctx context.Context, env fsx.Env) (tui.Flash, error) {
 	case err != nil:
 		fmt.Fprintln(os.Stderr, "rootout: AI unavailable in the picker:", err)
 	case c.LLM.Provider != "":
-		if a, err := buildAppAssessor(ctx, env, c, "", "", false, false); err == nil {
+		if a, err := buildAppAssessor(ctx, env, c, "", "", false); err == nil {
 			assessor = &a
 		} else {
 			fmt.Fprintln(os.Stderr, "rootout: AI unavailable in the picker:", err)
@@ -221,34 +219,6 @@ func uninstallOne(ctx context.Context, env fsx.Env, a app.App, rep progress.Repo
 		return tui.Flash{}, true, err
 	}
 	return removalFlash(a.Name, p, res, err), true, nil
-}
-
-// homeAssess opens the apps review screen and removes the ticked apps one
-// by one through the usual plan and confirm.
-func homeAssess(ctx context.Context, env fsx.Env) (tui.Flash, error) {
-	rep := progress.Term(os.Stderr)
-	apps, err := app.DiscoverWith(env, app.Options{Progress: rep})
-	if err != nil {
-		return tui.Flash{}, err
-	}
-	if len(apps) == 0 {
-		return tui.Flash{Text: "No applications found"}, nil
-	}
-	c, _, err := loadConfig()
-	if err != nil {
-		return tui.Flash{}, err
-	}
-	assessor, err := buildAppAssessor(ctx, env, c, "", "", true, false)
-	if errors.Is(err, tui.ErrQuit) {
-		return tui.Flash{}, err
-	}
-	if isExit(err, exitDeclined) {
-		return tui.Flash{Text: "Assess cancelled: no model chosen"}, nil
-	}
-	if err != nil {
-		return tui.Flash{}, err
-	}
-	return reviewAndUninstallApps(ctx, env, apps, assessor, rep)
 }
 
 func homeOrphans(ctx context.Context, env fsx.Env) (tui.Flash, error) {

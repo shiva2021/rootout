@@ -173,8 +173,7 @@ func TestHomeEnterSelects(t *testing.T) {
 		{0, ActionUninstall},
 		{1, ActionOrphans},
 		{2, ActionScan},
-		{3, ActionAssess},
-		{4, ActionSetup},
+		{3, ActionSetup},
 	}
 	for _, tt := range tests {
 		h := newTestHome(t, Flash{})
