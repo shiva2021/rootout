@@ -4,6 +4,14 @@ All notable changes to rootout. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Removed
+- The "Assess apps" home row and its review screen (D-041): they duplicated what `ctrl+l` in the uninstall picker does, where the keep-or-drop decision is actually made. `rootout assess --no-tui` goes with them (there is no screen left to switch off).
+
+### Changed
+- `rootout assess` is for scripts: it needs an app name or `--all` and exits 2 without either; the interactive way is Uninstall an app → `ctrl+l`.
+- The uninstall picker's `ctrl+l` shows the facts it gathered (code signature and Team ID, Gatekeeper verdict, download origin, App Store receipt, dates, permissions, privileged helpers, launch items) under the AI answer, as soon as they arrive and even when the model call fails. The probes, including `spctl`, now run only on an explicit ask.
+- `tui.AppAssessor` is pruned to `Provider, Label, Inspect, Assess, Cached` (`Reassess`, `Models`, `HostedModels`, `OnModel` served only the removed screen); `buildAppAssessor` has no interactive form.
+
 ## [0.9.0] - 2026-11-04
 
 ### Added

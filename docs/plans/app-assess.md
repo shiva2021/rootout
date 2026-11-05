@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+_Superseded in part by D-041 (2026-11-05): the review screen and the "Assess apps" home row were removed; the picker key and the CLI remain._
+
 _Spec written 2026-11-04 (brainstormed with Shivang, reviewed by a Plan agent and the advisor). Status: approved; implementation in three PRs. The code is the truth once merged._
 
 **Goal:** Ask the configured AI model about an installed app (source legitimacy, one-line purpose, confidence, keep/drop) from a new review screen, from the uninstall picker and from `rootout assess`, and keep hosted answers so the model is not asked twice.
