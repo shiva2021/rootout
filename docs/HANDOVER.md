@@ -1,8 +1,29 @@
 # Handover
 
-_Updated: 2026-11-04 · Session: app assessments (D-040) merged (#25, #26, #29, #28), v0.9.0 cut_
+_Updated: 2026-11-05 · Session: assessment folded into the uninstall picker (D-041), review screen removed_
 
 ## Status
+**Unreleased on `main` after this PR: app assessment lives in the uninstall picker only (D-041).** Shivang found the separate "Assess apps" home row and review screen redundant with the picker's `ctrl+l`. Plan approved (plan mode, two scope questions answered: keep the CLI for scripts; show the gathered facts in the picker preview). One PR `feat/assess-in-picker`, three commits:
+1. `refactor: remove the apps review screen; assess is script-only`: `internal/tui/apps.go` + `apps_test.go` deleted; `AppAssessFunc`/`AppAssessor` (pruned to `Provider, Label, Inspect, Assess, Cached`) moved to `internal/tui/appassessor.go`; `ActionAssess` and the home row gone; `homeAssess`, `reviewAndUninstallApps`, `assessFlash` gone; `buildAppAssessor(ctx, env, c, provider, model, noCache)` has no interactive form; `assessAppFunc(p, cache)` has no `force`; `rootout assess` exits 2 without an app or `--all` on every terminal and `--no-tui` is removed; guide step 5 reworded.
+2. `feat(tui): picker preview shows the gathered facts`: `ctrl+l` asks in two steps (`pickerFactsMsg` then `pickerAssessMsg`), facts shown while the spinner runs and kept on error, answer above the facts, `previewLabelW = 14` shared by basic and fact lines. TDD: `TestPickerFactsBeforeAsk`, `TestPickerFactsShownWhileAsking`, `TestPickerFactLabelsAligned`, additions to `TestPickerAskHighlighted`/`TestPickerAskError`.
+3. `docs`: D-041, `docs/kb/assessments.md` section rewritten, README, CHANGELOG Unreleased (Removed + Changed), a superseded note on `docs/plans/app-assess.md`, this file.
+4. `fix: review findings` (`/code-review medium` on #31): `runAssess` resolves the app before building the assessor (a typo exits 2 without touching the Keychain); a retried `ctrl+l` after an error reuses the facts instead of probing again; fact values wrap under the value column (`factLines(f, label, styles, valW)`); the unreachable "ask abandoned" guard is gone. Accepted, not changed: the picker's explicit `Cached` call before `Assess` is a second cache lookup (it keeps the fake-assessor tests honest and is cheap); there is no re-ask key in the picker (`--no-cache` on the CLI, D-041 consequences).
+
+Verified: `make test` all packages, `make lint` 0 issues after each commit. Live on this Mac (anthropic, claude-haiku-5-5): `rootout assess` exits 2 naming `--all`, `--no-tui` is an unknown flag, `rootout assess "Google Chrome"` asked Claude once (Chrome had updated to 156.0.8078.80 since v0.9.0, so the key changed: keep 93 %) and the `--json` run right after was `cached: true`; `rootout guide` step 5 shows the new text. A pty drive (`drive.py` in the scratchpad, the usual recipe) showed the home screen with five rows and no "Assess apps", then Uninstall an app → type "Google Chrome" → `ctrl+l`: "asking the AI…", "Gatekeeper" on screen before the answer, then KEEP.
+
+No tag: the change waits under Unreleased until Shivang asks for a release (it would be v0.10.0: a feature and a flag were removed).
+
+## Next steps
+1. Cut the release when asked: `release/0.10.0`, CHANGELOG move, `make release-check NEXT=v0.10.0`, release PR, tag (runbook `docs/kb/release.md`).
+2. The picker preview is now the pane that outgrows its height first (basic lines + answer + up to ~10 fact lines); a scrollable preview is the next improvement.
+3. Not seen by a human: Uninstall an app → `ctrl+l` with the facts under the answer on a real terminal.
+4. Earlier open items (`~/.local/bin/rootout` shadowing the brew copy, Intel RAM tier, gitleaks) stand.
+
+## Gotchas learned this session
+- A helper added in one commit with its only caller in the next fails `golangci-lint` (`unused`) in between; land it with its caller.
+- Long fact values wrap inside the preview pane, so a test asserting a whole value must keep fixtures shorter than the value column.
+
+## Previous session (v0.9.0)
 **v0.9.0 is the current release: AI assessment of installed apps (D-040).** Shivang asked for the extension AI capability on apps: is the source legitimate, a one-line purpose, a confidence score, keep or drop, with answers retained. Brainstormed, Plan agent + advisor reviewed the plan; Shivang chose both entry points (a review screen and a picker key) and hosted-only caching. Plan: `docs/plans/app-assess.md`. Each code PR had a `/code-review medium` pass folded in before merge. Shivang then asked for the PRs to be merged in order and the release cut; this session did both.
 
 Merged in order (stacked PRs; a lesson learned below):
@@ -15,16 +36,15 @@ Verified: `make test` all packages (`-race` on app, assesscache), `make lint` 0 
 
 Review findings accepted rather than changed (say so before "fixing" them): the prompt is rendered twice per ask (fingerprint, then the call) with separate clocks, a 30-day bucket straddle in microseconds; `Unavailable` stays in the fingerprint (D-040 consequences); `assess --all` runs serially (explicit opt-in, simple output); the picker's explicit `Cached` call before `Assess` is redundant in production but is the `AppAssessor` contract; the picker is rebuilt per home-loop visit so Ollama answers (never cached) are lost when backing out of a plan; a long reasoning can clip in the picker's preview (no scroll there); the no-provider hint prints on every picker visit when a provider is configured but incomplete (same as scan).
 
-## Next steps
+### Next steps at the time
 1. `brew update && brew upgrade --cask rootout` on this Mac once the cask is at 0.9.0, then `rootout doctor` should say up to date; `~/.local/bin/rootout` (an old `make install` build) may still shadow it.
 2. Not seen by a human in a real terminal: home → Assess apps → tick → `l` → summary pane → `m` → enter → per-app confirm; home → Uninstall an app → `ctrl+l`. The unit tests and the pty run cover rendering and flow; the per-app confirm after enter has only unit coverage.
 3. Consider later: extract the ask queue shared by `ScanView` and `AppsView` (same field and method names on purpose); keep Ollama answers across picker visits; a scrollable picker preview.
 4. Earlier open items (v0.8.x manual checks, `~/.local/bin/rootout` shadowing the brew copy, Intel RAM tier, gitleaks) stand; see the previous session.
 
-## Gotchas learned this session
+### Gotchas learned that session
 - Stacked PRs: merging the base PR with `--delete-branch` makes GitHub *close* the PR stacked on it (it cannot be reopened once its base branch is gone); #27 had to be recreated as #29. Merge a stacked base *without* deleting the branch, retarget the next PR with `gh api -X PATCH repos/<owner>/<repo>/pulls/<n> -f base=main` (`gh pr edit --base` fails on the Projects-classic GraphQL deprecation), then delete the branch.
 - Bubble Tea's renderer splits words across cursor-positioning escapes in a pty capture, so `"word" in buffer` checks miss; check short tokens or strip the full escape set.
-- Cursor moves on the apps screen return probe Cmds; a test that presses keys without running them leaves rows `inspecting` and the ask queue waiting (`pressDrain` in `apps_test.go`).
 - `make lint | tail` hides the exit code (same class as the `go test | tail` gotcha); one commit went in red and was amended.
 - `omitempty` does nothing on `time.Time`; use `omitzero` (Go 1.24+).
 - An older binary that stores into the shared cache file drops the `app|…` answers (its `Entry` has no `App` field); accepted in D-040.

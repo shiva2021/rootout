@@ -140,9 +140,9 @@ func buildGuide(ctx context.Context) []guideStep {
 
 	// 5. assess apps
 	add("Ask the AI about an installed app", "optional",
-		"rootout assess shows every app with its code signature, Gatekeeper verdict and download origin, and asks the configured model what the app is for, whether its source is legitimate and whether to keep it. Answers from Claude or OpenAI are saved. Nothing is removed without the usual review of its files.",
+		"In Uninstall an app, ctrl+l asks the configured model what the highlighted app is for, whether its source is legitimate and whether to keep it, and shows its code signature, Gatekeeper verdict and download origin in the preview. rootout assess does the same from the command line; --all covers every app. Answers from Claude or OpenAI are saved. Nothing is removed without the usual review of its files.",
 		"rootout assess "+shellArg(appName),
-		"rootout assess")
+		"rootout assess --all")
 
 	// 6. orphans
 	add("Find leftovers of apps you already deleted", "ready",

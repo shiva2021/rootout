@@ -13,13 +13,11 @@ import (
 	"github.com/shiva2021/rootout/internal/fsx"
 	"github.com/shiva2021/rootout/internal/llm"
 	"github.com/shiva2021/rootout/internal/output"
-	"github.com/shiva2021/rootout/internal/progress"
 	"github.com/shiva2021/rootout/internal/tui"
 )
 
 type assessFlags struct {
 	all       bool
-	noTUI     bool
 	pickModel bool
 	noCache   bool
 	provider  string
@@ -46,26 +44,24 @@ model what the app is for, whether its source is legitimate, how confident it
 is and whether to keep or drop it. The recommendation is advice: nothing is
 removed unless you choose to, and every removal still shows its files first.
 
-On a terminal with no app named, every installed app opens in a review screen:
-move the cursor to inspect an app, tick apps and press l to ask the model,
-enter to uninstall the ticked ones one by one. Name an app to assess just that
-one; --all assesses every app without the screen (every app's facts go to the
-model, so it is an explicit choice).
+Name an app to assess just that one; --all assesses every app (every app's
+facts go to the model, so it is an explicit choice). On a terminal the same
+assessment is a keypress away: in "rootout", choose Uninstall an app and press
+ctrl+l on the highlighted app to see its facts and the answer before deciding.
 
 The facts come from local commands; spctl may contact Apple's notary service.
 App metadata, signature facts and download URLs reach a hosted provider only
 when you ask. Answers from Claude or OpenAI are saved under ~/.cache/rootout
 and reused for the same app version, provider, model and facts; --no-cache
-neither reads nor writes them, "rootout config cache clear" forgets them and
-L in the screen asks again. Local Ollama answers are never saved. Without a
+neither reads nor writes them (and so asks again) and "rootout config cache
+clear" forgets them. Local Ollama answers are never saved. Without a
 configured model the facts are still shown.
 
 --json prints one object per app: the app, the facts and, when a model is
 configured, the answer ("cached": true when it was a saved answer).`,
-		Example: `  rootout assess                        # review every app on screen
-  rootout assess Spotify                # one app: facts and the AI's answer
+		Example: `  rootout assess Spotify                # one app: facts and the AI's answer
   rootout assess Spotify --json         # the same for scripts
-  rootout assess --all --no-tui         # every app, as a table
+  rootout assess --all                  # every app, as a table
   rootout assess --provider ollama --model llama3.2 Spotify   # one-off model`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -77,8 +73,7 @@ configured, the answer ("cached": true when it was a saved answer).`,
 		},
 	}
 	fl := cmd.Flags()
-	fl.BoolVarP(&f.all, "all", "a", false, "assess every installed app without the review screen")
-	fl.BoolVar(&f.noTUI, "no-tui", false, "print results instead of opening the review screen")
+	fl.BoolVarP(&f.all, "all", "a", false, "assess every installed app")
 	fl.BoolVar(&f.pickModel, "pick-model", false, "choose a local Ollama model first (terminal only)")
 	fl.BoolVar(&f.noCache, "no-cache", false, "neither read nor save answers from Claude/OpenAI for this run")
 	fl.StringVar(&f.provider, "provider", "", "AI provider for this run: anthropic, openai or ollama")
@@ -87,12 +82,11 @@ configured, the answer ("cached": true when it was a saved answer).`,
 }
 
 func runAssess(ctx context.Context, g *globalFlags, f assessFlags, arg string) error {
-	interactive := !g.json && !f.noTUI && isTerminal(os.Stdin) && isTerminal(os.Stdout)
-	if f.pickModel && !interactive {
+	if f.pickModel && (g.json || !isTerminal(os.Stdin) || !isTerminal(os.Stdout)) {
 		return &exitErr{code: exitBadInput, msg: "--pick-model needs a terminal; use `rootout config models` and `--model <name>` in scripts"}
 	}
-	if arg == "" && !f.all && !interactive {
-		return &exitErr{code: exitBadInput, msg: "name an app or pass --all (the review screen needs a terminal)"}
+	if arg == "" && !f.all {
+		return &exitErr{code: exitBadInput, msg: "name an app or pass --all (the uninstall picker's ctrl+l asks about one app on screen)"}
 	}
 	c, _, err := loadConfig()
 	if err != nil {
@@ -116,40 +110,22 @@ func runAssess(ctx context.Context, g *globalFlags, f assessFlags, arg string) e
 		return err
 	}
 	w := output.New(os.Stdout, g.json)
-
+	// The app argument is checked before the provider is set up, so a typo
+	// exits 2 without touching the Keychain or the cache.
+	var target app.App
 	if arg != "" {
-		target, err := resolveApp(apps, arg)
-		if err != nil {
+		if target, err = resolveApp(apps, arg); err != nil {
 			return err
 		}
-		a, err := buildAppAssessor(ctx, env, c, f.provider, f.model, false, f.noCache)
-		if err != nil {
-			return err
-		}
-		return printAssessItems(w, []assessItem{assessOne(ctx, a, target)})
 	}
-	if !interactive || f.all {
-		a, err := buildAppAssessor(ctx, env, c, f.provider, f.model, false, f.noCache)
-		if err != nil {
-			return err
-		}
-		return printAssessItems(w, assessApps(ctx, a, apps))
-	}
-	a, err := buildAppAssessor(ctx, env, c, f.provider, f.model, true, f.noCache)
+	a, err := buildAppAssessor(ctx, env, c, f.provider, f.model, f.noCache)
 	if err != nil {
-		return declinedOnQuit(err, "no model chosen")
-	}
-	flash, err := reviewAndUninstallApps(ctx, env, apps, a, progress.Term(os.Stderr))
-	if err != nil {
-		if errors.Is(err, tui.ErrQuit) {
-			return nil
-		}
 		return err
 	}
-	if flash.Err {
-		return &exitErr{code: exitError, msg: flash.Text}
+	if arg != "" {
+		return printAssessItems(w, []assessItem{assessOne(ctx, a, target)})
 	}
-	return nil
+	return printAssessItems(w, assessApps(ctx, a, apps))
 }
 
 // resolveApp finds the app arg names (exact bundle id, exact name, then
@@ -208,53 +184,6 @@ func assessApps(ctx context.Context, a tui.AppAssessor, apps []app.App) []assess
 		items = append(items, assessOne(ctx, a, x))
 	}
 	return items
-}
-
-// reviewAndUninstallApps opens the review screen and runs the usual plan,
-// confirm and removal for each ticked app, one at a time.
-func reviewAndUninstallApps(ctx context.Context, env fsx.Env, apps []app.App, a tui.AppAssessor, rep progress.Reporter) (tui.Flash, error) {
-	res, ok, err := tui.ReviewApps(ctx, apps, a)
-	if err != nil {
-		return tui.Flash{}, err
-	}
-	if !ok || len(res.Uninstall) == 0 {
-		return tui.Flash{Text: "No changes"}, nil
-	}
-	var done, skipped int
-	var failed []string
-	for _, x := range res.Uninstall {
-		f, confirmed, err := uninstallOne(ctx, env, x, rep)
-		if err != nil {
-			return tui.Flash{}, err
-		}
-		switch {
-		case !confirmed:
-			skipped++
-		case f.Err:
-			// Each outcome is printed between screens, as the removal
-			// report is, so the reason survives the summary.
-			fmt.Fprintln(os.Stderr, "rootout:", f.Text)
-			failed = append(failed, x.Name)
-		default:
-			fmt.Fprintln(os.Stderr, "rootout:", f.Text)
-			done++
-		}
-	}
-	return assessFlash(done, skipped, failed), nil
-}
-
-// assessFlash summarises the removals that followed the review screen,
-// naming the apps that failed.
-func assessFlash(done, skipped int, failed []string) tui.Flash {
-	f := tui.Flash{Text: fmt.Sprintf("Removed %d of %d apps", done, done+skipped+len(failed))}
-	if skipped > 0 {
-		f.Text += fmt.Sprintf(" · %d skipped", skipped)
-	}
-	if len(failed) > 0 {
-		f.Text += fmt.Sprintf(" · %d failed (%s)", len(failed), strings.Join(failed, ", "))
-		f.Err = true
-	}
-	return f
 }
 
 // printAssessItems renders the table (or the JSON array) and, after it,

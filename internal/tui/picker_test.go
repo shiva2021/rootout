@@ -450,28 +450,61 @@ var keyCtrlL = tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl}
 
 // pickerAssessor records the apps inspected and asked and answers keep.
 func pickerAssessor(answer llm.AppAssessment, err error) (*AppAssessor, *[]string) {
+	a, asked, _ := pickerAssessorCounting(answer, err)
+	return a, asked
+}
+
+// pickerAssessorCounting is pickerAssessor that also counts Inspect calls.
+func pickerAssessorCounting(answer llm.AppAssessment, err error) (*AppAssessor, *[]string, *int) {
 	var asked []string
+	var inspected int
 	return &AppAssessor{
 		Provider: "fake", Label: "fake · m",
 		Inspect: func(_ context.Context, a app.App) app.Facts {
-			return app.Facts{App: a, Signature: app.Signature{Signed: true, TeamID: "TEAM"}}
+			inspected++
+			return app.Facts{App: a,
+				Signature:  app.Signature{Signed: true, TeamID: "TEAM", Authority: []string{"Example Ltd"}},
+				Gatekeeper: app.Gatekeeper{Accepted: true, Source: "notarized"},
+				Origin:     app.Origin{WhereFroms: []string{"https://example.com/dl"}},
+				Plist:      app.PlistFacts{PrivilegedHelpers: []string{"com.example.helper"}}}
 		},
 		Assess: func(_ context.Context, f app.Facts) (llm.AppAssessment, error) {
 			asked = append(asked, f.App.Name)
 			return answer, err
 		},
-	}, &asked
+	}, &asked, &inspected
 }
+
+// factWants are the fact lines the picker's assessor yields, as the
+// preview shows them.
+var factWants = []string{"Signature", "Example Ltd · team TEAM", "Gatekeeper", "accepted · notarized", "Where from", "https://example.com/dl", "Helper", "com.example.helper"}
 
 var keepAnswer = llm.AppAssessment{Purpose: "Plays music.", Source: llm.SourceLegitimate, Confidence: 0.85, Recommendation: llm.Keep, Reasoning: "Signed by Spotify AB.", Model: "m"}
 
-// feedPicker runs cmd and feeds its pickerAssessMsgs back into p.
+// feedPicker runs cmd and feeds its facts and answer messages back into
+// p, running whatever Cmd each one returns (the facts message starts the
+// ask), until nothing is left.
 func feedPicker(p *Picker, cmd tea.Cmd) {
 	for _, msg := range runCmd(cmd) {
-		if _, ok := msg.(pickerAssessMsg); ok {
-			p.Update(msg)
+		switch msg.(type) {
+		case pickerFactsMsg, pickerAssessMsg:
+			_, next := p.Update(msg)
+			feedPicker(p, next)
 		}
 	}
+}
+
+// feedFacts runs cmd up to and including the facts message, returning the
+// Cmd that would ask the model, so a test can look at the screen between
+// the two.
+func feedFacts(p *Picker, cmd tea.Cmd) tea.Cmd {
+	for _, msg := range runCmd(cmd) {
+		if _, ok := msg.(pickerFactsMsg); ok {
+			_, next := p.Update(msg)
+			return next
+		}
+	}
+	return nil
 }
 
 func TestPickerAskIgnoredWithoutAssessor(t *testing.T) {
@@ -507,7 +540,7 @@ func TestPickerAskHighlighted(t *testing.T) {
 		t.Fatalf("asked %v", *asked)
 	}
 	out := view(p)
-	for _, want := range []string{"KEEP", "85%", "Plays music.", "Signed by Spotify AB.", "legitimate"} {
+	for _, want := range append([]string{"KEEP", "85%", "Plays music.", "Signed by Spotify AB.", "legitimate"}, factWants...) {
 		if !strings.Contains(out, want) {
 			t.Errorf("preview missing %q:\n%s", want, out)
 		}
@@ -515,9 +548,77 @@ func TestPickerAskHighlighted(t *testing.T) {
 	if strings.Contains(out, "asking the AI") {
 		t.Error("pending indicator left on")
 	}
+	// The answer comes first so a short pane clips facts, not the verdict.
+	if strings.Index(out, "KEEP") > strings.Index(out, "Gatekeeper") {
+		t.Errorf("answer should precede the facts:\n%s", out)
+	}
 	// Asking again for an answered app costs nothing.
 	if cmd := press(p, keyCtrlL); cmd != nil || len(*asked) != 1 {
 		t.Fatal("second ctrl+l must not ask again")
+	}
+}
+
+func TestPickerFactsBeforeAsk(t *testing.T) {
+	a, _ := pickerAssessor(keepAnswer, nil)
+	p := newTestPicker(t)
+	p.SetAssessor(a)
+	typeText(p, "spot")
+	if out := view(p); strings.Contains(out, "Gatekeeper") || strings.Contains(out, "Signature") {
+		t.Fatalf("no facts before ctrl+l:\n%s", out)
+	}
+}
+
+func TestPickerFactsShownWhileAsking(t *testing.T) {
+	a, asked := pickerAssessor(keepAnswer, nil)
+	p := newTestPicker(t)
+	p.SetAssessor(a)
+	typeText(p, "spot")
+	next := feedFacts(p, press(p, keyCtrlL))
+	out := view(p)
+	if !strings.Contains(out, askingLabel) || len(*asked) != 0 {
+		t.Fatalf("facts arrive before the model is asked (asked %v):\n%s", *asked, out)
+	}
+	for _, want := range factWants {
+		if !strings.Contains(out, want) {
+			t.Errorf("preview missing %q while asking:\n%s", want, out)
+		}
+	}
+	feedPicker(p, next)
+	if !slices.Equal(*asked, []string{"Spotify"}) || !strings.Contains(view(p), "KEEP") {
+		t.Fatalf("the ask should follow the facts (asked %v):\n%s", *asked, view(p))
+	}
+}
+
+func TestPickerFactLabelsAligned(t *testing.T) {
+	a, _ := pickerAssessor(keepAnswer, nil)
+	p := newTestPicker(t)
+	p.SetAssessor(a)
+	typeText(p, "spot")
+	feedPicker(p, press(p, keyCtrlL))
+	// Every labelled line starts its value in the same column: the basic
+	// lines and the fact lines share one label width.
+	col := -1
+	for _, l := range strings.Split(view(p), "\n") {
+		for _, label := range []string{"Bundle ID", "Version", "Path", "Size", "Signature", "Gatekeeper", "Where from", "Helper"} {
+			i := strings.Index(l, label)
+			if i < 0 {
+				continue
+			}
+			rest := l[i+len(label):]
+			pad := len(rest) - len(strings.TrimLeft(rest, " "))
+			if pad == 0 {
+				continue // "Signature" inside the reasoning, not a label
+			}
+			start := len(label) + pad
+			if col < 0 {
+				col = start
+			} else if start != col {
+				t.Errorf("%q: value starts at %d, want %d", l, start, col)
+			}
+		}
+	}
+	if col < 0 {
+		t.Fatal("no labelled lines found")
 	}
 }
 
@@ -532,17 +633,66 @@ func TestPickerAskProtected(t *testing.T) {
 }
 
 func TestPickerAskError(t *testing.T) {
-	a, _ := pickerAssessor(llm.AppAssessment{}, errors.New("llm: no API key configured"))
+	a, asked, inspected := pickerAssessorCounting(llm.AppAssessment{}, errors.New("llm: no API key configured"))
 	p := newTestPicker(t)
 	p.SetAssessor(a)
 	typeText(p, "spot")
 	feedPicker(p, press(p, keyCtrlL))
-	if out := view(p); !strings.Contains(out, "AI error: no API key configured") {
+	out := view(p)
+	if !strings.Contains(out, "AI error: no API key configured") {
 		t.Fatalf("error not shown:\n%s", out)
 	}
-	// An errored app can be asked again.
-	if cmd := press(p, keyCtrlL); cmd == nil {
+	// The facts were gathered before the call failed; they stay.
+	if !strings.Contains(out, "Gatekeeper") {
+		t.Fatalf("facts should survive a failed ask:\n%s", out)
+	}
+	// An errored app can be asked again, without probing it again: the
+	// facts are at hand and spctl may contact Apple.
+	cmd := press(p, keyCtrlL)
+	if cmd == nil {
 		t.Fatal("ctrl+l after an error should retry")
+	}
+	feedPicker(p, cmd)
+	if *inspected != 1 || len(*asked) != 2 {
+		t.Fatalf("retry: inspected %d times, asked %d; want 1 and 2", *inspected, len(*asked))
+	}
+}
+
+func TestPickerFactsWrapUnderLabel(t *testing.T) {
+	a, _ := pickerAssessor(keepAnswer, nil)
+	a.Inspect = func(_ context.Context, x app.App) app.Facts {
+		return app.Facts{App: x, Origin: app.Origin{WhereFroms: []string{"https://downloads.example.com/releases/2026/spotify-installer-arm64.dmg", "https://www.example.com/download"}}}
+	}
+	p := newTestPicker(t)
+	p.SetAssessor(a)
+	typeText(p, "spot")
+	feedPicker(p, press(p, keyCtrlL))
+	out := view(p)
+	lines := strings.Split(out, "\n")
+	start := -1
+	for i, l := range lines {
+		if strings.Contains(l, "Where from") {
+			start = i
+		}
+	}
+	if start < 0 {
+		t.Fatalf("Where from missing:\n%s", out)
+	}
+	// The value continues on the next line, indented past the label
+	// column, and no line crosses the pane border.
+	next := lines[start+1]
+	i := strings.Index(next, "│") + len("│")
+	body := strings.TrimLeft(next[i:], " ")
+	if body == "" || strings.HasPrefix(body, "│") {
+		t.Fatalf("continuation line should carry the rest of the value:\n%s", out)
+	}
+	if pad := len(next[i:]) - len(body); pad < previewLabelW {
+		t.Errorf("continuation indented %d, want at least %d:\n%s", pad, previewLabelW, out)
+	}
+	for n, l := range lines {
+		if lipgloss.Width(l) > 100 {
+			t.Errorf("line %d wider than the terminal: %q", n, l)
+		}
 	}
 }
 

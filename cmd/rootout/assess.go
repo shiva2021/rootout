@@ -159,15 +159,16 @@ func withCache(a tui.Assessor, p llm.Provider, cache *assesscache.Cache) tui.Ass
 	return a
 }
 
-// assessAppFunc is assessFunc for apps: the saved answer first (unless
-// force), else the model under the per-call timeout, every answer stored.
-func assessAppFunc(p llm.Provider, cache *assesscache.Cache, force bool) tui.AppAssessFunc {
+// assessAppFunc is assessFunc for apps: the saved answer first, else the
+// model under the per-call timeout, every answer stored. There is no forced
+// re-ask: --no-cache is the way to ask again.
+func assessAppFunc(p llm.Provider, cache *assesscache.Cache) tui.AppAssessFunc {
 	if p == nil {
 		return nil
 	}
 	return func(ctx context.Context, f app.Facts) (llm.AppAssessment, error) {
 		id := assesscache.IDForApp(f, p.Name(), p.Model())
-		if cache != nil && !force {
+		if cache != nil {
 			if a, ok := cache.LookupApp(id); ok {
 				return a, nil
 			}
@@ -187,7 +188,7 @@ func assessAppFunc(p llm.Provider, cache *assesscache.Cache, force bool) tui.App
 	}
 }
 
-// cachedAppFunc is the apps screen's Cached: a saved answer for the facts
+// cachedAppFunc is the picker's Cached: a saved answer for the facts
 // under p's name and model; nil when there is no cache.
 func cachedAppFunc(p llm.Provider, cache *assesscache.Cache) func(app.Facts) (llm.AppAssessment, bool) {
 	if p == nil || cache == nil {
@@ -200,8 +201,7 @@ func cachedAppFunc(p llm.Provider, cache *assesscache.Cache) func(app.Facts) (ll
 
 // withAppCache fills an AppAssessor's model-calling fields for p.
 func withAppCache(a tui.AppAssessor, p llm.Provider, cache *assesscache.Cache) tui.AppAssessor {
-	a.Assess = assessAppFunc(p, cache, false)
-	a.Reassess = assessAppFunc(p, cache, true)
+	a.Assess = assessAppFunc(p, cache)
 	a.Cached = cachedAppFunc(p, cache)
 	return a
 }
@@ -294,10 +294,11 @@ func buildAssessor(ctx context.Context, c config.Config, provider, model string,
 	return a, nil
 }
 
-// buildAppAssessor is buildAssessor for the apps screen and the picker.
-// Inspect is always set, so facts show even without a model.
-func buildAppAssessor(ctx context.Context, env fsx.Env, c config.Config, provider, model string, interactive, noCache bool) (tui.AppAssessor, error) {
-	core, err := newAssessorCore(ctx, c, provider, model, interactive, noCache)
+// buildAppAssessor is buildAssessor for the uninstall picker and `rootout
+// assess`. Inspect is always set, so facts show even without a model.
+// Neither caller swaps models in place, so there is no interactive form.
+func buildAppAssessor(ctx context.Context, env fsx.Env, c config.Config, provider, model string, noCache bool) (tui.AppAssessor, error) {
+	core, err := newAssessorCore(ctx, c, provider, model, false, noCache)
 	if err != nil {
 		return tui.AppAssessor{}, err
 	}
@@ -305,24 +306,6 @@ func buildAppAssessor(ctx context.Context, env fsx.Env, c config.Config, provide
 	if core.p != nil {
 		a.Provider, a.Label = core.p.Name(), core.p.Name()+" · "+core.p.Model()
 		a = withAppCache(a, core.p, core.cacheFor(core.p.Name()))
-	}
-	if !interactive {
-		return a, nil
-	}
-	a.HostedModels = hostedLister(a.Provider, core.key)
-	a.Models = core.models
-	a.OnModel = func(_ context.Context, provider, m string) (tui.AppAssessor, error) {
-		np, err := core.swap(provider, m)
-		if err != nil {
-			return tui.AppAssessor{}, err
-		}
-		return withAppCache(tui.AppAssessor{
-			Provider:     provider,
-			Label:        provider + " · " + m,
-			Inspect:      a.Inspect,
-			Models:       core.models,
-			HostedModels: hostedLister(provider, core.key),
-		}, np, core.cacheFor(provider)), nil
 	}
 	return a, nil
 }

@@ -4,14 +4,14 @@ Uninstall macOS apps completely, and find risky extensions in VS Code, Cursor,
 VSCodium, Windsurf and VS Code Insiders.
 
 ```bash
-rootout                       # home screen: uninstall an app, remove orphans, scan extensions, assess apps
+rootout                       # home screen: uninstall an app, remove orphans, scan extensions
 rootout list [--search q]     # installed apps
 rootout remove <app> -n       # dry run: show the bundle and every leftover file
 rootout remove <app>          # move them to the Trash after you confirm
 rootout scan                  # score installed extensions; review and uninstall on a terminal
 rootout scan --llm            # also ask Claude, OpenAI or a local Ollama model
-rootout assess                # every app with its signature and origin; ask the AI what to keep
 rootout assess <app>          # one app: is the source legitimate, what is it for, keep or drop
+rootout assess --all          # every app with its signature, origin and the AI's answer, as a table
 rootout orphans               # leftovers of apps you already deleted, grouped by old app id
 rootout setup                 # optional: a local model or a Claude/OpenAI key for recommendations
 rootout config models --pick  # choose or download a local model that fits this Mac
@@ -56,16 +56,16 @@ them (two at a time; the right pane lists every answer). The home
 screen always shows the current AI status and model, and `rootout setup`
 reopens the screen.
 
-The same model can look at installed apps. `rootout assess` lists every app
-and, as the cursor rests on one, gathers its facts locally: who signed it
-(Team ID), whether Gatekeeper accepts it, where it was downloaded from, the
-App Store receipt, launch agents and the permissions it declares. Tick apps
-and press `l` to ask the model what each app is for, whether its source is
-legitimate, how confident it is and whether to keep or drop it; `rootout
-assess <app>` does one app from the command line, and `ctrl+l` in the
-uninstall picker asks about the highlighted app before you decide. The answer is advice: a
-ticked app still gets the usual review of its files before anything moves to
-the Trash. Answers from Claude and OpenAI are saved and reused.
+The same model can look at installed apps. In the uninstall picker, `ctrl+l`
+asks about the highlighted app: rootout first gathers its facts locally (who
+signed it and the Team ID, whether Gatekeeper accepts it, where it was
+downloaded from, the App Store receipt, launch agents and the permissions it
+declares) and shows them in the preview, then the model says what the app is
+for, whether its source is legitimate, how confident it is and whether to keep
+or drop it. The answer is advice: you still see every file before anything
+moves to the Trash. `rootout assess <app>` does the same from the command
+line and `--all` covers every app; answers from Claude and OpenAI are saved
+and reused.
 
 Nothing is uninstalled until you type `delete`. In every screen `?` lists the
 keys; in the scan screen `m` changes the model without leaving the scan (the
