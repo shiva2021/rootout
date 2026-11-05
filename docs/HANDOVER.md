@@ -1,9 +1,9 @@
 # Handover
 
-_Updated: 2026-11-05 · Session: assessment folded into the uninstall picker (D-041), review screen removed_
+_Updated: 2026-11-05 · Session: assessment folded into the uninstall picker (D-041), #31 merged, v0.10.0 cut_
 
 ## Status
-**Unreleased on `main` after this PR: app assessment lives in the uninstall picker only (D-041).** Shivang found the separate "Assess apps" home row and review screen redundant with the picker's `ctrl+l`. Plan approved (plan mode, two scope questions answered: keep the CLI for scripts; show the gathered facts in the picker preview). One PR `feat/assess-in-picker`, three commits:
+**v0.10.0 is the current release: app assessment lives in the uninstall picker only (D-041).** PR #31 merged (CI green, review findings folded in), then `release/0.10.0` moved the Unreleased entries, release PR merged, tag on its merge commit. Shivang found the separate "Assess apps" home row and review screen redundant with the picker's `ctrl+l`. Plan approved (plan mode, two scope questions answered: keep the CLI for scripts; show the gathered facts in the picker preview). One PR `feat/assess-in-picker`, three commits:
 1. `refactor: remove the apps review screen; assess is script-only`: `internal/tui/apps.go` + `apps_test.go` deleted; `AppAssessFunc`/`AppAssessor` (pruned to `Provider, Label, Inspect, Assess, Cached`) moved to `internal/tui/appassessor.go`; `ActionAssess` and the home row gone; `homeAssess`, `reviewAndUninstallApps`, `assessFlash` gone; `buildAppAssessor(ctx, env, c, provider, model, noCache)` has no interactive form; `assessAppFunc(p, cache)` has no `force`; `rootout assess` exits 2 without an app or `--all` on every terminal and `--no-tui` is removed; guide step 5 reworded.
 2. `feat(tui): picker preview shows the gathered facts`: `ctrl+l` asks in two steps (`pickerFactsMsg` then `pickerAssessMsg`), facts shown while the spinner runs and kept on error, answer above the facts, `previewLabelW = 14` shared by basic and fact lines. TDD: `TestPickerFactsBeforeAsk`, `TestPickerFactsShownWhileAsking`, `TestPickerFactLabelsAligned`, additions to `TestPickerAskHighlighted`/`TestPickerAskError`.
 3. `docs`: D-041, `docs/kb/assessments.md` section rewritten, README, CHANGELOG Unreleased (Removed + Changed), a superseded note on `docs/plans/app-assess.md`, this file.
@@ -11,10 +11,9 @@ _Updated: 2026-11-05 · Session: assessment folded into the uninstall picker (D-
 
 Verified: `make test` all packages, `make lint` 0 issues after each commit. Live on this Mac (anthropic, claude-haiku-5-5): `rootout assess` exits 2 naming `--all`, `--no-tui` is an unknown flag, `rootout assess "Google Chrome"` asked Claude once (Chrome had updated to 156.0.8078.80 since v0.9.0, so the key changed: keep 93 %) and the `--json` run right after was `cached: true`; `rootout guide` step 5 shows the new text. A pty drive (`drive.py` in the scratchpad, the usual recipe) showed the home screen with five rows and no "Assess apps", then Uninstall an app → type "Google Chrome" → `ctrl+l`: "asking the AI…", "Gatekeeper" on screen before the answer, then KEEP.
 
-No tag: the change waits under Unreleased until Shivang asks for a release (it would be v0.10.0: a feature and a flag were removed).
 
 ## Next steps
-1. Cut the release when asked: `release/0.10.0`, CHANGELOG move, `make release-check NEXT=v0.10.0`, release PR, tag (runbook `docs/kb/release.md`).
+1. `brew update && brew upgrade --cask rootout` on this Mac once the cask is at 0.10.0, then `rootout --version`.
 2. The picker preview is now the pane that outgrows its height first (basic lines + answer + up to ~10 fact lines); a scrollable preview is the next improvement.
 3. Not seen by a human: Uninstall an app → `ctrl+l` with the facts under the answer on a real terminal.
 4. Earlier open items (`~/.local/bin/rootout` shadowing the brew copy, Intel RAM tier, gitleaks) stand.
