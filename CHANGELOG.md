@@ -4,6 +4,8 @@ All notable changes to rootout. Format: [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-05
+
 ### Removed
 - The "Assess apps" home row and its review screen (D-041): they duplicated what `ctrl+l` in the uninstall picker does, where the keep-or-drop decision is actually made. `rootout assess --no-tui` goes with them (there is no screen left to switch off).
 
