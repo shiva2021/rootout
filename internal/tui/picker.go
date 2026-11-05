@@ -287,12 +287,7 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return p, nil
 
 	case pickerFactsMsg:
-		// Kept even when the ask was abandoned: the facts cost nothing to
-		// show. The ask itself goes on only while still wanted.
 		p.facts[msg.path] = msg.f
-		if !p.asking[msg.path] {
-			return p, nil
-		}
 		return p, p.askModel(msg.path, msg.name, msg.f)
 
 	case pickerAssessMsg:
@@ -410,9 +405,16 @@ func (p *Picker) ask() tea.Cmd {
 	if p.narrow() {
 		p.flash = a.Name + ": " + askingLabel
 	}
-	ctx, as := p.ctx, *p.assessor
-	cmd := func() tea.Msg {
-		return pickerFactsMsg{path: path, name: a.Name, f: as.inspect(ctx, a)}
+	var cmd tea.Cmd
+	if f, ok := p.facts[path]; ok {
+		// A retry after an error: the facts are at hand, and probing again
+		// would cost seconds and possibly a call to Apple.
+		cmd = p.askModel(path, a.Name, f)
+	} else {
+		ctx, as := p.ctx, *p.assessor
+		cmd = func() tea.Msg {
+			return pickerFactsMsg{path: path, name: a.Name, f: as.inspect(ctx, a)}
+		}
 	}
 	if idle {
 		return tea.Batch(cmd, p.spin.Tick)
@@ -828,24 +830,30 @@ func (p *Picker) renderPreview(width, rows int) string {
 	}
 	if f, ok := p.facts[a.Path]; ok {
 		lines = append(lines, "")
-		lines = append(lines, factLines(f, label, p.styles)...)
+		lines = append(lines, factLines(f, label, p.styles, width-4-previewLabelW)...)
 	}
 	return pane.Render(strings.Join(lines, "\n"))
 }
 
 // factLines renders the gathered facts, one label per line, styled by
-// tone: warnings in the flash colour, missing evidence dim.
-func factLines(f app.Facts, label func(k, val string) string, s styles) []string {
+// tone: warnings in the flash colour, missing evidence dim. Values wrap at
+// valW and continue under the value column, so the pane never wraps them
+// at its border.
+func factLines(f app.Facts, label func(k, val string) string, s styles, valW int) []string {
 	var lines []string
 	for _, l := range f.Summary() {
-		val := l.Value
+		val := wrapLines(l.Value, valW)
 		switch l.Tone {
 		case app.Warn:
 			val = s.flash.Render(val)
 		case app.Dim:
 			val = s.dim.Render(val)
 		}
-		lines = append(lines, label(l.Label, val))
+		first, rest, more := strings.Cut(val, "\n")
+		lines = append(lines, label(l.Label, first))
+		if more {
+			lines = append(lines, indent(rest, strings.Repeat(" ", previewLabelW)))
+		}
 	}
 	return lines
 }

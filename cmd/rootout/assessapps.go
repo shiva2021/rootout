@@ -110,15 +110,19 @@ func runAssess(ctx context.Context, g *globalFlags, f assessFlags, arg string) e
 		return err
 	}
 	w := output.New(os.Stdout, g.json)
+	// The app argument is checked before the provider is set up, so a typo
+	// exits 2 without touching the Keychain or the cache.
+	var target app.App
+	if arg != "" {
+		if target, err = resolveApp(apps, arg); err != nil {
+			return err
+		}
+	}
 	a, err := buildAppAssessor(ctx, env, c, f.provider, f.model, f.noCache)
 	if err != nil {
 		return err
 	}
 	if arg != "" {
-		target, err := resolveApp(apps, arg)
-		if err != nil {
-			return err
-		}
 		return printAssessItems(w, []assessItem{assessOne(ctx, a, target)})
 	}
 	return printAssessItems(w, assessApps(ctx, a, apps))

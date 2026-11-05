@@ -450,10 +450,18 @@ var keyCtrlL = tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl}
 
 // pickerAssessor records the apps inspected and asked and answers keep.
 func pickerAssessor(answer llm.AppAssessment, err error) (*AppAssessor, *[]string) {
+	a, asked, _ := pickerAssessorCounting(answer, err)
+	return a, asked
+}
+
+// pickerAssessorCounting is pickerAssessor that also counts Inspect calls.
+func pickerAssessorCounting(answer llm.AppAssessment, err error) (*AppAssessor, *[]string, *int) {
 	var asked []string
+	var inspected int
 	return &AppAssessor{
 		Provider: "fake", Label: "fake · m",
 		Inspect: func(_ context.Context, a app.App) app.Facts {
+			inspected++
 			return app.Facts{App: a,
 				Signature:  app.Signature{Signed: true, TeamID: "TEAM", Authority: []string{"Example Ltd"}},
 				Gatekeeper: app.Gatekeeper{Accepted: true, Source: "notarized"},
@@ -464,7 +472,7 @@ func pickerAssessor(answer llm.AppAssessment, err error) (*AppAssessor, *[]strin
 			asked = append(asked, f.App.Name)
 			return answer, err
 		},
-	}, &asked
+	}, &asked, &inspected
 }
 
 // factWants are the fact lines the picker's assessor yields, as the
@@ -625,7 +633,7 @@ func TestPickerAskProtected(t *testing.T) {
 }
 
 func TestPickerAskError(t *testing.T) {
-	a, _ := pickerAssessor(llm.AppAssessment{}, errors.New("llm: no API key configured"))
+	a, asked, inspected := pickerAssessorCounting(llm.AppAssessment{}, errors.New("llm: no API key configured"))
 	p := newTestPicker(t)
 	p.SetAssessor(a)
 	typeText(p, "spot")
@@ -638,9 +646,53 @@ func TestPickerAskError(t *testing.T) {
 	if !strings.Contains(out, "Gatekeeper") {
 		t.Fatalf("facts should survive a failed ask:\n%s", out)
 	}
-	// An errored app can be asked again.
-	if cmd := press(p, keyCtrlL); cmd == nil {
+	// An errored app can be asked again, without probing it again: the
+	// facts are at hand and spctl may contact Apple.
+	cmd := press(p, keyCtrlL)
+	if cmd == nil {
 		t.Fatal("ctrl+l after an error should retry")
+	}
+	feedPicker(p, cmd)
+	if *inspected != 1 || len(*asked) != 2 {
+		t.Fatalf("retry: inspected %d times, asked %d; want 1 and 2", *inspected, len(*asked))
+	}
+}
+
+func TestPickerFactsWrapUnderLabel(t *testing.T) {
+	a, _ := pickerAssessor(keepAnswer, nil)
+	a.Inspect = func(_ context.Context, x app.App) app.Facts {
+		return app.Facts{App: x, Origin: app.Origin{WhereFroms: []string{"https://downloads.example.com/releases/2026/spotify-installer-arm64.dmg", "https://www.example.com/download"}}}
+	}
+	p := newTestPicker(t)
+	p.SetAssessor(a)
+	typeText(p, "spot")
+	feedPicker(p, press(p, keyCtrlL))
+	out := view(p)
+	lines := strings.Split(out, "\n")
+	start := -1
+	for i, l := range lines {
+		if strings.Contains(l, "Where from") {
+			start = i
+		}
+	}
+	if start < 0 {
+		t.Fatalf("Where from missing:\n%s", out)
+	}
+	// The value continues on the next line, indented past the label
+	// column, and no line crosses the pane border.
+	next := lines[start+1]
+	i := strings.Index(next, "│") + len("│")
+	body := strings.TrimLeft(next[i:], " ")
+	if body == "" || strings.HasPrefix(body, "│") {
+		t.Fatalf("continuation line should carry the rest of the value:\n%s", out)
+	}
+	if pad := len(next[i:]) - len(body); pad < previewLabelW {
+		t.Errorf("continuation indented %d, want at least %d:\n%s", pad, previewLabelW, out)
+	}
+	for n, l := range lines {
+		if lipgloss.Width(l) > 100 {
+			t.Errorf("line %d wider than the terminal: %q", n, l)
+		}
 	}
 }
 
