@@ -36,6 +36,9 @@ const (
 	defaultHeight  = 24
 	chromeRows     = 4 // search row, blank row, status row, footer row
 	minPreviewCols = 60
+	// previewLabelW fits the longest fact label ("Could not run") so the
+	// basic lines and the fact lines share one value column.
+	previewLabelW = 14
 )
 
 // pickerKeys is the ? overlay of the app picker.
@@ -51,6 +54,14 @@ var pickerKeys = []keyHelp{
 
 // pickerAskKey is the ? row added when an AI model is configured.
 var pickerAskKey = keyHelp{"ctrl+l", "ask the configured AI what the highlighted app is for, whether its source is legitimate and whether to keep it (shown in the preview)"}
+
+// pickerFactsMsg carries one app's gathered facts back to the picker,
+// keyed by bundle path; the picker then asks the model about them.
+type pickerFactsMsg struct {
+	path string
+	name string
+	f    app.Facts
+}
 
 // pickerAssessMsg carries the model's answer about one app back to the
 // picker, keyed by bundle path.
@@ -147,6 +158,7 @@ type Picker struct {
 	assessor *AppAssessor
 	rec      map[string]lipgloss.Style // recommendation colours
 	spin     spinner.Model
+	facts    map[string]app.Facts // gathered on ctrl+l, shown under the answer
 	results  map[string]llm.AppAssessment
 	errs     map[string]error
 	asking   map[string]bool
@@ -207,6 +219,7 @@ func newPicker() *Picker {
 		height:    defaultHeight,
 		rec:       map[string]lipgloss.Style{llm.Keep: sc.verdict[llm.Benign], llm.Drop: sc.verdict[llm.Malicious], llm.Review: sc.verdict[llm.Suspicious]},
 		spin:      spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		facts:     map[string]app.Facts{},
 		results:   map[string]llm.AppAssessment{},
 		errs:      map[string]error{},
 		asking:    map[string]bool{},
@@ -272,6 +285,15 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		p.setApps(msg.apps)
 		return p, nil
+
+	case pickerFactsMsg:
+		// Kept even when the ask was abandoned: the facts cost nothing to
+		// show. The ask itself goes on only while still wanted.
+		p.facts[msg.path] = msg.f
+		if !p.asking[msg.path] {
+			return p, nil
+		}
+		return p, p.askModel(msg.path, msg.name, msg.f)
 
 	case pickerAssessMsg:
 		delete(p.asking, msg.path)
@@ -364,10 +386,11 @@ func (p *Picker) View() tea.View {
 	return v
 }
 
-// ask asks the AI about the highlighted app: facts first (through the
-// assessor's Inspect), then the saved answer or the model. Nothing happens
-// without an assessor, without a row, for a protected app, or for an app
-// already answered or being asked; an errored app is asked again.
+// ask asks the AI about the highlighted app in two steps: the facts first
+// (through the assessor's Inspect, shown as soon as they arrive), then the
+// saved answer or the model. Nothing happens without an assessor, without
+// a row, for a protected app, or for an app already answered or being
+// asked; an errored app is asked again.
 func (p *Picker) ask() tea.Cmd {
 	if p.assessor == nil || p.loading || p.rowCount() == 0 {
 		return nil
@@ -389,19 +412,27 @@ func (p *Picker) ask() tea.Cmd {
 	}
 	ctx, as := p.ctx, *p.assessor
 	cmd := func() tea.Msg {
-		f := as.inspect(ctx, a)
-		if as.Cached != nil {
-			if r, ok := as.Cached(f); ok {
-				return pickerAssessMsg{path: path, name: a.Name, a: r}
-			}
-		}
-		r, err := as.Assess(ctx, f)
-		return pickerAssessMsg{path: path, name: a.Name, a: r, err: err}
+		return pickerFactsMsg{path: path, name: a.Name, f: as.inspect(ctx, a)}
 	}
 	if idle {
 		return tea.Batch(cmd, p.spin.Tick)
 	}
 	return cmd
+}
+
+// askModel is ask's second step: the saved answer for the facts when there
+// is one, else the model.
+func (p *Picker) askModel(path, name string, f app.Facts) tea.Cmd {
+	ctx, as := p.ctx, *p.assessor
+	return func() tea.Msg {
+		if as.Cached != nil {
+			if r, ok := as.Cached(f); ok {
+				return pickerAssessMsg{path: path, name: name, a: r}
+			}
+		}
+		r, err := as.Assess(ctx, f)
+		return pickerAssessMsg{path: path, name: name, a: r, err: err}
+	}
 }
 
 // narrow reports whether the terminal is too narrow for the preview pane.
@@ -773,7 +804,7 @@ func (p *Picker) renderPreview(width, rows int) string {
 	}
 	a := p.matches[p.cursor].App
 	label := func(k, v string) string {
-		return p.styles.dim.Render(fmt.Sprintf("%-10s", k)) + v
+		return p.styles.dim.Render(fmt.Sprintf("%-*s", previewLabelW, k)) + v
 	}
 	lines := []string{
 		p.styles.title.Render(a.Name),
@@ -789,11 +820,34 @@ func (p *Picker) renderPreview(width, rows int) string {
 	if a.Protected {
 		lines = append(lines, "", p.styles.danger.Render("Protected: system application, cannot be removed"))
 	}
+	// The answer before the facts: the pane does not scroll, so on a short
+	// terminal it is the facts that get clipped, never the verdict.
 	if ai := p.aiLines(a.Path, width-4); len(ai) > 0 {
 		lines = append(lines, "")
 		lines = append(lines, ai...)
 	}
+	if f, ok := p.facts[a.Path]; ok {
+		lines = append(lines, "")
+		lines = append(lines, factLines(f, label, p.styles)...)
+	}
 	return pane.Render(strings.Join(lines, "\n"))
+}
+
+// factLines renders the gathered facts, one label per line, styled by
+// tone: warnings in the flash colour, missing evidence dim.
+func factLines(f app.Facts, label func(k, val string) string, s styles) []string {
+	var lines []string
+	for _, l := range f.Summary() {
+		val := l.Value
+		switch l.Tone {
+		case app.Warn:
+			val = s.flash.Render(val)
+		case app.Dim:
+			val = s.dim.Render(val)
+		}
+		lines = append(lines, label(l.Label, val))
+	}
+	return lines
 }
 
 // aiLines renders the AI state for the app at path: the spinner while
